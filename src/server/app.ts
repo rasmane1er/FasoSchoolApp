@@ -37,6 +37,10 @@ import {
   perimetreDe, peutClasse, peutMatiere,
 } from "./services.ts";
 import {
+  termIsClosed, setTermStatus, publishClass, publishedBulletins,
+  ecarts, resumeEcarts, decrireEcart, frozenClassResult,
+} from "./cloture.ts";
+import {
   guardianExists, createGuardianSession, resolveGuardian, revokeGuardian,
   loadChildren, famillePage, familleLoginPage, schoolNameOf,
 } from "./famille.ts";
@@ -397,7 +401,8 @@ async function saveNotes(user: SessionUser, url: URL, form: URLSearchParams): Pr
   let saved = 0;
   /* Le contrôle porte sur l'ÉCRITURE, pas seulement sur ce qui a été affiché.
      Chaque évaluation est confrontée à la répartition de services : un
-     identifiant envoyé à la main ne passe pas plus qu'une option masquée. */
+     identifiant envoyé à la main ne passe pas plus qu'une option masquée.
+     Et à l'état du trimestre : un carnet clos est clos. */
   const perimetre = await perimetreDe(user);
 
   await withSchool(schoolId, async (c) => {
@@ -406,13 +411,16 @@ async function saveNotes(user: SessionUser, url: URL, form: URLSearchParams): Pr
 
     const autorisee = new Map<string, boolean>();
     const evaluationPermise = async (evaluationId: string): Promise<boolean> => {
-      if (perimetre.classIds === null) return true;
       const connu = autorisee.get(evaluationId);
       if (connu !== undefined) return connu;
       const ev = await c.query(
-        `select class_id, subject_id from evaluations where id = $1`, [evaluationId]);
+        `select ev.class_id, ev.subject_id, t.status
+           from evaluations ev join terms t on t.id = ev.term_id
+          where ev.id = $1`, [evaluationId]);
       const ok = ev.rowCount! > 0
-        && peutMatiere(perimetre, ev.rows[0].class_id, ev.rows[0].subject_id);
+        && ev.rows[0].status === "ouvert"
+        && (perimetre.classIds === null
+            || peutMatiere(perimetre, ev.rows[0].class_id, ev.rows[0].subject_id));
       autorisee.set(evaluationId, ok);
       return ok;
     };
@@ -464,7 +472,7 @@ async function saveNotes(user: SessionUser, url: URL, form: URLSearchParams): Pr
   return saved;
 }
 
-async function bulletinsPage(user: SessionUser, url: URL): Promise<string> {
+async function bulletinsPage(user: SessionUser, url: URL, flash?: string): Promise<string> {
   const schoolId = user.schoolId!;
   const period = await currentPeriod(schoolId);
   const chrome = await chromeFor(user, "bulletins", period ? `Trimestre ${period.sequence}` : undefined);
@@ -501,16 +509,30 @@ async function bulletinsPage(user: SessionUser, url: URL): Promise<string> {
   });
 
   const byId = new Map(inputs.students.map((s) => [s.id, s]));
+
+  // Ce qui a été REMIS aux familles, comparé à ce que disent les notes
+  // d'aujourd'hui. Un écart n'est pas corrigé en silence : il est montré.
+  const fige = await publishedBulletins(schoolId, classId, period.term_id);
+  const divergents = ecarts(fige, klass.students, byId);
+  const clos = await termIsClosed(schoolId, period.term_id);
+
   const rows = [...klass.students]
     .sort((a, b) => (a.rang ?? 999) - (b.rang ?? 999))
     .map((r) => {
       const st = byId.get(r.studentId)!;
-      return `<tr>
+      const f = fige.get(r.studentId);
+      const ecart = f && f.moyenne !== r.moyenneGenerale;
+      return `<tr${ecart ? ' class="bad"' : ""}>
         <td class="num r">${ordinal(r.rang)}</td>
         <td><b>${esc(st.lastName)}</b> ${esc(st.firstNames)}</td>
         <td class="num r" style="font-weight:600">${fr(r.moyenneGenerale)}</td>
         <td class="num r" style="color:var(--muted)">${fr(r.totalPoints)}</td>
         <td>${esc(r.mention ?? "—")}</td>
+        <td>${f
+          ? (ecart
+              ? `<span class="pill p-bad">remis à ${fr(f.moyenne)}</span>`
+              : `<span class="pill p-ok">publié</span>`)
+          : `<span class="pill p-info">non publié</span>`}</td>
       </tr>`;
     }).join("");
 
@@ -521,14 +543,49 @@ async function bulletinsPage(user: SessionUser, url: URL): Promise<string> {
       <p style="margin:0;color:var(--muted)">${inputs.subjects.length} disciplines, total des coefficients ${fr(klass.students[0]?.totalCoefficients ?? 0, 0)} — moyenne de la classe ${fr(klass.moyenneDeClasse)}.</p>
       </div>${selector}</div>
 
+    ${flash ? `<div class="note good">${esc(flash)}</div>` : ""}
     ${warn.length ? `<div class="note warn"><b>Règles à confirmer avec le censeur.</b><br>${warn.map(esc).join("<br>")}</div>` : ""}
+
+    ${divergents.length ? `<div class="note bad">
+      <b>${esc(resumeEcarts(divergents.length))}</b><br>
+      ${divergents.slice(0, 6).map((d) =>
+        `${esc(d.lastName)} ${esc(d.firstNames)} — ${esc(decrireEcart(d))}`).join("<br>")}
+      ${divergents.length > 6 ? `<br>…et ${divergents.length - 6} autres.` : ""}
+      <br><br>Une note a bougé depuis la remise. Republier remplacera la copie
+      des familles ; ne rien faire la laisse telle quelle. Les deux se
+      défendent — mais il faut choisir, pas subir.
+    </div>` : ""}
+
+    ${fige.size > 0 && divergents.length === 0 ? `<div class="note good">
+      Bulletins publiés : c'est cette copie figée que les familles lisent, et
+      c'est elle qu'on réimprimera en juin.</div>` : ""}
+
+    ${can(user, "publier_bulletins") ? `<div class="card"><div class="body row">
+      <form method="post" action="/bulletins/publier?classe=${esc(classId)}" style="margin:0">
+        <button type="submit" class="btn">${
+          fige.size > 0 ? "Republier les bulletins" : "Publier les bulletins"}</button>
+      </form>
+      <span style="color:var(--muted);font-size:13px">Fige les moyennes, les
+        rangs et les mentions. C'est ce document que la famille reçoit.</span>
+      <div class="grow"></div>
+      <form method="post" action="/bulletins/trimestre?classe=${esc(classId)}" style="margin:0">
+        <input type="hidden" name="ouvert" value="${clos ? "1" : "0"}">
+        <button type="submit" class="btn ghost">${
+          clos ? "Rouvrir le trimestre" : "Clôturer le trimestre"}</button>
+      </form>
+    </div>
+    ${clos ? `<div class="body" style="border-top:1px solid var(--rule)">
+      <p class="hint" style="margin:0">Trimestre clôturé : aucune note ne peut
+      plus y être saisie, en ligne comme hors ligne. Une tablette restée hors
+      ligne verra ses notes refusées, avec le motif.</p></div>` : ""}
+    </div>` : ""}
 
     <div class="card">
       <header><h2>Classement</h2>
         <a class="btn" style="margin-left:auto;height:38px" href="/bulletins/imprimer?classe=${esc(classId)}" target="_blank" rel="noopener">Imprimer ${plural(klass.students.length, "le bulletin", "les " + klass.students.length + " bulletins").replace(/^\d+ /, klass.students.length === 1 ? "" : "")}</a>
       </header>
       <div class="scroll"><table>
-        <thead><tr><th class="r">Rang</th><th>Élève</th><th class="r">Moyenne</th><th class="r">Points</th><th>Mention</th></tr></thead>
+        <thead><tr><th class="r">Rang</th><th>Élève</th><th class="r">Moyenne</th><th class="r">Points</th><th>Mention</th><th>Bulletin</th></tr></thead>
         <tbody>${rows}</tbody>
       </table></div>
     </div>`);
@@ -866,7 +923,11 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       const classId = url.searchParams.get("classe");
       if (!period || !classId) return redirect(res, "/bulletins");
       const inputs = await loadBulletinInputs(user.schoolId, classId, period.term_id);
-      const klass = computeClassBulletins({
+      /* On réimprime la copie PUBLIÉE quand elle existe. Sans cela, le double
+         ressorti en juin pour un dossier de transfert ne serait pas la feuille
+         remise en décembre — et c'est le double qui ferait foi. */
+      const fige = await frozenClassResult(user.schoolId, classId, period.term_id);
+      const klass = fige ?? computeClassBulletins({
         studentIds: inputs.students.map((s) => s.id),
         grades: inputs.grades,
         coefficients: new Map(inputs.subjects.map((s) => [s.id, s.coefficient])),
@@ -995,6 +1056,26 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       ].filter(Boolean).join(" ");
       const chrome = await chromeFor(user, "conseil");
       return html(res, await conseilPage(user, chrome, url, flash));
+    }
+
+    // --- Publication et clôture ---------------------------------------------
+    if (path === "/bulletins/publier" && req.method === "POST") {
+      if (!can(user, "publier_bulletins")) return html(res, "Accès refusé.", 403);
+      const period = await currentPeriod(user.schoolId);
+      const classe = url.searchParams.get("classe") ?? "";
+      if (!period || !classe) return redirect(res, "/bulletins");
+      const out = await publishClass(user, classe, period.term_id);
+      return html(res, await bulletinsPage(user, url,
+        `${plural(out.publies + out.republies, "bulletin figé", "bulletins figés")}`
+        + `${out.republies ? ` (dont ${out.republies} remplacés)` : ""}.`));
+    }
+    if (path === "/bulletins/trimestre" && req.method === "POST") {
+      if (!can(user, "publier_bulletins")) return html(res, "Accès refusé.", 403);
+      const period = await currentPeriod(user.schoolId);
+      if (!period) return redirect(res, "/bulletins");
+      const form = await formBody(req);
+      const r = await setTermStatus(user, period.term_id, form.get("ouvert") === "1");
+      return html(res, await bulletinsPage(user, url, r.flash ?? r.error));
     }
 
     // --- Répartition des services ------------------------------------------

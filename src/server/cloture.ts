@@ -1,0 +1,357 @@
+/**
+ * Publication des bulletins et clôture du trimestre.
+ *
+ * LE PROBLÈME. Jusqu'ici un bulletin était recalculé à chaque affichage. Un
+ * enseignant corrigeait une note en février, et le bulletin de décembre déjà
+ * remis à la famille n'était plus celui que le logiciel affichait. Personne ne
+ * mentait ; les deux documents disaient simplement des choses différentes, et
+ * c'est exactement ainsi qu'un établissement perd la confiance d'un parent.
+ *
+ * LA RÈGLE. Un bulletin remis est un document, pas une vue. Le publier fige
+ * ses nombres — moyenne, rang, mention, chaque ligne de discipline — dans
+ * `bulletins` et `bulletin_lines`. C'est cette copie figée que la famille lit,
+ * et c'est elle qu'on réimprime en juin.
+ *
+ * CE QUI SUIT DE LA RÈGLE :
+ *
+ * - Clôturer le trimestre refuse toute nouvelle saisie de notes pour ce
+ *   trimestre, en ligne comme hors ligne. Un carnet fermé est fermé.
+ * - Rouvrir est possible — une vraie erreur doit pouvoir être corrigée — mais
+ *   c'est un acte, il est journalisé, et l'écran prévient que des bulletins
+ *   circulent déjà.
+ * - Si une note change après publication, le logiciel ne remplace pas
+ *   silencieusement le bulletin figé : il SIGNALE l'écart et laisse le censeur
+ *   décider de republier. Un écart visible vaut mieux qu'une substitution
+ *   invisible.
+ */
+
+import { withSchool } from "../lib/db.ts";
+import { computeClassBulletins } from "../lib/bulletin.ts";
+import { loadBulletinInputs } from "../lib/repository.ts";
+import { plural } from "./html.ts";
+import type { SessionUser } from "./session.ts";
+
+// ---------------------------------------------------------------------------
+// État d'un trimestre
+// ---------------------------------------------------------------------------
+
+export async function termIsClosed(schoolId: string, termId: string): Promise<boolean> {
+  return withSchool(schoolId, async (c) => {
+    const r = await c.query(`select status from terms where id = $1`, [termId]);
+    return r.rows[0]?.status !== "ouvert";
+  });
+}
+
+/** Le trimestre auquel appartient une évaluation. */
+export async function termOfEvaluation(
+  schoolId: string, evaluationId: string,
+): Promise<{ termId: string; closed: boolean } | null> {
+  return withSchool(schoolId, async (c) => {
+    const r = await c.query(
+      `select t.id, t.status from evaluations ev
+         join terms t on t.id = ev.term_id where ev.id = $1`, [evaluationId]);
+    if (r.rowCount === 0) return null;
+    return { termId: r.rows[0].id, closed: r.rows[0].status !== "ouvert" };
+  });
+}
+
+export async function setTermStatus(
+  user: SessionUser, termId: string, ouvert: boolean,
+): Promise<{ flash?: string; error?: string }> {
+  return withSchool(user.schoolId!, async (c) => {
+    const t = await c.query(
+      `update terms set status = $2 where id = $1 returning sequence`,
+      [termId, ouvert ? "ouvert" : "clos"]);
+    if (t.rowCount === 0) return { error: "Trimestre introuvable." };
+    await c.query(
+      `insert into audit_log (school_id, actor_id, action, target_type, target_id)
+       values (current_school_id(), $1, $2, 'term', $3)`,
+      [user.userId, ouvert ? "term.reopen" : "term.close", termId]);
+    return {
+      flash: ouvert
+        ? `Trimestre ${t.rows[0].sequence} rouvert. Les bulletins déjà remis ne `
+          + `changent pas d'eux-mêmes : republiez-les si une note bouge.`
+        : `Trimestre ${t.rows[0].sequence} clôturé. Plus aucune note ne peut y être saisie.`,
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Publication
+// ---------------------------------------------------------------------------
+
+export interface Frozen {
+  studentId: string;
+  moyenne: number | null;
+  rang: number | null;
+  mention: string | null;
+  publishedAt: Date;
+}
+
+/** Les bulletins figés d'une classe pour un trimestre, par élève. */
+export async function publishedBulletins(
+  schoolId: string, classId: string, termId: string,
+): Promise<Map<string, Frozen>> {
+  return withSchool(schoolId, async (c) => {
+    const r = await c.query(
+      `select student_id, moyenne_generale, rang, mention, published_at
+         from bulletins
+        where class_id = $1 and term_id = $2 and status = 'publie'`,
+      [classId, termId]);
+    return new Map(r.rows.map((x) => [x.student_id as string, {
+      studentId: x.student_id,
+      moyenne: x.moyenne_generale === null ? null : Number(x.moyenne_generale),
+      rang: x.rang,
+      mention: x.mention,
+      publishedAt: x.published_at,
+    }]));
+  });
+}
+
+/** Le bulletin figé d'UN élève, disciplines comprises — ce que lit la famille. */
+export async function publishedFor(schoolId: string, studentId: string, termId: string) {
+  return withSchool(schoolId, async (c) => {
+    const b = await c.query(
+      `select id, moyenne_generale, rang, effectif, mention, published_at,
+              absences_count, retards_count
+         from bulletins where student_id = $1 and term_id = $2 and status = 'publie'`,
+      [studentId, termId]);
+    if (b.rowCount === 0) return null;
+    const lines = await c.query(
+      `select bl.moyenne_matiere, bl.coefficient, s.label
+         from bulletin_lines bl join subjects s on s.id = bl.subject_id
+        where bl.bulletin_id = $1 order by bl.sort_order, s.label`, [b.rows[0].id]);
+    return {
+      moyenne: b.rows[0].moyenne_generale === null ? null : Number(b.rows[0].moyenne_generale),
+      rang: b.rows[0].rang as number | null,
+      effectif: b.rows[0].effectif as number | null,
+      mention: b.rows[0].mention as string | null,
+      publishedAt: b.rows[0].published_at as Date,
+      lines: lines.rows.map((l) => ({
+        label: l.label as string,
+        coefficient: Number(l.coefficient),
+        moyenne: l.moyenne_matiere === null ? null : Number(l.moyenne_matiere),
+      })),
+    };
+  });
+}
+
+export interface PublishOutcome { publies: number; republies: number }
+
+/**
+ * Fige les bulletins d'une classe. Republier écrase la copie précédente — et
+ * c'est voulu : republier est une décision explicite du censeur, prise en
+ * connaissance de l'écart que l'écran lui a montré.
+ */
+export async function publishClass(
+  user: SessionUser, classId: string, termId: string,
+): Promise<PublishOutcome> {
+  const schoolId = user.schoolId!;
+  const inputs = await loadBulletinInputs(schoolId, classId, termId);
+  const klass = computeClassBulletins({
+    studentIds: inputs.students.map((s) => s.id),
+    grades: inputs.grades,
+    coefficients: new Map(inputs.subjects.map((s) => [s.id, s.coefficient])),
+    policy: inputs.policy,
+    mentionBands: inputs.mentionBands,
+  });
+
+  return withSchool(schoolId, async (c) => {
+    const staff = await c.query(
+      `select id from staff where user_id = $1 limit 1`, [user.userId]);
+    const staffId = staff.rows[0]?.id ?? null;
+    const out: PublishOutcome = { publies: 0, republies: 0 };
+
+    const ordre = new Map(inputs.subjects.map((s, i) => [s.id, i]));
+
+    for (const st of klass.students) {
+      const abs = inputs.absences.get(st.studentId)
+        ?? { justified: 0, unjustified: 0, late: 0 };
+
+      const b = await c.query(
+        `insert into bulletins
+           (school_id, student_id, term_id, class_id, grading_policy_id,
+            coefficient_set_id, moyenne_generale, total_points, total_coefficients,
+            rang, effectif, moyenne_de_classe, mention, absences_count,
+            retards_count, status, published_at, published_by, computed_at)
+         values (current_school_id(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+                 $11, $12, $13, $14, 'publie', now(), $15, now())
+         on conflict (student_id, term_id) do update set
+           class_id = excluded.class_id,
+           grading_policy_id = excluded.grading_policy_id,
+           coefficient_set_id = excluded.coefficient_set_id,
+           moyenne_generale = excluded.moyenne_generale,
+           total_points = excluded.total_points,
+           total_coefficients = excluded.total_coefficients,
+           rang = excluded.rang, effectif = excluded.effectif,
+           moyenne_de_classe = excluded.moyenne_de_classe,
+           mention = excluded.mention,
+           absences_count = excluded.absences_count,
+           retards_count = excluded.retards_count,
+           status = 'publie', published_at = now(),
+           published_by = excluded.published_by, computed_at = now()
+         returning id, (xmax = 0) as cree`,
+        [st.studentId, termId, classId, inputs.policyId, inputs.coefficientSetId,
+         st.moyenneGenerale, st.totalPoints, st.totalCoefficients,
+         st.rang, st.effectif, klass.moyenneDeClasse, st.mention,
+         abs.justified + abs.unjustified, abs.late, staffId]);
+
+      const bulletinId = b.rows[0].id as string;
+      if (b.rows[0].cree) out.publies += 1; else out.republies += 1;
+
+      // Les lignes sont réécrites en entier : une discipline retirée du
+      // programme ne doit pas survivre dans un bulletin republié.
+      await c.query(`delete from bulletin_lines where bulletin_id = $1`, [bulletinId]);
+      for (const line of st.subjects) {
+        await c.query(
+          `insert into bulletin_lines
+             (school_id, bulletin_id, subject_id, moyenne_matiere, coefficient,
+              points, moyenne_classe_matiere, rang_matiere, sort_order)
+           values (current_school_id(), $1, $2, $3, $4, $5, $6, $7, $8)`,
+          [bulletinId, line.subjectId, line.moyenne, line.coefficient, line.points,
+           klass.moyenneParMatiere.get(line.subjectId) ?? null,
+           line.rangMatiere, ordre.get(line.subjectId) ?? 0]);
+      }
+    }
+
+    await c.query(
+      `insert into audit_log (school_id, actor_id, action, target_type, target_id, detail)
+       values (current_school_id(), $1, 'bulletins.publish', 'class', $2, $3)`,
+      [user.userId, classId, JSON.stringify(out)]);
+
+    return out;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Écart entre le bulletin remis et l'état actuel des notes
+// ---------------------------------------------------------------------------
+
+export interface Ecart {
+  lastName: string; firstNames: string;
+  publiee: number | null; actuelle: number | null;
+  rangPublie: number | null; rangActuel: number | null;
+}
+
+/**
+ * Compare la copie figée au calcul d'aujourd'hui. Un écart signifie qu'une
+ * note a bougé depuis la remise du bulletin : la famille détient un document
+ * qui ne dit plus la même chose que le logiciel.
+ */
+export function ecarts(
+  fige: Map<string, Frozen>,
+  vivant: Array<{ studentId: string; moyenneGenerale: number | null; rang: number | null }>,
+  identites: Map<string, { lastName: string; firstNames: string }>,
+): Ecart[] {
+  const out: Ecart[] = [];
+  for (const v of vivant) {
+    const f = fige.get(v.studentId);
+    if (!f) continue;
+    // Le RANG compte autant que la moyenne. Une note corrigée chez un élève
+    // reclasse toute la classe : les autres n'ont pas vu leur moyenne changer,
+    // mais leur bulletin porte un rang qui n'est plus le bon.
+    if (f.moyenne !== v.moyenneGenerale || f.rang !== v.rang) {
+      const who = identites.get(v.studentId);
+      out.push({
+        lastName: who?.lastName ?? "", firstNames: who?.firstNames ?? "",
+        publiee: f.moyenne, actuelle: v.moyenneGenerale,
+        rangPublie: f.rang, rangActuel: v.rang,
+      });
+    }
+  }
+  return out;
+}
+
+/** Décrit un écart en une ligne, sans jargon. */
+export const decrireEcart = (d: Ecart): string => {
+  const parts: string[] = [];
+  if (d.publiee !== d.actuelle) {
+    parts.push(`moyenne remise ${fmt(d.publiee)}, aujourd'hui ${fmt(d.actuelle)}`);
+  }
+  if (d.rangPublie !== d.rangActuel) {
+    parts.push(`rang remis ${d.rangPublie ?? "—"}, aujourd'hui ${d.rangActuel ?? "—"}`);
+  }
+  return parts.join(" · ");
+};
+
+const fmt = (n: number | null): string =>
+  n === null ? "—" : n.toFixed(2).replace(".", ",");
+
+/**
+ * Reconstitue le résultat de classe TEL QU'IL A ÉTÉ PUBLIÉ, pour réimprimer
+ * en juin exactement la feuille remise en décembre. Renvoie null si la classe
+ * n'a pas de bulletins publiés : on imprime alors le calcul du jour.
+ */
+export async function frozenClassResult(
+  schoolId: string, classId: string, termId: string,
+): Promise<{
+  students: Array<{
+    studentId: string; subjects: Array<{
+      subjectId: string; moyenne: number | null; coefficient: number;
+      points: number | null; gradesCounted: number; rangMatiere: number | null;
+    }>;
+    moyenneGenerale: number | null; totalPoints: number; totalCoefficients: number;
+    mention: string | null; rang: number | null; effectif: number;
+  }>;
+  moyenneDeClasse: number | null;
+  moyenneParMatiere: Map<string, number | null>;
+  publishedAt: Date;
+} | null> {
+  return withSchool(schoolId, async (c) => {
+    const b = await c.query(
+      `select id, student_id, moyenne_generale, total_points, total_coefficients,
+              rang, effectif, moyenne_de_classe, mention, published_at
+         from bulletins
+        where class_id = $1 and term_id = $2 and status = 'publie'
+        order by rang nulls last`, [classId, termId]);
+    if (b.rowCount === 0) return null;
+
+    const lines = await c.query(
+      `select bl.bulletin_id, bl.subject_id, bl.moyenne_matiere, bl.coefficient,
+              bl.points, bl.moyenne_classe_matiere, bl.rang_matiere
+         from bulletin_lines bl
+         join bulletins bu on bu.id = bl.bulletin_id
+        where bu.class_id = $1 and bu.term_id = $2
+        order by bl.sort_order`, [classId, termId]);
+
+    const parBulletin = new Map<string, typeof lines.rows>();
+    const moyenneParMatiere = new Map<string, number | null>();
+    for (const l of lines.rows) {
+      const arr = parBulletin.get(l.bulletin_id) ?? [];
+      arr.push(l);
+      parBulletin.set(l.bulletin_id, arr);
+      if (!moyenneParMatiere.has(l.subject_id)) {
+        moyenneParMatiere.set(l.subject_id,
+          l.moyenne_classe_matiere === null ? null : Number(l.moyenne_classe_matiere));
+      }
+    }
+
+    return {
+      students: b.rows.map((r) => ({
+        studentId: r.student_id,
+        subjects: (parBulletin.get(r.id) ?? []).map((l: any) => ({
+          subjectId: l.subject_id,
+          moyenne: l.moyenne_matiere === null ? null : Number(l.moyenne_matiere),
+          coefficient: Number(l.coefficient),
+          points: l.points === null ? null : Number(l.points),
+          gradesCounted: l.moyenne_matiere === null ? 0 : 1,
+          rangMatiere: l.rang_matiere,
+        })),
+        moyenneGenerale: r.moyenne_generale === null ? null : Number(r.moyenne_generale),
+        totalPoints: Number(r.total_points ?? 0),
+        totalCoefficients: Number(r.total_coefficients ?? 0),
+        mention: r.mention,
+        rang: r.rang,
+        effectif: r.effectif ?? b.rowCount,
+      })),
+      moyenneDeClasse: b.rows[0].moyenne_de_classe === null
+        ? null : Number(b.rows[0].moyenne_de_classe),
+      moyenneParMatiere,
+      publishedAt: b.rows[0].published_at,
+    };
+  });
+}
+
+export const resumeEcarts = (n: number): string =>
+  `${plural(n, "bulletin déjà remis ne correspond plus",
+    "bulletins déjà remis ne correspondent plus")} aux notes actuelles.`;

@@ -17,7 +17,7 @@
     "start": "node --experimental-strip-types src/server/app.ts",
     "test:e2e": "node tests/app.e2e.mjs",
     "test:offline": "node tests/offline.e2e.mjs",
-    "check:all": "npm run typecheck && npm test && npm run test:rentree && npm run test:e2e && npm run test:offline && npm run test:import && npm run test:conseil && npm run test:famille && npm run test:categorisation && npm run test:services",
+    "check:all": "npm run typecheck && npm test && npm run test:rentree && npm run test:e2e && npm run test:offline && npm run test:import && npm run test:conseil && npm run test:famille && npm run test:categorisation && npm run test:services && npm run test:cloture",
     "test:import": "node tests/import.e2e.mjs",
     "test:rentree": "node tests/rentree.e2e.mjs",
     "test:conseil": "node tests/conseil.e2e.mjs",
@@ -25,7 +25,8 @@
     "test:categorisation": "node tests/categorisation.e2e.mjs",
     "db:sauvegarde": "./scripts/sauvegarde.sh",
     "db:epreuve": "./scripts/restauration-verifiee.sh",
-    "test:services": "node tests/services.e2e.mjs"
+    "test:services": "node tests/services.e2e.mjs",
+    "test:cloture": "node tests/cloture.e2e.mjs"
   },
   "dependencies": {
     "pg": "^8.23.0"

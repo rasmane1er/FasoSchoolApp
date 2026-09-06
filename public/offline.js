@@ -141,13 +141,20 @@
     return all().then(function (rows) {
       if (rows.length === 0) return refresh();
       return send(rows).then(function (res) {
-        var conflits = 0;
+        var conflits = 0, rejets = 0, motif = "";
         return Promise.all(res.results.map(function (r) {
           if (r.outcome === "conflit") conflits++;
+          if (r.outcome === "rejete") { rejets++; motif = r.reason || ""; }
           return drop(r.mutationId);
         })).then(function () {
           return refresh().then(function () {
-            if (conflits > 0) {
+            /* Un refus doit se voir. Annoncer « synchronisée » une note que le
+               serveur a refusée, c'est le pire des deux mondes : l'enseignant
+               croit son travail enregistre et ne le refera pas. */
+            if (rejets > 0) {
+              render(rejets + (rejets > 1 ? " notes refusées par le serveur. "
+                                          : " note refusée par le serveur. ") + motif, "note bad");
+            } else if (conflits > 0) {
               render(conflits + (conflits > 1 ? " notes divergentes signalées au censeur."
                                               : " note divergente signalée au censeur."), "note bad");
             } else if (res.results.length > 0) {

@@ -73,6 +73,8 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
   bord, et rien d'autre.
 - `src/server/services.ts` — répartition des services : qui enseigne quoi, à
   quelle classe, et ce que cela autorise.
+- `src/server/cloture.ts` — publication des bulletins et clôture du trimestre :
+  un document remis ne change pas tout seul.
 - `src/lib/roster.ts` — lecture d'un fichier de liste (encodage, séparateur,
   intitulés, dates, numéros). 22 tests.
 - `src/server/multipart.ts` — envoi de fichier, écrit à la main pour ne pas
@@ -89,6 +91,34 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
 **Démonstration** — `npm run demo` crée un établissement, une 6<sup>e</sup> de
 douze élèves, huit disciplines notées, la scolarité et un dossier de
 catégorisation entamé, puis écrit les bulletins dans `out/`.
+
+### La publication des bulletins
+
+Un bulletin était jusqu'ici **recalculé à chaque affichage**. Un enseignant
+corrigeait une note en février, et le bulletin de décembre déjà remis à la
+famille n'était plus celui que le logiciel montrait. Personne ne mentait : les
+deux documents disaient simplement des choses différentes, et c'est ainsi qu'un
+établissement perd la confiance d'un parent.
+
+Un bulletin remis est un **document**, pas une vue. Le publier fige la moyenne,
+le rang, la mention et chaque ligne de discipline. C'est cette copie que la
+famille lit dans son espace, et c'est elle qu'on réimprime en juin pour un
+dossier de transfert.
+
+Ce qui en découle :
+
+- **Clôturer le trimestre** refuse toute nouvelle saisie, en ligne comme hors
+  ligne. Une tablette restée trois semaines sans réseau voit ses notes refusées
+  avec leur motif — et le bandeau de l'enseignant le dit, au lieu d'annoncer
+  « synchronisée » une note que le serveur a écartée.
+- **Rouvrir reste possible** : une vraie erreur doit pouvoir être corrigée.
+  Mais c'est un acte, il est journalisé, et l'écran prévient que des bulletins
+  circulent déjà.
+- **Un écart n'est jamais corrigé en silence.** Si une note bouge après la
+  remise, le censeur voit qui est concerné et les deux valeurs, puis décide de
+  republier ou non. Le **rang** compte autant que la moyenne : corriger la note
+  du premier reclasse toute la classe, et les autres bulletins portent alors un
+  rang faux sans qu'une seule de leurs moyennes ait changé.
 
 ### La répartition des services
 
@@ -279,6 +309,7 @@ et trois parcours dans un vrai navigateur :
 
 | suite | ce qu'elle prouve |
 |---|---|
+| `test:cloture` (25) | le bulletin remis ne bouge pas, l'écart est montré, le trimestre clos refuse les notes en ligne comme hors ligne |
 | `test:services` (12) | un enseignant ne voit et ne touche que ses classes — y compris en postant à la main |
 | `test:rentree` (19) | un établissement ouvre son année, pose ses trimestres et crée ses classes sans intervention en base |
 | `test:e2e` (47) | connexion, notes, bulletins, appel et SMS, encaissement, droits |

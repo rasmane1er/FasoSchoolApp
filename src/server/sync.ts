@@ -91,16 +91,28 @@ export async function applyMutations(
         continue;
       }
 
-      // L'évaluation doit appartenir à cet établissement — le RLS s'en charge,
-      // mais une évaluation inconnue doit être rejetée proprement.
-      const ev = await c.query(`select id from evaluations where id = $1`, [m.evaluationId]);
-      if (ev.rowCount === 0) {
+      /* L'évaluation doit appartenir à cet établissement — le RLS s'en charge —
+         et son trimestre doit être ouvert. C'est le cas qui compte ici : une
+         tablette restée hors ligne trois semaines revient avec des notes d'un
+         trimestre entre-temps clôturé. Les accepter ferait bouger des bulletins
+         déjà remis aux familles, sans que personne ne l'ait décidé. */
+      const ev = await c.query(
+        `select ev.id, t.status from evaluations ev
+           join terms t on t.id = ev.term_id where ev.id = $1`, [m.evaluationId]);
+      const inconnue = ev.rowCount === 0;
+      const close = !inconnue && ev.rows[0].status !== "ouvert";
+      if (inconnue || close) {
         await c.query(
           `insert into sync_mutations (school_id, mutation_id, device_id, actor_id,
                                        entity_type, entity_id, operation, payload, outcome)
            values ($1,$2,$3,$4,'grade_entry',$5,'upsert',$6,'rejete')`,
           [schoolId, m.mutationId, m.deviceId, user.userId, m.studentId, JSON.stringify(m)]);
-        results.push({ mutationId: m.mutationId, outcome: "rejete", reason: "Évaluation inconnue." });
+        results.push({
+          mutationId: m.mutationId, outcome: "rejete",
+          reason: inconnue
+            ? "Évaluation inconnue."
+            : "Trimestre clôturé : cette note arrive trop tard. Voyez le censeur.",
+        });
         continue;
       }
 

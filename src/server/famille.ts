@@ -26,6 +26,7 @@ import type { PoolClient } from "pg";
 import { withSchool, withoutSchool } from "../lib/db.ts";
 import { computeClassBulletins } from "../lib/bulletin.ts";
 import { loadBulletinInputs } from "../lib/repository.ts";
+import { publishedFor } from "./cloture.ts";
 import { esc, fr, fcfa, plural } from "./html.ts";
 
 const sha256 = (v: string) => createHash("sha256").update(v).digest("hex");
@@ -107,6 +108,8 @@ export interface ChildView {
   duFcfa: number;
   payeFcfa: number;
   rulesUnverified: boolean;
+  /** Date de remise du bulletin figé, si la famille en a reçu un. */
+  publishedAt: Date | null;
 }
 
 export async function loadChildren(g: GuardianSession): Promise<ChildView[]> {
@@ -170,7 +173,21 @@ export async function loadChildren(g: GuardianSession): Promise<ChildView[]> {
     let effectif = 0;
     let rulesUnverified = false;
 
-    if (k.classId && k.termId) {
+    /* Ce que la famille lit est le bulletin PUBLIÉ quand il en existe un.
+       Pas un recalcul : le document remis à la maison et l'écran doivent dire
+       la même chose, même si une note a bougé depuis. Sinon un parent qui
+       compare les deux ne sait plus lequel croire — et il a raison. */
+    let publishedAt: Date | null = null;
+    const remis = k.termId ? await publishedFor(g.schoolId, k.id, k.termId) : null;
+
+    if (remis) {
+      subjects = remis.lines;
+      moyenne = remis.moyenne;
+      mention = remis.mention;
+      rang = remis.rang;
+      effectif = remis.effectif ?? 0;
+      publishedAt = remis.publishedAt;
+    } else if (k.classId && k.termId) {
       const inputs = await loadBulletinInputs(g.schoolId, k.classId, k.termId);
       effectif = inputs.students.length;
       rulesUnverified = !!inputs.sourceNotes.policy || !!inputs.sourceNotes.coefficients;
@@ -204,7 +221,7 @@ export async function loadChildren(g: GuardianSession): Promise<ChildView[]> {
       termLabel: k.termSequence ? `Trimestre ${k.termSequence}` : "Aucun trimestre en cours",
       subjects, moyenne, mention, rang, effectif,
       absences: k.absences, retards: k.retards, justifiees: k.justifiees,
-      duFcfa: k.du, payeFcfa: k.paye, rulesUnverified,
+      duFcfa: k.du, payeFcfa: k.paye, rulesUnverified, publishedAt,
     });
   }
   return views;
@@ -269,7 +286,10 @@ export function famillePage(
 
     return `
 <div class="card">
-  <h2>${esc(k.fullName)}<span>${esc(k.classLabel)} — ${esc(k.termLabel)}</span></h2>
+  <h2>${esc(k.fullName)}<span>${esc(k.classLabel)} — ${esc(k.termLabel)}${
+    k.publishedAt
+      ? ` · bulletin remis le ${new Date(k.publishedAt).toLocaleDateString("fr-FR")}`
+      : " · notes en cours de saisie"}</span></h2>
 
   <div class="big">
     <div><div class="k">Moyenne</div><div class="v">${fr(k.moyenne)}</div></div>
@@ -304,7 +324,7 @@ export function famillePage(
 </div>`;
   };
 
-  const nonVerifie = children.some((k) => k.rulesUnverified);
+  const nonVerifie = children.some((k) => k.rulesUnverified && !k.publishedAt);
 
   const body = `
 <p style="margin:0 0 4px;font-size:14px;color:#5C6072">${esc(schoolName)}</p>
@@ -314,6 +334,10 @@ ${children.length === 0 ? `<div class="note">Aucun élève n'est rattaché à vo
   numéro. Signalez-le au secrétariat de l'établissement.</div>` : ""}
 
 ${children.map(enfant).join("")}
+
+${children.some((k) => !k.publishedAt && k.subjects.length > 0) ? `<div class="note">
+  Un bulletin n'a pas encore été remis pour ce trimestre. Les moyennes
+  ci-dessus sont celles des notes déjà saisies : elles bougeront encore.</div>` : ""}
 
 ${nonVerifie ? `<div class="note">Les moyennes affichées utilisent les règles de
   notation par défaut de l'établissement, qui n'ont pas encore été confirmées
