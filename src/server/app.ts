@@ -33,6 +33,10 @@ import { conseilPage, saveDeliberation } from "./conseil.ts";
 import { categorisationPage, saveDossier, addCriterion } from "./categorisation.ts";
 import { pointsDAttention, attentionCard } from "./attention.ts";
 import {
+  servicesPage, addService, removeService,
+  perimetreDe, peutClasse, peutMatiere,
+} from "./services.ts";
+import {
   guardianExists, createGuardianSession, resolveGuardian, revokeGuardian,
   loadChildren, famillePage, familleLoginPage, schoolNameOf,
 } from "./famille.ts";
@@ -260,21 +264,40 @@ async function notesPage(user: SessionUser, url: URL, flash?: string): Promise<s
   const classId = url.searchParams.get("classe");
   const subjectId = url.searchParams.get("matiere");
 
+  // Un enseignant ne voit que les classes de sa répartition. Le filtre porte
+  // sur la LISTE ici, et sur l'écriture dans saveNotes() : masquer une option
+  // n'a jamais empêché personne d'envoyer un identifiant à la main.
+  const perimetre = await perimetreDe(user);
+  if (classId && !peutClasse(perimetre, classId)) {
+    return page(chrome, "Notes", `<h1>Notes</h1>
+      <div class="note bad">Cette classe ne fait pas partie de votre
+      répartition de services.</div>`);
+  }
+
   const d = await withSchool(schoolId, async (c) => {
     const classes = await c.query(
-      `select id, label from classes where academic_year_id = $1 order by label`,
-      [period.year_id],
+      perimetre.classIds === null
+        ? `select id, label from classes where academic_year_id = $1 order by label`
+        : `select id, label from classes
+            where academic_year_id = $1 and id = any($2::uuid[]) order by label`,
+      perimetre.classIds === null
+        ? [period.year_id] : [period.year_id, perimetre.classIds],
     );
     if (!classId) return { classes: classes.rows, subjects: [], evals: [], students: [], grades: [] };
 
-    const subjects = await c.query(
+    const toutes = await c.query(
       `select distinct sub.id, sub.label
          from evaluations ev join subjects sub on sub.id = ev.subject_id
         where ev.class_id = $1 and ev.term_id = $2
         order by sub.label`,
       [classId, period.term_id],
     );
+    const subjects = { rows: toutes.rows.filter((x: any) =>
+      peutMatiere(perimetre, classId, x.id)) };
     const chosen = subjectId ?? subjects.rows[0]?.id ?? null;
+    if (chosen && !peutMatiere(perimetre, classId, chosen)) {
+      return { classes: classes.rows, subjects: subjects.rows, evals: [], students: [], grades: [] };
+    }
     if (!chosen) return { classes: classes.rows, subjects: subjects.rows, evals: [], students: [], grades: [] };
 
     const evals = await c.query(
@@ -372,15 +395,34 @@ async function notesPage(user: SessionUser, url: URL, flash?: string): Promise<s
 async function saveNotes(user: SessionUser, url: URL, form: URLSearchParams): Promise<number> {
   const schoolId = user.schoolId!;
   let saved = 0;
+  /* Le contrôle porte sur l'ÉCRITURE, pas seulement sur ce qui a été affiché.
+     Chaque évaluation est confrontée à la répartition de services : un
+     identifiant envoyé à la main ne passe pas plus qu'une option masquée. */
+  const perimetre = await perimetreDe(user);
+
   await withSchool(schoolId, async (c) => {
     const staff = await c.query(`select id from staff where user_id = $1 limit 1`, [user.userId]);
     const staffId = staff.rows[0]?.id ?? null;
+
+    const autorisee = new Map<string, boolean>();
+    const evaluationPermise = async (evaluationId: string): Promise<boolean> => {
+      if (perimetre.classIds === null) return true;
+      const connu = autorisee.get(evaluationId);
+      if (connu !== undefined) return connu;
+      const ev = await c.query(
+        `select class_id, subject_id from evaluations where id = $1`, [evaluationId]);
+      const ok = ev.rowCount! > 0
+        && peutMatiere(perimetre, ev.rows[0].class_id, ev.rows[0].subject_id);
+      autorisee.set(evaluationId, ok);
+      return ok;
+    };
 
     for (const [name, raw] of form) {
       if (!name.startsWith("n_")) continue;
       const parts = name.slice(2).split("_");
       if (parts.length !== 2) continue;
       const [evaluationId, studentId] = parts as [string, string];
+      if (!(await evaluationPermise(evaluationId))) continue;
 
       const v = raw.trim().toLowerCase().replace(",", ".");
       let score: number | null = null;
@@ -501,9 +543,23 @@ async function absencesPage(user: SessionUser, url: URL, flash?: string): Promis
   const classId = url.searchParams.get("classe");
   const date = url.searchParams.get("date") ?? new Date().toISOString().slice(0, 10);
 
+  // L'appel suit la même répartition que les notes : un enseignant fait
+  // l'appel de ses classes, pas de celles des autres.
+  const perimetre = await perimetreDe(user);
+  if (classId && !peutClasse(perimetre, classId)) {
+    return page(chrome, "Absences", `<h1>Absences</h1>
+      <div class="note bad">Cette classe ne fait pas partie de votre
+      répartition de services.</div>`);
+  }
+
   const d = await withSchool(schoolId, async (c) => {
     const classes = await c.query(
-      `select id, label from classes where academic_year_id = $1 order by label`, [period.year_id]);
+      perimetre.classIds === null
+        ? `select id, label from classes where academic_year_id = $1 order by label`
+        : `select id, label from classes
+            where academic_year_id = $1 and id = any($2::uuid[]) order by label`,
+      perimetre.classIds === null
+        ? [period.year_id] : [period.year_id, perimetre.classIds]);
     if (!classId) return { classes: classes.rows, students: [], marks: new Map() };
 
     const students = await c.query(
@@ -582,7 +638,12 @@ async function absencesPage(user: SessionUser, url: URL, flash?: string): Promis
     </form>`);
 }
 
-async function saveAbsences(user: SessionUser, url: URL, form: URLSearchParams) {
+async function saveAbsences(user: SessionUser, url: URL, form: URLSearchParams):
+  Promise<{ absents: number; queued: number; cost: number } | null> {
+  // Comme pour les notes : le contrôle est à l'écriture, pas à l'affichage.
+  const perimetreAppel = await perimetreDe(user);
+  if (!peutClasse(perimetreAppel, url.searchParams.get("classe") ?? "")) return null;
+
   const schoolId = user.schoolId!;
   const classId = url.searchParams.get("classe")!;
   const date = url.searchParams.get("date") ?? new Date().toISOString().slice(0, 10);
@@ -822,6 +883,10 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     if (path === "/absences" && req.method === "POST") {
       if (!can(user, "faire_appel")) return html(res, "Accès refusé.", 403);
       const r = await saveAbsences(user, url, await formBody(req));
+      if (!r) {
+        return html(res, await absencesPage(user, url,
+          "Cette classe ne fait pas partie de votre répartition de services."));
+      }
       return html(res, await absencesPage(user, url,
         `Appel enregistré : ${plural(r.absents, "absence")}, ${plural(r.queued, "SMS envoyé", "SMS envoyés")} pour ${r.cost} F.`));
     }
@@ -930,6 +995,24 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       ].filter(Boolean).join(" ");
       const chrome = await chromeFor(user, "conseil");
       return html(res, await conseilPage(user, chrome, url, flash));
+    }
+
+    // --- Répartition des services ------------------------------------------
+    if (path === "/services" && req.method === "GET") {
+      if (!can(user, "parametrer")) return html(res, "Accès refusé.", 403);
+      return html(res, await servicesPage(user, await chromeFor(user, "services")));
+    }
+    if (path === "/services" && req.method === "POST") {
+      if (!can(user, "parametrer")) return html(res, "Accès refusé.", 403);
+      const r = await addService(user, await formBody(req));
+      return html(res, await servicesPage(
+        user, await chromeFor(user, "services"), r.flash, r.error));
+    }
+    if (path === "/services/retirer" && req.method === "POST") {
+      if (!can(user, "parametrer")) return html(res, "Accès refusé.", 403);
+      const r = await removeService(user, (await formBody(req)).get("id") ?? "");
+      return html(res, await servicesPage(
+        user, await chromeFor(user, "services"), r.flash, r.error));
     }
 
     // --- Rentrée : année, trimestres, classes ------------------------------

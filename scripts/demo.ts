@@ -243,6 +243,19 @@ async function main() {
       [MATIERES],
     );
 
+    /* Répartition des services. L'enseignante de la démonstration a un service
+       RÉEL — français et anglais en 6e B — et pas la classe entière : c'est ce
+       qui rend visible, dès la démonstration, qu'elle ne peut pas saisir les
+       notes de mathématiques d'un collègue. */
+    const sesMatieres = subs.rows.filter((x: any) =>
+      ["FRANCAIS", "ANGLAIS"].includes(x.code));
+    for (const m of sesMatieres) {
+      await c.query(
+        `insert into teacher_assignments (school_id, staff_id, class_id, subject_id)
+         values ($1,$2,$3,$4) on conflict do nothing`,
+        [schoolId, staffId, classId, m.id]);
+    }
+
     for (const sub of subs.rows) {
       const evals: Array<[string, string]> = [
         ["devoir", "2026-10-20"],

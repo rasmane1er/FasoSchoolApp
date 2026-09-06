@@ -71,6 +71,8 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
   justificatives, score sur 100.
 - `src/server/attention.ts` — ce qui demande une action, en haut du tableau de
   bord, et rien d'autre.
+- `src/server/services.ts` — répartition des services : qui enseigne quoi, à
+  quelle classe, et ce que cela autorise.
 - `src/lib/roster.ts` — lecture d'un fichier de liste (encodage, séparateur,
   intitulés, dates, numéros). 22 tests.
 - `src/server/multipart.ts` — envoi de fichier, écrit à la main pour ne pas
@@ -87,6 +89,23 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
 **Démonstration** — `npm run demo` crée un établissement, une 6<sup>e</sup> de
 douze élèves, huit disciplines notées, la scolarité et un dossier de
 catégorisation entamé, puis écrit les bulletins dans `out/`.
+
+### La répartition des services
+
+Jusqu'ici n'importe quel enseignant pouvait ouvrir n'importe quelle classe et
+saisir des notes dans n'importe quelle discipline. Dans un établissement d'une
+classe cela ne se voit pas ; dans un établissement de douze classes c'est
+inacceptable.
+
+Le périmètre est une **donnée**, pas un rôle : « enseignant » ne dit rien de ce
+qu'on a le droit de toucher, `teacher_assignments` le dit. Le censeur, le
+proviseur et le directeur ne sont pas filtrés — leur métier est de voir toute
+la maison.
+
+Et le filtre d'affichage n'est **jamais** la protection : la même règle est
+appliquée à la lecture et à l'écriture. Le test envoie délibérément une note
+sur l'évaluation d'un collègue, sans passer par le formulaire, et vérifie
+qu'elle est refusée sans effacer la valeur en place.
 
 ### La rentrée
 
@@ -260,6 +279,7 @@ et trois parcours dans un vrai navigateur :
 
 | suite | ce qu'elle prouve |
 |---|---|
+| `test:services` (12) | un enseignant ne voit et ne touche que ses classes — y compris en postant à la main |
 | `test:rentree` (19) | un établissement ouvre son année, pose ses trimestres et crée ses classes sans intervention en base |
 | `test:e2e` (47) | connexion, notes, bulletins, appel et SMS, encaissement, droits |
 | `test:offline` (18) | le réseau est réellement coupé, l'onglet fermé puis rouvert ; rien n'est perdu, rien n'est écrasé |
