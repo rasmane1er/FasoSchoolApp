@@ -595,6 +595,24 @@ Deux garde-fous d'affichage : la moyenne annuelle est présentée comme une
 moyenne simple dont la pondération n'est pas vérifiée, et une année dont tous
 les trimestres ne portent pas de notes est signalée avant toute décision.
 
+### Ce que le conseil de classe voit désormais
+
+Un conseil de classe burkinabè délibère sur **le travail, l'assiduité et la
+conduite**. L'écran ne montrait que les moyennes : il faisait délibérer sur un
+tiers du dossier. Chaque ligne porte maintenant les absences (dont les non
+justifiées), les retards et les faits de discipline retenus — une exclusion est
+signalée en rouge.
+
+**Ces colonnes n'entrent dans aucun calcul, et c'est délibéré.** Aucun texte
+burkinabè public ne fixe un nombre d'absences au-delà duquel un élève ne peut
+plus passer ; l'inventer reviendrait à écrire une règle nationale dans un
+logiciel privé, et à faire porter à un chiffre arbitraire une décision qui
+change la vie d'un enfant. Au-delà de dix absences, ou après une exclusion, la
+ligne est simplement mise en évidence : un repère de lecture, pas un seuil
+réglementaire. La suite vérifie que la proposition est **exactement la même**
+avec et sans incidents. Le jour où un texte ou un établissement fixe son seuil,
+il deviendra une règle datée dans `promotion_rules`, comme les autres.
+
 ### La saisie hors ligne
 
 C'est le point où un logiciel scolaire se perd au Burkina : l'enseignant
@@ -671,7 +689,7 @@ et vingt parcours dans un vrai navigateur :
 | `test:offline` (18) | le réseau est réellement coupé, l'onglet fermé puis rouvert ; rien n'est perdu, rien n'est écrasé |
 | `test:categorisation` (20) | le dossier se saisit, les points hors barème sont refusés, et l'écran ne devine ni la catégorie ni le plafond |
 | `test:famille` (22) | un parent voit ses enfants et personne d'autre ; les deux sessions ne communiquent pas ; la page tient sous 60 Ko sans JavaScript |
-| `test:conseil` (19) | la proposition est motivée, la décision humaine prime, un redoublement interdit est refusé et le livret n'est pas dupliqué |
+| `test:conseil` (24) | la proposition est motivée, la décision humaine prime, un redoublement interdit est refusé, et la conduite ne change pas la proposition |
 | `test:import` (30) | un vrai fichier Windows-1252 est importé, corrigé dans l'aperçu, puis réimporté sans créer de doublon |
 
 ---

@@ -38,6 +38,10 @@ const anneeId = an[0].id;
 /* Une classe de CP1 pour éprouver l'interdiction de redoublement. Elle est
    créée ici et retirée à la fin : la démonstration ne doit pas la garder. */
 const CP1 = "CP1 test";
+const FAITS_TEST = [
+  "Exclusion de deux jours prononcee pour la deliberation de controle.",
+  "Fait consigne sans sanction pour la deliberation de controle.",
+];
 const purge = async () => {
   const k = await client.query(`select id from classes where label = $1`, [CP1]);
   for (const r of k.rows) {
@@ -46,6 +50,11 @@ const purge = async () => {
   }
   await client.query(`delete from conseil_decisions where academic_year_id = $1`, [anneeId]);
   await client.query(`delete from livret_entries`);
+  // Les faits que cette suite pose pour éprouver la colonne « conduite »,
+  // retirés par leur texte exact.
+  await client.query(
+    `delete from behavior_incidents where description = any($1::text[])`,
+    [FAITS_TEST]);
 };
 await purge();
 await client.query(
@@ -180,6 +189,54 @@ try {
     [eleveCp1, anneeId]);
   check("rien n'est écrit quand la décision est refusée",
     cp1dec.rows[0]?.decision !== "redouble", cp1dec.rows[0]?.decision ?? "aucune");
+
+  console.log("\nAssiduité et conduite au conseil");
+  const { rows: cible } = await client.query(
+    `select e.student_id, st.last_name from enrolments e
+       join students st on st.id = e.student_id
+      where e.class_id = $1 order by st.last_name limit 1`, [k6[0].id]);
+  const { rows: sgStaff } = await client.query(
+    `select id from staff where fonction = 'surveillant_general' limit 1`);
+  for (const f of FAITS_TEST) {
+    await client.query(
+      `insert into behavior_incidents (school_id, student_id, occurred_on,
+                                       description, sanction, recorded_by)
+       values (current_school_id(), $1, current_date, $2, $3, $4)`,
+      [cible[0].student_id, f,
+       f.startsWith("Exclusion") ? "exclusion_temporaire" : null,
+       sgStaff[0]?.id ?? null]);
+  }
+
+  await page.goto(`${BASE}/conseil?classe=${k6[0].id}`);
+  await page.waitForSelector("table");
+  const avecVie = await page.content();
+  check("le conseil voit l'assiduité et la conduite",
+    avecVie.includes(">Abs.<") && avecVie.includes(">Ret.<")
+      && avecVie.includes(">Disc.<"),
+    "délibérer sur la seule moyenne, c'est délibérer sur un tiers du dossier");
+  check("une exclusion est signalée sur la ligne de l'élève",
+    avecVie.includes("dont 1 exclusion"));
+  check("L'ÉCRAN DIT QUE CELA N'ENTRE DANS AUCUN CALCUL",
+    avecVie.includes("entrent dans aucun calcul"),
+    "un seuil d'absences inventé serait une règle nationale écrite en privé");
+  check("et que le repère de lecture n'est pas un seuil réglementaire",
+    avecVie.includes("pas un seuil réglementaire"));
+
+  /* La proposition doit être EXACTEMENT la même avec et sans incidents : le
+     logiciel montre, il ne juge pas à la place du conseil. */
+  const propAvec = await page.$eval(
+    `xpath=//tbody/tr[1]//span[contains(@class,"pill")]`,
+    (el) => el.textContent.trim());
+  await client.query(
+    `delete from behavior_incidents where description = any($1::text[])`,
+    [FAITS_TEST]);
+  await page.goto(`${BASE}/conseil?classe=${k6[0].id}`);
+  await page.waitForSelector("table");
+  const propSans = await page.$eval(
+    `xpath=//tbody/tr[1]//span[contains(@class,"pill")]`,
+    (el) => el.textContent.trim());
+  check("LA CONDUITE NE CHANGE PAS LA PROPOSITION", propAvec === propSans,
+    `${propAvec} avec incidents, ${propSans} sans`);
 
   console.log("\nDroits");
   const ens = await browser.newContext({ locale: "fr-FR" });

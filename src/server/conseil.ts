@@ -26,6 +26,18 @@ import { loadBulletinInputs } from "../lib/repository.ts";
 import { page, esc, fr, plural, type PageChrome } from "./html.ts";
 import type { SessionUser } from "./session.ts";
 
+/**
+ * Le seuil au-delà duquel l'assiduité est SIGNALÉE — pas sanctionnée.
+ *
+ * Aucun texte burkinabè public ne fixe un nombre d'absences au-delà duquel un
+ * élève ne peut plus passer, et inventer ce chiffre reviendrait à écrire une
+ * règle nationale dans un logiciel privé. Dix jours est un repère de lecture :
+ * il met la ligne en évidence pour que le conseil la regarde, et rien de plus.
+ * Le jour où un établissement ou un texte fixe le sien, ce nombre devient une
+ * règle datée dans `promotion_rules`, comme les autres.
+ */
+export const SEUIL_ABSENCES = 10;
+
 export const DECISIONS: Array<[ConseilDecision | "admis_par_compensation", string]> = [
   ["admis", "Admis en classe supérieure"],
   ["admis_par_compensation", "Admis par compensation"],
@@ -47,6 +59,14 @@ export interface DeliberationRow {
   redoublementAllowed: boolean;
   decision: string | null;
   appreciation: string | null;
+  /* Assiduité et conduite. Elles ne touchent PAS à la proposition — voir le
+     commentaire de `loadDeliberation` — mais un conseil qui ne les voit pas
+     délibère sur une moyenne dont il ignore les conditions. */
+  absences: number;
+  absencesNonJustifiees: number;
+  retards: number;
+  incidents: number;
+  sanctionsLourdes: number;
 }
 
 export interface Deliberation {
@@ -57,6 +77,8 @@ export interface Deliberation {
   termCount: number;
   /** Nombre de trimestres qui portent effectivement des notes. */
   termsWithData: number;
+  /** Le seuil au-delà duquel l'assiduité est signalée à l'écran. */
+  seuilAbsences: number;
   rows: DeliberationRow[];
   ruleNote: string | null;
 }
@@ -95,6 +117,34 @@ export async function loadDeliberation(
     const prior = await c.query(
       `select student_id, decision, appreciation from conseil_decisions
         where academic_year_id = $1`, [k.rows[0].academic_year_id]);
+
+    /* Assiduité et conduite de l'année, par élève. Un conseil de classe
+       burkinabè délibère sur « travail, assiduité et conduite » : ne montrer
+       que la moyenne, c'est délibérer sur un tiers du dossier. */
+    const vie = await c.query(
+      `select e.student_id,
+              count(*) filter (where ar.status = 'absent')::int as absences,
+              count(*) filter (where ar.status = 'absent'
+                                 and not ar.is_justified)::int as non_justifiees,
+              count(*) filter (where ar.status = 'retard')::int as retards
+         from enrolments e
+         left join attendance_records ar on ar.student_id = e.student_id
+         left join attendance_sessions ses
+                on ses.id = ar.attendance_session_id
+               and ses.class_id = e.class_id
+        where e.class_id = $1
+        group by e.student_id`, [classId]);
+
+    const conduite = await c.query(
+      `select bi.student_id,
+              count(*)::int as incidents,
+              count(*) filter (where bi.sanction in
+                ('exclusion_temporaire','exclusion_definitive'))::int as lourdes
+         from behavior_incidents bi
+         join enrolments e on e.student_id = bi.student_id
+        where e.class_id = $1 and bi.retracted_at is null
+        group by bi.student_id`, [classId]);
+
     return {
       label: k.rows[0].label as string,
       levelCode: k.rows[0].level_code as string,
@@ -103,6 +153,8 @@ export async function loadDeliberation(
       termIds: terms.rows.map((t) => t.id as string),
       rule: rule.rows[0] ?? null,
       prior: new Map(prior.rows.map((p) => [p.student_id as string, p])),
+      vie: new Map(vie.rows.map((v: any) => [v.student_id as string, v])),
+      conduite: new Map(conduite.rows.map((v: any) => [v.student_id as string, v])),
     };
   });
   if (!ctx) return null;
@@ -152,6 +204,8 @@ export async function loadDeliberation(
         ? null : Number(ctx.rule.min_average_to_pass),
     });
     const before = ctx.prior.get(s.id);
+    const v = ctx.vie.get(s.id);
+    const cd = ctx.conduite.get(s.id);
     return {
       studentId: s.id, matricule: s.matricule,
       lastName: s.last, firstNames: s.first,
@@ -160,6 +214,11 @@ export async function loadDeliberation(
       redoublementAllowed,
       decision: before?.decision ?? null,
       appreciation: before?.appreciation ?? null,
+      absences: Number(v?.absences ?? 0),
+      absencesNonJustifiees: Number(v?.non_justifiees ?? 0),
+      retards: Number(v?.retards ?? 0),
+      incidents: Number(cd?.incidents ?? 0),
+      sanctionsLourdes: Number(cd?.lourdes ?? 0),
     };
   }).sort((a, b) => (b.moyenneAnnuelle ?? -1) - (a.moyenneAnnuelle ?? -1));
 
@@ -173,6 +232,7 @@ export async function loadDeliberation(
     classLabel: ctx.label, levelCode: ctx.levelCode,
     yearId: ctx.yearId, yearLabel: ctx.yearLabel,
     termCount: ctx.termIds.length, termsWithData, rows,
+    seuilAbsences: SEUIL_ABSENCES,
     ruleNote: ctx.rule?.source_note ?? null,
   };
 }
@@ -330,11 +390,29 @@ export async function conseilPage(
         return `<option value="${code}"${selected ? " selected" : ""}>${esc(label)}</option>`;
       }).join("");
 
-    return `<tr${r.decision ? "" : ' class="warn"'}>
+    /* Assiduité et conduite. Le chiffre est mis en évidence au-delà du seuil,
+       et NE CHANGE RIEN à la proposition : c'est au conseil de peser une
+       moyenne au regard des conditions dans lesquelles elle a été obtenue. */
+    const assidu = r.absences > d.seuilAbsences || r.sanctionsLourdes > 0;
+    const vie = `
+      <td class="num r"${r.absences > d.seuilAbsences
+        ? ' style="color:var(--laterite);font-weight:600"' : ""}>${r.absences}${
+        r.absencesNonJustifiees > 0
+          ? `<span class="dit">dont ${r.absencesNonJustifiees} non justifiée${
+              r.absencesNonJustifiees > 1 ? "s" : ""}</span>` : ""}</td>
+      <td class="num r">${r.retards}</td>
+      <td class="num r"${r.sanctionsLourdes > 0
+        ? ' style="color:var(--laterite);font-weight:600"' : ""}>${r.incidents}${
+        r.sanctionsLourdes > 0
+          ? `<span class="dit bad">dont ${r.sanctionsLourdes} exclusion${
+              r.sanctionsLourdes > 1 ? "s" : ""}</span>` : ""}</td>`;
+
+    return `<tr${r.decision ? (assidu ? ' class="warn"' : "") : ' class="warn"'}>
       <td><b>${esc(r.lastName)}</b> ${esc(r.firstNames)}
         <div class="dit" style="color:var(--faint)">${esc(r.matricule)}</div></td>
       ${r.parTrimestre.map((m) => `<td class="num r">${fr(m)}</td>`).join("")}
       <td class="num r"><b>${fr(r.moyenneAnnuelle)}</b></td>
+      ${vie}
       <td>
         <span class="pill ${r.proposition === "admis" ? "p-ok" : "p-warn"}">${
           esc(r.proposition)}</span>
@@ -358,6 +436,17 @@ ${d.termsWithData < d.termCount ? `<div class="note bad">
   Une délibération prononcée maintenant reposerait sur une moyenne qui n'est pas
   la moyenne de l'année. Attendez la clôture du dernier trimestre.
 </div>` : ""}
+
+<div class="note">
+  <b>Assiduité et conduite sont affichées, et n'entrent dans aucun calcul.</b>
+  Un conseil de classe burkinabè délibère sur le travail, l'assiduité et la
+  conduite : ne montrer que la moyenne, c'est délibérer sur un tiers du
+  dossier. Mais aucun texte public ne fixe un nombre d'absences au-delà duquel
+  un élève ne peut plus passer, et l'inventer reviendrait à écrire une règle
+  nationale dans un logiciel privé. Au-delà de ${d.seuilAbsences} absences, ou
+  s'il y a eu exclusion, la ligne est mise en évidence — c'est un repère de
+  lecture, pas un seuil réglementaire, et la décision reste entière.
+</div>
 
 <div class="note warn">
   <b>Moyenne annuelle : moyenne simple des trimestres qui portent des notes.</b>
@@ -387,6 +476,7 @@ ${!d.rows[0]?.redoublementAllowed ? `<div class="note">
           <th>Élève</th>
           ${d.rows[0]?.parTrimestre.map((_, i) => `<th class="r">T${i + 1}</th>`).join("") ?? ""}
           <th class="r">Annuelle</th>
+          <th class="r">Abs.</th><th class="r">Ret.</th><th class="r">Disc.</th>
           <th>Proposition</th><th>Décision du conseil</th><th>Appréciation</th>
         </tr></thead>
         <tbody>${d.rows.map(ligne).join("\n")}</tbody>
