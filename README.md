@@ -67,6 +67,8 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
   humaine, livret scolaire cumulatif.
 - `src/server/famille.ts` — espace des familles : une page, sans JavaScript,
   sur son propre cookie.
+- `src/server/categorisation.ts` — dossier de catégorisation : critères, pièces
+  justificatives, score sur 100.
 - `src/lib/roster.ts` — lecture d'un fichier de liste (encodage, séparateur,
   intitulés, dates, numéros). 22 tests.
 - `src/server/multipart.ts` — envoi de fichier, écrit à la main pour ne pas
@@ -129,6 +131,23 @@ Et trois règles de conduite :
    et que deux élèves portent ce nom, la ligne est **bloquée** plutôt que
    rattachée au hasard : rattacher un enfant à la fiche d'un homonyme est pire
    qu'un import incomplet.
+
+### Le dossier de catégorisation
+
+L'arrêté n°2026-101 conditionne le plafond légal des frais au score de
+l'établissement sur 100 points. C'est le document le plus rentable de l'année
+d'une école — et celui qu'on monte dans l'urgence à partir de bouts de papier.
+
+L'écran tient les critères, leurs points, la pièce justificative de chacun, le
+total par axe et ce qui manque encore. Un critère qui porte des points sans
+pièce est signalé : c'est ce qu'une inspection retire en premier.
+
+Ce que l'écran **refuse de faire** : déduire la catégorie et le plafond. Les
+seuils et les tables de plafond par cycle n'ont pas pu être obtenus. Les
+inventer produirait un écran d'apparence sérieuse conduisant un établissement à
+facturer un montant illégal — l'erreur la plus chère que ce logiciel pourrait
+commettre. L'établissement saisit donc les critères de son exemplaire de
+l'arrêté, le logiciel additionne, et un humain lit la catégorie dans le texte.
 
 ### L'espace des familles
 
@@ -198,8 +217,9 @@ saisit quarante notes, le réseau tombe, tout est perdu. Ici :
 
 ### Ce qui n'existe pas encore
 
-La saisie du dossier de catégorisation (l'écran est en lecture seule), Orange
-Money et Moov Money — bloqués sur le RCCM.
+Orange Money et Moov Money, bloqués sur le RCCM. Les seuils de catégorisation
+et les plafonds de frais par cycle, faute d'avoir pu obtenir les tables de
+l'arrêté. Les retours statutaires au ministère, faute de leurs formulaires.
 
 Volontairement : le reste attend un vrai bulletin burkinabè.
 
@@ -235,8 +255,9 @@ et trois parcours dans un vrai navigateur :
 | suite | ce qu'elle prouve |
 |---|---|
 | `test:rentree` (19) | un établissement ouvre son année, pose ses trimestres et crée ses classes sans intervention en base |
-| `test:e2e` (42) | connexion, notes, bulletins, appel et SMS, encaissement, droits |
+| `test:e2e` (43) | connexion, notes, bulletins, appel et SMS, encaissement, droits |
 | `test:offline` (18) | le réseau est réellement coupé, l'onglet fermé puis rouvert ; rien n'est perdu, rien n'est écrasé |
+| `test:categorisation` (20) | le dossier se saisit, les points hors barème sont refusés, et l'écran ne devine ni la catégorie ni le plafond |
 | `test:famille` (22) | un parent voit ses enfants et personne d'autre ; les deux sessions ne communiquent pas ; la page tient sous 60 Ko sans JavaScript |
 | `test:conseil` (19) | la proposition est motivée, la décision humaine prime, un redoublement interdit est refusé et le livret n'est pas dupliqué |
 | `test:import` (30) | un vrai fichier Windows-1252 est importé, corrigé dans l'aperçu, puis réimporté sans créer de doublon |

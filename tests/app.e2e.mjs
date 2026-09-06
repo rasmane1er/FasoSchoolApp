@@ -281,7 +281,10 @@ try {
   const cat = await p3.content();
   check("le directeur voit le dossier de catégorisation", cat.includes("Catégorisation"));
   check("le score 68/100 est affiché", cat.includes("68"));
-  check("une pièce manquante est signalée", cat.includes("PIÈCE MANQUANTE"));
+  check("un critère sans pièce justificative est signalé", cat.includes("sans pièce"),
+    "c'est ce qu'une inspection retire en premier");
+  check("le dossier est saisissable, pas seulement consultable",
+    cat.includes('name="p_'));
   await p3.screenshot({ path: "out/captures/06-categorisation.png", fullPage: true });
   await dir.close();
 

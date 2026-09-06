@@ -30,6 +30,7 @@ import {
 import { isMultipart, readMultipart } from "./multipart.ts";
 import { rentreePage, saveYear, openYear, addClass } from "./rentree.ts";
 import { conseilPage, saveDeliberation } from "./conseil.ts";
+import { categorisationPage, saveDossier, addCriterion } from "./categorisation.ts";
 import {
   guardianExists, createGuardianSession, resolveGuardian, revokeGuardian,
   loadChildren, famillePage, familleLoginPage, schoolNameOf,
@@ -663,99 +664,6 @@ async function saveAbsences(user: SessionUser, url: URL, form: URLSearchParams) 
   });
 }
 
-async function simplePage(user: SessionUser, which: "scolarite" | "categorisation"): Promise<string> {
-  const schoolId = user.schoolId!;
-  const period = await currentPeriod(schoolId);
-  const chrome = await chromeFor(user, which);
-
-  if (which === "scolarite") {
-    const d = await withSchool(schoolId, async (c) => {
-      const inv = await c.query(
-        `select i.reference, i.total_fcfa, i.status, st.last_name, st.first_names, cl.label as classe,
-                coalesce((select sum(p.amount_fcfa) from payments p
-                           where p.invoice_id = i.id and p.status in ('confirme','rapproche')),0) as paye
-           from invoices i
-           join students st on st.id = i.student_id
-           left join enrolments e on e.student_id = st.id and e.academic_year_id = i.academic_year_id
-           left join classes cl on cl.id = e.class_id
-          order by st.last_name limit 50`);
-      const caps = await c.query(
-        `select fs.label, sum(fl.amount_fcfa) filter (where fl.cap_treatment = 'plafonne') as plafonne,
-                sum(fl.amount_fcfa) as total
-           from fee_schedules fs join fee_lines fl on fl.fee_schedule_id = fs.id
-          group by fs.id, fs.label`);
-      return { invoices: inv.rows, caps: caps.rows };
-    });
-
-    const rows = d.invoices.map((i: any) => {
-      const reste = Number(i.total_fcfa) - Number(i.paye);
-      return `<tr${reste > 0 ? ' class="bad"' : ""}>
-        <td><b>${esc(i.last_name)}</b> ${esc(i.first_names)}</td>
-        <td>${esc(i.classe ?? "—")}</td>
-        <td class="num r">${fcfa(i.total_fcfa)}</td>
-        <td class="num r">${fcfa(i.paye)}</td>
-        <td class="num r" style="font-weight:600;color:${reste > 0 ? "var(--laterite)" : "var(--verdant)"}">${fcfa(reste)}</td>
-      </tr>`;
-    }).join("");
-
-    return page(chrome, "Scolarité", `
-      <div><h1>Scolarité</h1>
-        <p style="margin:0;color:var(--muted)">Espèces et virement. Orange Money et Moov Money à l'obtention du RCCM.</p></div>
-      ${d.caps.map((c: any) => `<div class="note warn">
-        <b>${esc(c.label)}</b> — ${fcfa(c.plafonne)} F comptés dans le plafond de l'arrêté n°2026-101,
-        ${fcfa(Number(c.total) - Number(c.plafonne))} F hors plafond.</div>`).join("")}
-      <div class="card"><div class="scroll"><table>
-        <thead><tr><th>Élève</th><th>Classe</th><th class="r">Dû</th><th class="r">Payé</th><th class="r">Reste</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="5" style="color:var(--muted)">Aucune facture émise.</td></tr>`}</tbody>
-      </table></div></div>`);
-  }
-
-  const d = await withSchool(schoolId, async (c) => {
-    const a = await c.query(
-      `select id, investment_score, quality_score, total_score, category, status
-         from category_assessments where academic_year_id = $1 limit 1`,
-      [period?.year_id ?? null]);
-    const crit = a.rowCount
-      ? (await c.query(
-          `select axis, label, max_points, awarded_points, evidence_key
-             from category_criteria where category_assessment_id = $1
-            order by axis, code`, [a.rows[0].id])).rows
-      : [];
-    return { assessment: a.rows[0] ?? null, criteria: crit };
-  });
-
-  if (!d.assessment) {
-    return page(chrome, "Catégorisation", `
-      <div><h1>Dossier de catégorisation</h1>
-        <p style="margin:0;color:var(--muted)">Arrêté n°2026-101 du 10 juillet 2026.</p></div>
-      <div class="note warn">Aucun dossier ouvert pour cette année scolaire.</div>
-      <div class="note">Le score sur 100 — 50 points d'investissement, 50 de qualité éducative —
-        détermine la catégorie de l'établissement, et la catégorie croisée avec la zone fixe le
-        plafond légal des frais de scolarité. Une part des points se calcule à partir des registres
-        déjà tenus ici : résultats aux examens, effectifs, stabilité du personnel, gouvernance.</div>`);
-  }
-
-  const byAxis = (axis: string) => d.criteria.filter((c: any) => c.axis === axis)
-    .map((c: any) => `<tr>
-      <td>${esc(c.label)}</td>
-      <td class="num r">${fr(c.awarded_points, 0)}/${fr(c.max_points, 0)}</td>
-      <td class="r">${c.evidence_key ? '<span class="pill p-ok">JUSTIFIÉ</span>' : '<span class="pill p-bad">PIÈCE MANQUANTE</span>'}</td>
-    </tr>`).join("");
-
-  return page(chrome, "Catégorisation", `
-    <div><h1>Dossier de catégorisation</h1>
-      <p style="margin:0;color:var(--muted)">Arrêté n°2026-101 du 10 juillet 2026.</p></div>
-    <div class="tiles">
-      <div class="tile"><div class="k">Score</div><div class="v">${fr(d.assessment.total_score, 0)}<span style="font-size:15px;color:var(--faint)"> / 100</span></div></div>
-      <div class="tile"><div class="k">Investissement</div><div class="v">${fr(d.assessment.investment_score, 0)}<span style="font-size:15px;color:var(--faint)"> / 50</span></div></div>
-      <div class="tile"><div class="k">Qualité éducative</div><div class="v">${fr(d.assessment.quality_score, 0)}<span style="font-size:15px;color:var(--faint)"> / 50</span></div></div>
-      <div class="tile"><div class="k">Catégorie</div><div class="v">${esc(d.assessment.category ?? "—")}</div></div>
-    </div>
-    <div class="card"><header><h2>Investissement</h2></header>
-      <div class="scroll"><table><tbody>${byAxis("investissement")}</tbody></table></div></div>
-    <div class="card"><header><h2>Qualité éducative</h2></header>
-      <div class="scroll"><table><tbody>${byAxis("qualite")}</tbody></table></div></div>`);
-}
 
 // ---------------------------------------------------------------------------
 // Routage
@@ -980,7 +888,19 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     }
     if (path === "/categorisation" && req.method === "GET") {
       if (!can(user, "voir_categorisation")) return html(res, "Accès refusé.", 403);
-      return html(res, await simplePage(user, "categorisation"));
+      return html(res, await categorisationPage(user, await chromeFor(user, "categorisation")));
+    }
+    if (path === "/categorisation" && req.method === "POST") {
+      if (!can(user, "voir_categorisation")) return html(res, "Accès refusé.", 403);
+      const r = await saveDossier(user, await formBody(req));
+      return html(res, await categorisationPage(
+        user, await chromeFor(user, "categorisation"), r.flash, r.error));
+    }
+    if (path === "/categorisation/critere" && req.method === "POST") {
+      if (!can(user, "voir_categorisation")) return html(res, "Accès refusé.", 403);
+      const r = await addCriterion(user, await formBody(req));
+      return html(res, await categorisationPage(
+        user, await chromeFor(user, "categorisation"), r.flash, r.error));
     }
 
     // --- Conseil de classe -------------------------------------------------
