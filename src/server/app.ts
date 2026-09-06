@@ -35,6 +35,9 @@ import {
   fraisPage, addSchedule, addLine, removeLine, issueInvoices,
 } from "./frais.ts";
 import { communiquesPage, envoyer as envoyerCommunique } from "./communiques.ts";
+import {
+  transfertsPage, recordTransfer, addLivretEntry, certificatePage,
+} from "./transferts.ts";
 import { pointsDAttention, attentionCard } from "./attention.ts";
 import {
   servicesPage, addService, removeService,
@@ -1060,6 +1063,36 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       ].filter(Boolean).join(" ");
       const chrome = await chromeFor(user, "conseil");
       return html(res, await conseilPage(user, chrome, url, flash));
+    }
+
+    // --- Transferts et livret scolaire ---------------------------------------
+    if (path === "/transferts" && req.method === "GET") {
+      if (!can(user, "inscrire")) return html(res, "Accès refusé.", 403);
+      return html(res, await transfertsPage(
+        user, await chromeFor(user, "transferts"), url));
+    }
+    if (path === "/transferts" && req.method === "POST") {
+      if (!can(user, "inscrire")) return html(res, "Accès refusé.", 403);
+      const r = await recordTransfer(user, await formBody(req));
+      const u = new URL(url.toString());
+      if (r.studentId) u.searchParams.set("eleve", r.studentId);
+      return html(res, await transfertsPage(
+        user, await chromeFor(user, "transferts"), u, r.flash, r.error));
+    }
+    if (path === "/transferts/livret" && req.method === "POST") {
+      if (!can(user, "inscrire")) return html(res, "Accès refusé.", 403);
+      const r = await addLivretEntry(user, await formBody(req));
+      const u = new URL(url.toString());
+      if (r.studentId) u.searchParams.set("eleve", r.studentId);
+      return html(res, await transfertsPage(
+        user, await chromeFor(user, "transferts"), u, r.flash, r.error));
+    }
+    if (path === "/transferts/certificat" && req.method === "GET") {
+      if (!can(user, "inscrire")) return html(res, "Accès refusé.", 403);
+      const body = await certificatePage(
+        user.schoolId, url.searchParams.get("eleve") ?? "");
+      if (!body) return html(res, "Élève introuvable.", 404);
+      return html(res, body);
     }
 
     // --- Communiqués aux familles -------------------------------------------

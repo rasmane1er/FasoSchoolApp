@@ -78,6 +78,8 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
 - `src/server/frais.ts` — grille des frais et émission des factures, avec les
   deux garde-fous de l'arrêté.
 - `src/server/communiques.ts` — SMS aux familles, coût annoncé avant l'envoi.
+- `src/server/transferts.ts` — transferts, livret scolaire cumulatif et
+  certificat de transfert imprimable.
 - `src/lib/roster.ts` — lecture d'un fichier de liste (encodage, séparateur,
   intitulés, dates, numéros). 22 tests.
 - `src/server/multipart.ts` — envoi de fichier, écrit à la main pour ne pas
@@ -94,6 +96,27 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
 **Démonstration** — `npm run demo` crée un établissement, une 6<sup>e</sup> de
 douze élèves, huit disciplines notées, la scolarité et un dossier de
 catégorisation entamé, puis écrit les bulletins dans `out/`.
+
+### Les transferts et le livret
+
+Au Burkina Faso, un enfant change d'école pour des raisons qui n'ont rien de
+scolaire : la famille déménage, l'école ferme, l'insécurité déplace un village
+entier. L'enfant arrive dans un établissement qui ne sait rien de lui, souvent
+sans un papier.
+
+**Un enfant sans papiers s'inscrit quand même.** Refuser une inscription faute
+de bulletin, c'est exactement le mécanisme qui met un enfant déplacé hors de
+l'école pour de bon. Le logiciel accepte donc un parcours **déclaré par la
+famille**, et le marque comme tel — une ligne déclarée et une ligne établie ici
+ne se confondent jamais, parce que le censeur qui décide d'un placement doit
+savoir sur quoi il s'appuie. Une année sans moyenne est acceptée : mieux vaut
+une case vide qu'une moyenne inventée.
+
+Dans l'autre sens, l'élève qui part emporte un **certificat de transfert**
+imprimable portant son livret — années, niveaux, moyennes, décisions, et la
+source de chaque ligne. C'est ce document qui permet à l'école suivante de le
+placer correctement au lieu de le faire redoubler par défaut. Le certificat dit
+lui-même qu'il ne préjuge pas de la décision d'accueil.
 
 ### Les communiqués aux familles
 
@@ -358,6 +381,7 @@ et trois parcours dans un vrai navigateur :
 
 | suite | ce qu'elle prouve |
 |---|---|
+| `test:transferts` (23) | un parcours déclaré est accepté et étiqueté, une moyenne inventée est refusée, le certificat porte sa réserve |
 | `test:communiques` (17) | le coût est annoncé avant l'envoi, les tuteurs sont dédoublonnés, un crédit court refuse l'envoi en bloc |
 | `test:frais` (21) | un supplément sans autorisation est refusé, un dépassement de plafond est chiffré, une facture émise n'est pas recalculée |
 | `test:cloture` (25) | le bulletin remis ne bouge pas, l'écart est montré, le trimestre clos refuse les notes en ligne comme hors ligne |
