@@ -101,6 +101,11 @@ td.r,th.r{text-align:right}
 .p-warn{background:#F4EBD4;color:var(--ochre)}
 .p-bad{background:#F6E3DE;color:var(--laterite)}
 .p-info{background:#E3E6F1;color:var(--indigo)}
+/* Une observation est une phrase : elle se lit en bas de casse et revient a
+   la ligne. Tronquee dans une pastille, elle ne sert a rien. */
+.dit{display:block;font-size:12.5px;line-height:1.45;margin-top:3px}
+.dit.bad{color:var(--laterite)}
+.dit.warn{color:var(--ochre)}
 
 /* formulaires */
 label{display:block;font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);margin-bottom:6px}
@@ -116,6 +121,16 @@ input.note-cell{height:38px;width:74px;text-align:center;font-family:var(--mono)
 .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--ink)}
 .btn.ghost:hover{background:var(--surface2)}
 .btn.danger{background:var(--laterite)}
+textarea{font:inherit;font-size:13.5px;width:100%;padding:10px 12px;border:1px solid var(--line);
+  border-radius:5px;background:var(--surface);color:var(--ink);resize:vertical;line-height:1.5}
+textarea:focus{outline:2px solid var(--indigo);outline-offset:-1px;border-color:var(--indigo)}
+.sub{margin:0;font-size:14px;line-height:1.55;color:var(--muted);max-width:64ch}
+.hint{margin:6px 0 0;font-size:12.5px;line-height:1.5;color:var(--faint)}
+/* Le « ou » entre deux façons de faire la meme chose : deposer, ou coller. */
+.ou{display:flex;align-items:center;gap:12px;margin:20px 0;color:var(--faint);font-size:12px;
+  letter-spacing:.06em;text-transform:uppercase}
+.ou::before,.ou::after{content:"";flex-grow:1;height:1px;background:var(--rule)}
+code{font-family:var(--mono);font-size:.92em;background:var(--surface2);padding:1px 5px;border-radius:3px}
 .row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .grow{flex-grow:1}
 .err{background:#F6E3DE;color:#7C2E1D;border-radius:5px;padding:11px 14px;font-size:13.5px}
@@ -136,6 +151,7 @@ const NAV: Array<[string, string, string]> = [
   ["/notes", "Notes", "notes"],
   ["/bulletins", "Bulletins", "bulletins"],
   ["/absences", "Absences", "absences"],
+  ["/inscriptions", "Inscriptions", "inscriptions"],
   ["/scolarite", "Scolarité", "scolarite"],
   ["/categorisation", "Catégorisation", "categorisation"],
   ["/conflits", "Notes divergentes", "conflits"],

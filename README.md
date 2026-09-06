@@ -57,6 +57,12 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
 - `src/server/settings.ts` — règles de notation, corrigeables par le censeur
   avec aperçu immédiat sur une classe réelle.
 - `src/server/finance.ts` — encaissement au guichet et reçus numérotés.
+- `src/server/roster.ts` — import de la liste des élèves : aperçu, correction
+  sur place, réinscription sans doublon.
+- `src/lib/roster.ts` — lecture d'un fichier de liste (encodage, séparateur,
+  intitulés, dates, numéros). 22 tests.
+- `src/server/multipart.ts` — envoi de fichier, écrit à la main pour ne pas
+  ajouter de dépendance.
 - `src/server/sync.ts` — réception des saisies hors ligne, détection des
   divergences, écran d'arbitrage du censeur.
 - `public/offline.js` — file d'attente des notes dans IndexedDB.
@@ -65,6 +71,39 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
 **Démonstration** — `npm run demo` crée un établissement, une 6<sup>e</sup> de
 douze élèves, huit disciplines notées, la scolarité et un dossier de
 catégorisation entamé, puis écrit les bulletins dans `out/`.
+
+### L'import de la liste des élèves
+
+Un établissement possède déjà ses élèves, dans un classeur Excel. Personne ne
+retapera quatre cents lignes : tant que cet écran n'existe pas, le logiciel ne
+peut pas être essayé du tout.
+
+Ce qui est traité, parce que c'est ce qui casse un import en vrai :
+
+- **L'encodage.** Excel francophone sous Windows exporte en Windows-1252 avec
+  des points-virgules. Lu en UTF-8, « Alizèta » devient « AlizÃ¨ta » — et
+  l'erreur se retrouve ensuite sur chaque bulletin de l'année. Le fichier est
+  décodé sur ses octets, jamais converti en chaîne avant découpage.
+- **Les intitulés.** `Nom`, `NOM`, `Nom de famille`, `Prénom(s)`, `Né(e) le`,
+  `Tél. tuteur` — reconnus tels qu'ils sont écrits. Une colonne unique
+  `Nom et prénoms` convient : le nom de famille en capitales est reconnu.
+- **Les dates.** `12/03/2014` est le 12 mars. Jamais le 3 décembre.
+- **Les numéros.** `70 12 34 56`, `+226 70123456`, `00226-70-12-34-56` sont le
+  même numéro, ramené à huit chiffres. Un numéro illisible ne crée pas de
+  tuteur : mieux vaut pas de numéro qu'un mauvais numéro.
+
+Et trois règles de conduite :
+
+1. **Rien n'est écrit avant d'avoir été montré.** L'aperçu affiche chaque ligne
+   telle qu'elle sera enregistrée. L'import n'a lieu qu'après confirmation.
+2. **Une ligne douteuse se corrige dans l'aperçu**, pas dans Excel. Renvoyer le
+   secrétaire à son fichier pour une date mal écrite, c'est perdre la matinée.
+3. **Un élève déjà connu est réinscrit, jamais dupliqué.** À la rentrée, la
+   liste contient les élèves de l'an dernier. Deux fiches pour le même enfant,
+   et le bulletin de juin est faux. Quand la ligne n'a pas de date de naissance
+   et que deux élèves portent ce nom, la ligne est **bloquée** plutôt que
+   rattachée au hasard : rattacher un enfant à la fiche d'un homonyme est pire
+   qu'un import incomplet.
 
 ### La saisie hors ligne
 
@@ -88,7 +127,8 @@ saisit quarante notes, le réseau tombe, tout est perdu. Ici :
 ### Ce qui n'existe pas encore
 
 La saisie du dossier de catégorisation (l'écran est en lecture seule), Orange
-Money et Moov Money — bloqués sur le RCCM.
+Money et Moov Money — bloqués sur le RCCM. La création des classes et de
+l'année scolaire se fait encore en base.
 
 Volontairement : le reste attend un vrai bulletin burkinabè.
 
@@ -118,10 +158,14 @@ Comptes de démonstration — le code s'affiche à l'écran, aucun SMS n'est env
 | `70000004` | Économe |
 | `70000005` | Directeur |
 
-Vérifications : `npm run check:all` — typecheck strict, 15 tests du moteur,
-42 assertions dans un vrai navigateur, plus 18 assertions hors ligne
-(`node tests/offline.e2e.mjs`) qui coupent réellement le réseau du navigateur,
-ferment l'onglet, le rouvrent et vérifient que rien n'a été perdu.
+Vérifications : `npm run check:all` — typecheck strict, 37 tests unitaires,
+et trois parcours dans un vrai navigateur :
+
+| suite | ce qu'elle prouve |
+|---|---|
+| `test:e2e` (42) | connexion, notes, bulletins, appel et SMS, encaissement, droits |
+| `test:offline` (18) | le réseau est réellement coupé, l'onglet fermé puis rouvert ; rien n'est perdu, rien n'est écrasé |
+| `test:import` (30) | un vrai fichier Windows-1252 est importé, corrigé dans l'aperçu, puis réimporté sans créer de doublon |
 
 ---
 

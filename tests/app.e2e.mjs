@@ -144,12 +144,26 @@ try {
   await page.goto(`${BASE}/notes?classe=${classe}`);
   await page.waitForLoadState("networkidle");
   const before = await page.inputValue("input.note-cell >> nth=0");
-  await page.fill("input.note-cell >> nth=0", "19,50");
+  // Une valeur différente de celle qui s'y trouve déjà : sinon il n'y a rien à
+  // enregistrer, et l'écran a raison de ne rien confirmer.
+  const saisie = before.startsWith("19,5") ? "18,25" : "19,50";
+  await page.fill("input.note-cell >> nth=0", saisie);
   await page.click("button[type=submit]");
-  await page.waitForSelector(".ok");
-  check("l'enregistrement confirme", (await page.textContent(".ok")).includes("enregistrée"));
+
+  /* La saisie passe par la file hors-ligne dès que JavaScript est actif : le
+     navigateur ne recharge donc pas la page, et la confirmation arrive dans le
+     bandeau d'état. C'est le chemin qu'emprunte un vrai enseignant. */
+  await page.waitForFunction(
+    () => document.getElementById("etat-file")?.textContent?.includes("synchronisée"),
+    null, { timeout: 8000 });
+  check("l'enregistrement confirme",
+    (await page.textContent("#etat-file")).includes("synchronisée"));
+
+  await page.reload();
+  await page.waitForSelector("input.note-cell");
   const after = await page.inputValue("input.note-cell >> nth=0");
-  check("la note saisie est relue depuis la base", after.startsWith("19,5"), `lu « ${after} », avant « ${before} »`);
+  check("la note saisie est relue depuis la base", after.startsWith(saisie.slice(0, 4)),
+    `lu « ${after} », saisi « ${saisie} », avant « ${before} »`);
   await page.screenshot({ path: "out/captures/03-notes.png", fullPage: true });
 
   await page.fill("input.note-cell >> nth=0", "99");

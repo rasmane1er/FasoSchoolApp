@@ -184,7 +184,7 @@ export async function revokeSession(token: string): Promise<void> {
 export function can(user: SessionUser, action:
   | "voir_notes" | "saisir_notes" | "publier_bulletins"
   | "faire_appel" | "voir_scolarite" | "encaisser"
-  | "voir_categorisation" | "parametrer"): boolean {
+  | "voir_categorisation" | "parametrer" | "inscrire"): boolean {
   const r = new Set([...user.roles, user.fonction ?? ""]);
   const any = (...codes: string[]) => codes.some((x) => r.has(x));
 
@@ -206,5 +206,9 @@ export function can(user: SessionUser, action:
     // Le censeur possède les règles de notation : c'est lui qui les connaît.
     case "parametrer":
       return any("censeur", "proviseur", "directeur");
+    // L'inscription se fait au secrétariat, sous l'autorité du chef
+    // d'établissement. Le censeur en est, parce qu'il constitue les classes.
+    case "inscrire":
+      return any("secretaire", "censeur", "proviseur", "directeur");
   }
 }

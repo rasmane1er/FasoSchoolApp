@@ -23,6 +23,11 @@ import { page, loginPage, esc, fr, fcfa, ordinal, plural, type PageChrome } from
 import { settingsPage, saveSettings, type Period } from "./settings.ts";
 import { financePage, collectPage, collect, receiptPage } from "./finance.ts";
 import { parseMutations, applyMutations, conflictsPage, resolveConflict, conflictCount } from "./sync.ts";
+import {
+  importPage, previewPage, resultPage, runImport,
+  readSubmitted, decodeRows, applyCorrections,
+} from "./roster.ts";
+import { isMultipart, readMultipart } from "./multipart.ts";
 import { readFile } from "node:fs/promises";
 
 const PORT = Number(process.env.PORT ?? 4180);
@@ -921,6 +926,48 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     if (path === "/categorisation" && req.method === "GET") {
       if (!can(user, "voir_categorisation")) return html(res, "Accès refusé.", 403);
       return html(res, await simplePage(user, "categorisation"));
+    }
+
+    // --- Inscriptions -----------------------------------------------------
+    // Trois étapes séparées : déposer, voir, écrire. Rien ne s'enregistre
+    // avant que le secrétaire ait vu la liste ligne par ligne.
+    if (path === "/inscriptions" && req.method === "GET") {
+      if (!can(user, "inscrire")) return html(res, "Accès refusé.", 403);
+      return html(res, await importPage(user, await chromeFor(user, "inscriptions")));
+    }
+    if (path === "/inscriptions/lire" && req.method === "POST") {
+      if (!can(user, "inscrire")) return html(res, "Accès refusé.", 403);
+      const chrome = await chromeFor(user, "inscriptions");
+      let fichier: Buffer | undefined;
+      let colle = "";
+      let classe = "";
+      try {
+        if (isMultipart(req)) {
+          const m = await readMultipart(req);
+          fichier = m.files.get("fichier")?.bytes;
+          colle = m.fields.get("colle") ?? "";
+          classe = m.fields.get("classe") ?? "";
+        } else {
+          const f = await formBody(req);
+          colle = f.get("colle") ?? "";
+          classe = f.get("classe") ?? "";
+        }
+      } catch (e) {
+        return html(res, await importPage(user, chrome, (e as Error).message));
+      }
+      const reading = readSubmitted(fichier, colle);
+      if (!reading || reading.rows.length === 0) {
+        return html(res, await importPage(user, chrome,
+          "Aucune ligne lisible : choisissez un fichier ou collez le tableau."));
+      }
+      return html(res, await previewPage(user, chrome, reading, classe));
+    }
+    if (path === "/inscriptions/importer" && req.method === "POST") {
+      if (!can(user, "inscrire")) return html(res, "Accès refusé.", 403);
+      const form = await formBody(req);
+      const rows = applyCorrections(decodeRows(form.get("lignes") ?? ""), form);
+      const out = await runImport(user, rows, form.get("classe") ?? "");
+      return html(res, resultPage(await chromeFor(user, "inscriptions"), out));
     }
 
     if (path === "/sante") {

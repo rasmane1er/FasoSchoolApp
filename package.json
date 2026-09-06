@@ -17,7 +17,8 @@
     "start": "node --experimental-strip-types src/server/app.ts",
     "test:e2e": "node tests/app.e2e.mjs",
     "test:offline": "node tests/offline.e2e.mjs",
-    "check:all": "npm run typecheck && npm test && npm run test:e2e && npm run test:offline"
+    "check:all": "npm run typecheck && npm test && npm run test:e2e && npm run test:offline && npm run test:import",
+    "test:import": "node tests/import.e2e.mjs"
   },
   "dependencies": {
     "pg": "^8.23.0"
