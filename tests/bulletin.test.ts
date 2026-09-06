@@ -129,9 +129,9 @@ test("aucune note exploitable : moyenne null, pas zéro", () => {
 
 test("moyenne générale : matière sans note exclue des DEUX sommes", () => {
   const subjects = [
-    { subjectId: "MATH", moyenne: 15, coefficient: 3, points: 45, gradesCounted: 3 },
-    { subjectId: "FR", moyenne: 10, coefficient: 3, points: 30, gradesCounted: 3 },
-    { subjectId: "EPS", moyenne: null, coefficient: 2, points: null, gradesCounted: 0 },
+    { subjectId: "MATH", moyenne: 15, coefficient: 3, points: 45, gradesCounted: 3, rangMatiere: null },
+    { subjectId: "FR", moyenne: 10, coefficient: 3, points: 30, gradesCounted: 3, rangMatiere: null },
+    { subjectId: "EPS", moyenne: null, coefficient: 2, points: null, gradesCounted: 0, rangMatiere: null },
   ];
   const r = computeGeneralAverage(subjects, policy);
   // (15x3 + 10x3) / 6 = 12,5. Compter le coeff 2 de l'EPS donnerait 9,375.
@@ -181,9 +181,9 @@ test("élève sans moyenne : non classé, pas dernier", () => {
     { studentId: "b", subjects: [], moyenneGenerale: null, totalPoints: 0, totalCoefficients: 0, mention: null, rang: null, effectif: 0 },
   ];
   assignRanks(rs, policy);
-  assert.equal(rs[0].rang, 1);
-  assert.equal(rs[1].rang, null);
-  assert.equal(rs[0].effectif, 1, "l'effectif ne compte que les élèves classés");
+  assert.equal(rs[0]!.rang, 1);
+  assert.equal(rs[1]!.rang, null);
+  assert.equal(rs[0]!.effectif, 1, "l'effectif ne compte que les élèves classés");
 });
 
 test("bulletin de classe complet, coefficients réforme 2026", () => {

@@ -112,6 +112,41 @@ on conflict (code) do nothing;
 -- Appelée à la création d'un établissement. Chaque valeur porte sa provenance
 -- et est modifiable ensuite par le censeur.
 
+-- Création d'un établissement.
+--
+-- Passer par cette fonction est OBLIGATOIRE : la politique RLS de schools
+-- exige id = current_school_id(), donc un INSERT direct est toujours refusé —
+-- un établissement en cours de création n'a pas encore de contexte. On génère
+-- l'identifiant d'abord, on pose le contexte dessus, puis on insère. La
+-- vérification WITH CHECK est alors satisfaite et les tables filles aussi.
+--
+-- Effet de bord voulu : on ne crée pas un établissement par mégarde, et le
+-- code applicatif ordinaire n'en a jamais le pouvoir implicitement.
+create or replace function provision_school(
+  p_name      text,
+  p_sector    text,
+  p_fee_zone  text default null,
+  p_commune   text default null,
+  p_region    text default null,
+  p_effective date default current_date
+) returns uuid as $$
+declare
+  v_id uuid := uuid_generate_v4();
+begin
+  perform set_config('fasoschool.school_id', v_id::text, true);
+
+  insert into schools (id, name, sector, fee_zone, commune, region)
+  values (v_id, p_name, p_sector, p_fee_zone, p_commune, p_region);
+
+  perform seed_school_defaults(v_id, p_effective);
+  return v_id;
+end;
+$$ language plpgsql;
+
+comment on function provision_school(text, text, text, text, text, date) is
+  'Crée un établissement et installe ses règles par défaut. Seul chemin '
+  'possible : un INSERT direct dans schools est refusé par le RLS.';
+
 create or replace function seed_school_defaults(p_school_id uuid, p_effective date default current_date)
 returns void as $$
 declare

@@ -60,6 +60,8 @@ export interface SubjectResult {
   coefficient: number;
   points: number | null;
   gradesCounted: number;
+  /** Rang dans la matière, au sein de la classe. null si non noté. */
+  rangMatiere: number | null;
 }
 
 export interface StudentResult {
@@ -266,6 +268,40 @@ export function assignRanks(
   }
 }
 
+/**
+ * Rang dans chaque matière — colonne attendue sur un bulletin burkinabè.
+ * Même politique d'ex aequo que le classement général ; un élève sans
+ * moyenne dans la matière n'y est pas classé.
+ */
+export function assignSubjectRanks(
+  results: StudentResult[],
+  subjectIds: Iterable<string>,
+  policy: GradingPolicy,
+): void {
+  for (const subjectId of subjectIds) {
+    const entries = results
+      .map((r) => r.subjects.find((s) => s.subjectId === subjectId))
+      .filter((s): s is SubjectResult => !!s && s.moyenne !== null)
+      .sort((a, b) => (b.moyenne as number) - (a.moyenne as number));
+
+    let previousScore: number | null = null;
+    let previousRank = 0;
+
+    entries.forEach((s, index) => {
+      const score = s.moyenne as number;
+      if (previousScore !== null && score === previousScore) {
+        s.rangMatiere = previousRank;
+      } else {
+        s.rangMatiere = policy.rankTiePolicy === "same_rank_skip"
+          ? index + 1
+          : previousRank + 1;
+        previousRank = s.rangMatiere;
+        previousScore = score;
+      }
+    });
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Calcul complet d'une classe
 // ---------------------------------------------------------------------------
@@ -303,6 +339,7 @@ export function computeClassBulletins(input: {
           ? null
           : round(moyenne * coefficient, policy.decimals, policy.rounding),
         gradesCounted: counted,
+        rangMatiere: null,
       });
     }
 
@@ -321,6 +358,7 @@ export function computeClassBulletins(input: {
   });
 
   assignRanks(students, policy);
+  assignSubjectRanks(students, coefficients.keys(), policy);
 
   // Moyenne de classe : colonne de comparaison du bulletin.
   const withAverage = students.filter((s) => s.moyenneGenerale !== null);

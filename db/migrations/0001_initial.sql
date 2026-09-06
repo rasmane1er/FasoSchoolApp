@@ -988,11 +988,25 @@ create index on sync_conflicts (school_id, status);
 -- Une requête exécutée sans fasoschool.school_id posé ne voit rien. C'est la
 -- base de données qui refuse, pas le code qui doit se souvenir.
 
+-- Deux régimes.
+--
+-- 1. Cloisonnement strict : school_id = current_school_id(). Une ligne dont
+--    school_id vaut NULL n'est JAMAIS visible — la comparaison rend NULL, donc
+--    faux. C'est voulu pour users et audit_log, dont les lignes sans
+--    établissement appartiennent à la plateforme.
+--
+-- 2. Référentiel partagé : subjects et calendar_events portent des lignes
+--    nationales (school_id NULL) que tout établissement doit LIRE — les 24
+--    matières officielles, le calendrier national. Sans la clause « or
+--    school_id is null », le catalogue des matières est invisible et aucun
+--    bulletin ne sort. En écriture, le régime reste strict : un établissement
+--    ne peut pas créer de ligne nationale.
+
 do $$
 declare t text;
 begin
   foreach t in array array[
-    'campuses','academic_years','terms','calendar_events','subjects','classes',
+    'campuses','academic_years','terms','classes',
     'users','staff','students','guardians','student_guardians','emergency_contacts',
     'enrolments','teacher_assignments','student_transfers',
     'grading_policies','mention_bands','coefficient_sets','coefficients','promotion_rules',
@@ -1012,6 +1026,26 @@ begin
     execute format(
       'create policy %I_tenant_isolation on %I using (school_id = current_school_id())'
       || ' with check (school_id = current_school_id())', t, t);
+  end loop;
+
+  -- Régime 2 : lecture du référentiel national, écriture cloisonnée.
+  foreach t in array array['subjects', 'calendar_events']
+  loop
+    execute format('alter table %I enable row level security', t);
+    execute format('alter table %I force row level security', t);
+    execute format(
+      'create policy %I_tenant_read on %I for select'
+      || ' using (school_id = current_school_id() or school_id is null)', t, t);
+    execute format(
+      'create policy %I_tenant_write on %I for insert'
+      || ' with check (school_id = current_school_id())', t, t);
+    execute format(
+      'create policy %I_tenant_update on %I for update'
+      || ' using (school_id = current_school_id())'
+      || ' with check (school_id = current_school_id())', t, t);
+    execute format(
+      'create policy %I_tenant_delete on %I for delete'
+      || ' using (school_id = current_school_id())', t, t);
   end loop;
 end $$;
 
