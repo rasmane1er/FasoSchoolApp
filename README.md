@@ -45,6 +45,8 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
   renvoyé, famille appelée, ou abandon assumé.
 - `db/migrations/0005_personnel.sql` — `auth_resolve` vérifie enfin
   `is_active`, et `chefs_en_exercice()` empêche d'écarter le dernier chef.
+- `db/migrations/0006_annulation_paiement.sql` — la contrepassation d'un
+  paiement, et `montant_regle()` : la seule définition du net encaissé.
 - `db/tests/rls_isolation.sql` — le test d'isolation contradictoire.
 
 **Métier**
@@ -110,6 +112,40 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
 **Démonstration** — `npm run demo` crée un établissement, une 6<sup>e</sup> de
 douze élèves, huit disciplines notées, la scolarité et un dossier de
 catégorisation entamé, puis écrit les bulletins dans `out/`.
+
+### L'annulation d'un paiement
+
+Un économe encaisse debout, devant une file de parents, en fin de mois. Il tape
+50 000 au lieu de 5 000. Jusqu'ici rien ne pouvait le rattraper : le reçu était
+émis, la facture soldée, et le seul recours était psql. C'est le genre d'erreur
+qui arrive le premier jour.
+
+**On n'efface pas un reçu, et on n'en diminue pas le montant.** Un reçu est un
+document remis à une famille, et sa numérotation est une suite sans trou — c'est
+ce qui la rend vérifiable ; un numéro sauté est la première chose qu'un contrôle
+cherche. Une annulation est donc un **second reçu, de contrepartie** : même
+montant, propre numéro dans la même suite, motif obligatoire. Les deux documents
+circulent, et chacun se déclare — l'ancien porte « CE REÇU EST ANNULÉ » et le nom
+de celui qui l'annule ; le nouveau porte « ANNULATION », le reçu visé, le motif,
+et son montant en négatif.
+
+Le motif est exigé parce qu'une annulation sans raison est exactement ce que
+produirait un caissier malhonnête, et c'est la seule chose qu'un contrôle pourra
+lire ensuite. On n'annule pas deux fois un même paiement — la facture
+deviendrait créditrice — et on n'annule pas une annulation.
+
+**Une seule définition du solde.** Sept requêtes calculaient chacune à sa façon
+« ce qui a été payé sur cette facture ». C'est ainsi qu'elles finissent par ne
+plus dire la même chose, et qu'un parent lit deux soldes différents sur deux
+écrans du même logiciel. La somme est désormais écrite une fois, en base
+(`montant_regle()`), et appelée par le guichet, la liste des factures, le
+tableau de bord, la fiche de l'élève, l'espace des familles et le ciblage des
+communiqués.
+
+Un défaut trouvé en écrivant la suite : un refus d'annulation levé **avant**
+d'avoir retrouvé la facture ne pouvait pas se réafficher, et l'économe lisait
+« facture introuvable » à la place de la raison du refus. Le contrôle du motif
+se fait maintenant après.
 
 ### La fiche de l'élève
 
@@ -537,10 +573,11 @@ Comptes de démonstration — le code s'affiche à l'écran, aucun SMS n'est env
 | `70000005` | Directeur |
 
 Vérifications : `npm run check:all` — typecheck strict, 60 tests unitaires,
-et dix-sept parcours dans un vrai navigateur :
+et dix-huit parcours dans un vrai navigateur :
 
 | suite | ce qu'elle prouve |
 |---|---|
+| `test:annulation` (28) | le reçu d'origine reste intact, l'annulation est un second reçu numéroté, et tous les écrans lisent le même solde |
 | `test:eleve` (35) | on retrouve un élève par le numéro de son tuteur, un tuteur partagé se corrige pour la fratrie, et voir n'est pas corriger |
 | `test:personnel` (29) | un établissement crée ses propres comptes ; le dernier chef ne peut être ni écarté ni rétrogradé ; écarter quelqu'un ferme ses sessions ouvertes |
 | `test:messages` (26) | un refus de l'opérateur est enregistré avec sa raison, remonte au tableau de bord, et ne se referme que par un geste humain tracé |

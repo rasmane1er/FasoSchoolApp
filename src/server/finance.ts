@@ -33,9 +33,7 @@ export async function listInvoices(schoolId: string, filter: "tous" | "impayes")
     const r = await c.query(
       `select i.id, i.reference, i.total_fcfa, i.student_id,
               st.last_name, st.first_names, cl.label as classe,
-              coalesce((select sum(p.amount_fcfa) from payments p
-                         where p.invoice_id = i.id
-                           and p.status in ('confirme','rapproche')), 0) as paye,
+              montant_regle(i.id) as paye,
               (select g.phone from student_guardians sg
                  join guardians g on g.id = sg.guardian_id
                 where sg.student_id = st.id and sg.receives_sms
@@ -120,19 +118,77 @@ export async function financePage(
     </table></div></div>`);
 }
 
+const MOYENS: Record<string, string> = {
+  especes: "Espèces", virement: "Virement", cheque: "Chèque",
+  orange_money: "Orange Money", moov_money: "Moov Money",
+};
+
 export async function collectPage(
   user: SessionUser, chrome: PageChrome, invoiceId: string, error?: string,
+  flash?: string,
 ): Promise<string> {
   const schoolId = user.schoolId!;
   const rows = await listInvoices(schoolId, "tous");
   const inv = rows.find((r) => r.id === invoiceId);
-  if (!inv) return page(chrome, "Encaisser", `<div class="note bad">Facture introuvable.</div>`);
+  if (!inv) {
+    // Ceinture et bretelles : même sans facture, le message est rendu. Une
+    // page qui remplace un refus par « facture introuvable » ment deux fois.
+    return page(chrome, "Encaisser", `
+      ${error ? `<div class="err">${esc(error)}</div>` : ""}
+      ${flash ? `<div class="ok">${esc(flash)}</div>` : ""}
+      <div class="note bad">Facture introuvable.</div>
+      <p><a href="/scolarite">Retour à la scolarité</a></p>`);
+  }
+  const lignes = await encaissements(schoolId, invoiceId);
+
+  /* Le registre des encaissements. Les deux lignes d'une erreur corrigée y
+     restent : cacher la première ferait douter de la seconde. */
+  const journal = lignes.length === 0 ? "" : `
+    <div class="card">
+      <header><b>Ce qui a été encaissé sur cette facture</b></header>
+      <div class="scroll"><table>
+        <thead><tr><th>Date</th><th>Reçu</th><th>Moyen</th>
+          <th class="r">Montant</th><th>Par</th><th></th></tr></thead>
+        <tbody>${lignes.map((l) => `
+          <tr${l.annulePar || l.annuleLeRecu ? ' class="pale"' : ""}>
+            <td class="num">${new Date(l.quand).toLocaleDateString("fr-FR")}</td>
+            <td class="num">${l.recu
+              ? `<a href="/recus/${encodeURIComponent(l.recu)}">${esc(l.recu)}</a>`
+              : "—"}</td>
+            <td>${esc(MOYENS[l.methode] ?? l.methode)}</td>
+            <td class="num r"${l.annuleLeRecu
+              ? ' style="color:var(--laterite)"' : ""}>${
+              l.annuleLeRecu ? "− " : ""}${fcfa(l.montant)} F</td>
+            <td>${esc(l.par ?? "—")}
+              ${l.annuleLeRecu ? `<span class="dit">Annule le reçu ${
+                esc(l.annuleLeRecu)}${l.motif ? ` — ${esc(l.motif)}` : ""}</span>` : ""}
+              ${l.annulePar ? `<span class="dit bad">Annulé par le reçu ${
+                esc(l.annulePar)}</span>` : ""}</td>
+            <td class="r">${l.annulePar || l.annuleLeRecu ? "" : `
+              <form method="post" action="/scolarite/annuler" class="row"
+                    style="justify-content:flex-end">
+                <input type="hidden" name="paiement" value="${l.paymentId}">
+                <input type="text" name="motif" placeholder="Motif de l'annulation"
+                       style="width:auto;height:34px;font-size:13px" required>
+                <button type="submit" class="btn ghost petit">Annuler</button>
+              </form>`}</td>
+          </tr>`).join("")}
+        </tbody>
+      </table></div>
+      <div class="body" style="padding-top:0">
+        <p class="hint">On n'efface pas un reçu : sa numérotation est une suite
+        sans trou, et c'est ce qui la rend vérifiable. Une annulation est un
+        second reçu, de contrepartie. Les deux documents circulent, et chacun
+        dit ce qu'il est.</p>
+      </div>
+    </div>`;
 
   return page(chrome, "Encaisser", `
     <div><h1>Encaisser un paiement</h1>
       <p style="margin:0;color:var(--muted)">${esc(inv.lastName)} ${esc(inv.firstNames)} — ${esc(inv.classe ?? "")} — facture <span class="num">${esc(inv.reference)}</span></p></div>
 
     ${error ? `<div class="err">${esc(error)}</div>` : ""}
+    ${flash ? `<div class="ok">${esc(flash)}</div>` : ""}
 
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px;align-items:start">
       <div class="card"><div class="body">
@@ -184,7 +240,9 @@ export async function collectPage(
           Un comptable le vérifiera.
         </div>
       </div></div>
-    </div>`);
+    </div>
+
+    ${journal}`);
 }
 
 export async function collect(
@@ -205,9 +263,7 @@ export async function collect(
   return withSchool(schoolId, async (c) => {
     const inv = await c.query(
       `select i.id, i.total_fcfa, i.student_id,
-              coalesce((select sum(p.amount_fcfa) from payments p
-                         where p.invoice_id = i.id
-                           and p.status in ('confirme','rapproche')),0) as paye
+              montant_regle(i.id) as paye
          from invoices i where i.id = $1`, [invoiceId]);
     if (inv.rowCount === 0) return { ok: false as const, error: "Facture introuvable.", invoiceId };
 
@@ -298,19 +354,180 @@ export async function collect(
   });
 }
 
+/**
+ * Les encaissements d'une facture, annulations comprises.
+ *
+ * C'est le registre qu'un économe ouvre quand une famille conteste. Il montre
+ * les deux lignes d'une erreur corrigée — le paiement et sa contrepassation —
+ * parce que cacher la première ferait douter de la seconde.
+ */
+export interface Encaissement {
+  paymentId: string;
+  recu: string | null;
+  montant: number;
+  methode: string;
+  quand: Date;
+  par: string | null;
+  /** Numéro du reçu que cette ligne annule, si c'en est une. */
+  annuleLeRecu: string | null;
+  /** Numéro du reçu qui annule cette ligne, si elle l'a été. */
+  annulePar: string | null;
+  motif: string | null;
+}
+
+export async function encaissements(
+  schoolId: string, invoiceId: string,
+): Promise<Encaissement[]> {
+  return withSchool(schoolId, async (c) => {
+    const r = await c.query(
+      `select p.id, p.amount_fcfa, p.method, p.confirmed_at, p.initiated_at,
+              p.reverses_payment_id, p.reversal_reason,
+              rc.receipt_number,
+              sf.full_name as par,
+              (select rc2.receipt_number from receipts rc2
+                where rc2.payment_id = p.reverses_payment_id) as annule_le_recu,
+              (select rc3.receipt_number from receipts rc3
+                 join payments p3 on p3.id = rc3.payment_id
+                where p3.reverses_payment_id = p.id) as annule_par
+         from payments p
+         left join receipts rc on rc.payment_id = p.id
+         left join staff sf on sf.id = p.recorded_by
+        where p.invoice_id = $1 and p.status in ('confirme','rapproche')
+        order by coalesce(p.confirmed_at, p.initiated_at)`, [invoiceId]);
+    return r.rows.map((x: any): Encaissement => ({
+      paymentId: x.id, recu: x.receipt_number,
+      montant: Number(x.amount_fcfa), methode: x.method,
+      quand: x.confirmed_at ?? x.initiated_at, par: x.par,
+      annuleLeRecu: x.annule_le_recu, annulePar: x.annule_par,
+      motif: x.reversal_reason,
+    }));
+  });
+}
+
+/**
+ * Annuler un paiement.
+ *
+ * Un économe encaisse debout, devant une file de parents. Il tape 50 000 au
+ * lieu de 5 000. Rien ne pouvait le rattraper : le seul recours était psql.
+ *
+ * ON N'EFFACE PAS UN REÇU, et on ne diminue pas le montant du paiement. Un
+ * reçu est un document remis à une famille et sa numérotation est une suite
+ * sans trou — c'est ce qui la rend vérifiable. L'annulation est donc un
+ * SECOND paiement, de contrepartie, avec son propre numéro de reçu. Les deux
+ * documents circulent, et chacun dit ce qu'il est.
+ *
+ * Le motif est obligatoire : une annulation sans raison est exactement ce que
+ * produirait un caissier malhonnête, et c'est la seule chose qu'un contrôle
+ * puisse lire ensuite.
+ */
+export async function annulerPaiement(
+  user: SessionUser, paymentId: string, motif: string,
+): Promise<{ ok: boolean; error?: string; recu?: string; invoiceId?: string }> {
+  const schoolId = user.schoolId!;
+  const raison = motif.trim().replace(/\s+/g, " ");
+
+  return withSchool(schoolId, async (c) => {
+    const p = await c.query(
+      `select p.id, p.invoice_id, p.amount_fcfa, p.method, p.status,
+              p.reverses_payment_id,
+              (select count(*)::int from payments r
+                where r.reverses_payment_id = p.id) as deja
+         from payments p where p.id = $1`, [paymentId]);
+    if (p.rowCount === 0) return { ok: false, error: "Ce paiement n'existe pas." };
+    const pay = p.rows[0];
+
+    if (!["confirme", "rapproche"].includes(pay.status)) {
+      return { ok: false, error: "Ce paiement n'a jamais été encaissé : il n'y "
+        + "a rien à annuler.", invoiceId: pay.invoice_id };
+    }
+    if (pay.reverses_payment_id) {
+      return { ok: false, error: "Ceci est déjà une annulation. On n'annule pas "
+        + "une annulation : si le premier paiement doit être réenregistré, "
+        + "encaissez-le de nouveau.", invoiceId: pay.invoice_id };
+    }
+    if (pay.deja > 0) {
+      return { ok: false, error: "Ce paiement a déjà été annulé. Deux "
+        + "contrepassations rendraient la facture créditrice.",
+        invoiceId: pay.invoice_id };
+    }
+    /* Le motif est contrôlé APRÈS avoir retrouvé la facture, et jamais avant :
+       un refus qui ne sait pas sur quelle facture il porte ne peut pas se
+       réafficher, et l'économe lit « facture introuvable » au lieu de la
+       raison du refus. C'est ainsi qu'un refus devient invisible. */
+    if (raison.length < 8) {
+      return { ok: false, invoiceId: pay.invoice_id,
+        error: "Dites pourquoi ce paiement est annulé, en une phrase : c'est "
+          + "la seule chose qu'un contrôle pourra lire ensuite. « Erreur de "
+          + "saisie : 50 000 au lieu de 5 000 », par exemple." };
+    }
+
+    const staff = await c.query(
+      `select id from staff where user_id = $1 limit 1`, [user.userId]);
+
+    // Même sérialisation que l'émission : deux guichets ne se disputent pas
+    // un numéro de reçu.
+    await c.query(`select pg_advisory_xact_lock(hashtext($1))`, [`recu:${schoolId}`]);
+
+    const contre = await c.query(
+      `insert into payments (school_id, invoice_id, amount_fcfa, method, status,
+                             idempotency_key, recorded_by, confirmed_at,
+                             reverses_payment_id, reversal_reason)
+       values ($1,$2,$3,$4,'confirme',$5,$6, now(), $7, $8) returning id`,
+      [schoolId, pay.invoice_id, pay.amount_fcfa, pay.method,
+       `annulation:${paymentId}`, staff.rows[0]?.id ?? null, paymentId, raison]);
+
+    const seq = await c.query(
+      `update schools set receipt_sequence = receipt_sequence + 1
+        where id = $1 returning receipt_sequence`, [schoolId]);
+    const n = Number(seq.rows[0].receipt_sequence);
+    const numero = `R-${new Date().getFullYear()}-${String(n).padStart(4, "0")}`;
+    await c.query(
+      `insert into receipts (school_id, payment_id, receipt_number, sequence,
+                             amount_fcfa)
+       values ($1,$2,$3,$4,$5)`,
+      [schoolId, contre.rows[0].id, numero, n, pay.amount_fcfa]);
+
+    // La facture retrouve son état réel.
+    const i = await c.query(
+      `select total_fcfa, montant_regle(id) as paye from invoices where id = $1`,
+      [pay.invoice_id]);
+    const reste = Number(i.rows[0].total_fcfa) - Number(i.rows[0].paye);
+    await c.query(
+      `update invoices set status = $2 where id = $1`,
+      [pay.invoice_id, reste <= 0 ? "soldee"
+        : Number(i.rows[0].paye) > 0 ? "partielle" : "ouverte"]);
+
+    await c.query(
+      `insert into audit_log (school_id, actor_id, action, target_type, target_id, detail)
+       values ($1,$2,'payment.reverse','payment',$3,$4)`,
+      [schoolId, user.userId, paymentId,
+       JSON.stringify({ montant: Number(pay.amount_fcfa), motif: raison,
+                        recu: numero })]);
+
+    return { ok: true, recu: numero, invoiceId: pay.invoice_id };
+  });
+}
+
 /** Reçu imprimable, format A5 paysage — la moitié d'une feuille A4. */
 export async function receiptPage(schoolId: string, number: string): Promise<string | null> {
   const d = await withSchool(schoolId, async (c) => {
     const r = await c.query(
       `select rc.receipt_number, rc.amount_fcfa, rc.issued_at,
-              p.method, p.provider_ref,
+              p.method, p.provider_ref, p.reverses_payment_id,
+              p.reversal_reason,
+              -- Le reçu qu'annule celui-ci, ou celui qui l'annule : un
+              -- document remis à une famille doit dire lui-même s'il vaut
+              -- encore, sinon deux papiers contradictoires circulent.
+              (select rc2.receipt_number from receipts rc2
+                where rc2.payment_id = p.reverses_payment_id) as annule_le_recu,
+              (select rc3.receipt_number from receipts rc3
+                 join payments p3 on p3.id = rc3.payment_id
+                where p3.reverses_payment_id = p.id) as annule_par,
               i.reference, i.total_fcfa,
               st.last_name, st.first_names, st.matricule,
               cl.label as classe, s.name as ecole, s.commune,
               sf.full_name as encaisse_par,
-              coalesce((select sum(p2.amount_fcfa) from payments p2
-                         where p2.invoice_id = i.id
-                           and p2.status in ('confirme','rapproche')),0) as paye
+              montant_regle(i.id) as paye
          from receipts rc
          join payments p on p.id = rc.payment_id
          join invoices i on i.id = p.invoice_id
@@ -343,7 +560,14 @@ export async function receiptPage(schoolId: string, number: string): Promise<str
   @media print{ body{background:#fff} .recu{margin:0;box-shadow:none} }
 </style></head>
 <body>
-<div class="recu">
+<div class="recu"${d.annule_par ? ' style="opacity:.97"' : ""}>
+  ${d.annule_par ? `<div style="border:2px solid #A8402A;color:#A8402A;padding:8px 14px;
+      margin-bottom:10px;font-weight:700;font-size:10pt;letter-spacing:.04em">
+      CE REÇU EST ANNULÉ — voir le reçu ${esc(d.annule_par)}</div>` : ""}
+  ${d.annule_le_recu ? `<div style="border:2px solid #A8402A;color:#A8402A;padding:8px 14px;
+      margin-bottom:10px;font-weight:700;font-size:10pt;letter-spacing:.04em">
+      ANNULATION du reçu ${esc(d.annule_le_recu)}${d.reversal_reason
+        ? ` — ${esc(d.reversal_reason)}` : ""}</div>` : ""}
   <div style="display:flex;justify-content:space-between;align-items:flex-start;
               padding-bottom:10px;border-bottom:2px solid #14161F">
     <div>
@@ -353,7 +577,8 @@ export async function receiptPage(schoolId: string, number: string): Promise<str
       <div style="font-size:8pt;color:#4E5265">${esc(d.commune ?? "")}</div>
     </div>
     <div style="text-align:right">
-      <div style="font-size:18pt;font-weight:700">REÇU</div>
+      <div style="font-size:18pt;font-weight:700">${d.annule_le_recu
+        ? "ANNULATION" : "REÇU"}</div>
       <div class="num" style="font-size:13pt;margin-top:2px">${esc(d.receipt_number)}</div>
       <div class="num" style="font-size:8.5pt;color:#4E5265;margin-top:4px">${new Date(d.issued_at).toLocaleDateString("fr-FR")}</div>
     </div>
@@ -385,8 +610,11 @@ export async function receiptPage(schoolId: string, number: string): Promise<str
 
   <div style="display:flex;gap:16px;margin-top:18px">
     <div style="flex-grow:1;border:2px solid #14161F;padding:14px 18px">
-      <div style="font-size:8pt;text-transform:uppercase;letter-spacing:.06em;color:#6B6F80">Montant reçu</div>
-      <div class="num" style="font-size:30pt;font-weight:600;line-height:1.1">${fcfa(d.amount_fcfa)} <span style="font-size:14pt">FCFA</span></div>
+      <div style="font-size:8pt;text-transform:uppercase;letter-spacing:.06em;color:#6B6F80">${
+        d.annule_le_recu ? "Montant restitué" : "Montant reçu"}</div>
+      <div class="num" style="font-size:30pt;font-weight:600;line-height:1.1${
+        d.annule_le_recu ? ";color:#A8402A" : ""}">${d.annule_le_recu ? "− " : ""}${
+        fcfa(d.amount_fcfa)} <span style="font-size:14pt">FCFA</span></div>
     </div>
     <div style="width:38%;border:1px solid #DCD8CF;padding:14px 18px;display:flex;flex-direction:column;gap:7px">
       <div style="display:flex;justify-content:space-between;font-size:9.5pt">
@@ -401,7 +629,9 @@ export async function receiptPage(schoolId: string, number: string): Promise<str
 
   <div style="margin-top:auto;display:flex;justify-content:space-between;align-items:flex-end">
     <div style="font-size:8pt;color:#6B6F80">
-      ${reste === 0 ? "<b style='color:#3B6349;font-size:10pt'>SCOLARITÉ SOLDÉE</b>" : "Reçu à conserver."}
+      ${d.annule_par ? "Ce document ne vaut plus quittance."
+        : reste === 0 ? "<b style='color:#3B6349;font-size:10pt'>SCOLARITÉ SOLDÉE</b>"
+        : "Reçu à conserver."}
     </div>
     <div style="width:44%;border-top:1px solid #14161F;padding-top:5px;font-size:8.5pt;color:#4E5265">
       ${esc(d.encaisse_par ?? "L'économe")}

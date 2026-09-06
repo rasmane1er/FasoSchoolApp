@@ -21,7 +21,8 @@ import {
 } from "./session.ts";
 import { page, loginPage, esc, fr, fcfa, ordinal, plural, type PageChrome } from "./html.ts";
 import { settingsPage, saveSettings, type Period } from "./settings.ts";
-import { financePage, collectPage, collect, receiptPage } from "./finance.ts";
+import { financePage, collectPage, collect, receiptPage,
+         annulerPaiement } from "./finance.ts";
 import { parseMutations, applyMutations, conflictsPage, resolveConflict, conflictCount } from "./sync.ts";
 import {
   importPage, previewPage, resultPage, runImport,
@@ -192,9 +193,11 @@ async function dashboard(user: SessionUser): Promise<string> {
         where queued_at::date = current_date and status in ('envoye','livre')`,
     );
     const arrears = await c.query(
-      `select coalesce(sum(i.total_fcfa),0) - coalesce((
-                select sum(p.amount_fcfa) from payments p
-                 where p.status in ('confirme','rapproche')), 0) as reste,
+      // montant_regle() est la seule définition du net encaissé : elle
+      // soustrait les contrepassations, qu'aucune de ces requêtes ne
+      // connaissait quand chacune refaisait la somme à sa façon.
+      `select coalesce(sum(i.total_fcfa),0)
+              - coalesce(sum(montant_regle(i.id)),0) as reste,
               count(*) filter (where i.status in ('ouverte','partielle')) as familles
          from invoices i`,
     );
@@ -1075,6 +1078,18 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       if (r.ok) return redirect(res, `/scolarite?recu=${encodeURIComponent(r.receipt)}`);
       const chrome = await chromeFor(user, "scolarite");
       return html(res, await collectPage(user, chrome, r.invoiceId, r.error));
+    }
+    if (path === "/scolarite/annuler" && req.method === "POST") {
+      if (!can(user, "encaisser")) return html(res, "Accès refusé.", 403);
+      const form = await formBody(req);
+      const r = await annulerPaiement(user, form.get("paiement") ?? "",
+                                      form.get("motif") ?? "");
+      const chrome = await chromeFor(user, "scolarite");
+      return html(res, await collectPage(user, chrome, r.invoiceId ?? "",
+        r.ok ? undefined : r.error,
+        r.ok ? `Paiement annulé. Le reçu de contrepartie ${r.recu} a été émis : `
+             + `remettez-le à la famille, l'ancien ne vaut plus quittance.`
+             : undefined));
     }
     if (path.startsWith("/recus/") && req.method === "GET") {
       if (!can(user, "voir_scolarite")) return html(res, "Accès refusé.", 403);

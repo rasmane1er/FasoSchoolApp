@@ -141,10 +141,7 @@ export async function loadChildren(g: GuardianSession): Promise<ChildView[]> {
            from attendance_records ar where ar.student_id = $1`, [k.id]);
       const sco = await c.query(
         `select coalesce(sum(i.total_fcfa), 0)::bigint as du,
-                coalesce((select sum(p.amount_fcfa) from payments p
-                           join invoices i2 on i2.id = p.invoice_id
-                          where i2.student_id = $1
-                            and p.status in ('confirme','rapproche')), 0)::bigint as paye
+                coalesce(sum(montant_regle(i.id)), 0)::bigint as paye
            from invoices i
           where i.student_id = $1 and i.status <> 'annulee'`, [k.id]);
       out.push({

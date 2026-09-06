@@ -154,10 +154,8 @@ export async function loadFiche(
         order by tr.sequence`, [studentId]);
 
     const inv = await c.query(
-      `select coalesce(sum(i.total_fcfa), 0)::int
-              - coalesce((select sum(p.amount_fcfa) from payments p
-                           where p.invoice_id = any(array_agg(i.id))
-                             and p.status in ('confirme','rapproche')), 0)::int as reste
+      `select (coalesce(sum(i.total_fcfa), 0)
+               - coalesce(sum(montant_regle(i.id)), 0))::int as reste
          from invoices i
         where i.student_id = $1 and i.status <> 'annulee'`, [studentId]);
 

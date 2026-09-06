@@ -62,8 +62,7 @@ export async function destinataires(
         select 1 from invoices i
          where i.student_id = st.id and i.academic_year_id = e.academic_year_id
            and i.status <> 'annulee'
-           and i.total_fcfa > coalesce((select sum(p.amount_fcfa) from payments p
-                where p.invoice_id = i.id and p.status in ('confirme','rapproche')), 0))`);
+           and i.total_fcfa > montant_regle(i.id))`);
     }
 
     const r = await c.query(
