@@ -106,12 +106,47 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
 - `public/sw.js` — cache de l'écran de saisie.
 
 **Exploitation**
+- `scripts/installer.ts` — installer un établissement et son premier compte.
 - `scripts/sauvegarde.sh` — sauvegarde chiffrée, jamais écrite en clair.
 - `scripts/restauration-verifiee.sh` — l'épreuve de restauration.
 
 **Démonstration** — `npm run demo` crée un établissement, une 6<sup>e</sup> de
 douze élèves, huit disciplines notées, la scolarité et un dossier de
 catégorisation entamé, puis écrit les bulletins dans `out/`.
+
+### Installer un établissement
+
+```bash
+npm run installer -- --nom "Lycée Municipal de Koudougou" \
+                     --secteur public --zone chef_lieu \
+                     --commune Koudougou --region Centre-Ouest \
+                     --chef "SAWADOGO Rasmane" --telephone 76900011 \
+                     --fonction proviseur
+```
+
+C'est le seul geste qui ne peut **pas** se faire depuis l'application : il faut
+être connecté pour ouvrir un écran, et il n'existe encore aucun compte à
+connecter. Un écran public qui créerait des établissements serait par
+construction ouvert à tout le monde. C'est aussi, honnêtement, une opération
+d'éditeur et non d'école — une fois, avec le contrat sous les yeux.
+
+L'établissement et son premier compte se créent **ensemble ou pas du tout**,
+dans une seule transaction : un établissement sans compte est inaccessible pour
+toujours, puisque personne ne peut s'y connecter et donc personne ne peut y
+créer le premier compte. Le premier compte est forcément un chef
+d'établissement, parce que c'est lui qui crée tous les autres. Un numéro déjà
+pris est refusé en nommant son titulaire : `auth_lookup_user` s'arrête au
+premier trouvé, et le second ne se connecterait jamais.
+
+Tout le reste — année scolaire, classes, personnel, services, élèves, frais —
+se fait ensuite depuis l'application, par l'établissement lui-même, sans qu'on
+touche à sa base. L'installateur le rappelle en sortie, y compris que les
+règles de notation restent **à confirmer** : tant qu'elles ne le sont pas,
+toutes les moyennes calculées sont indicatives.
+
+La suite `test:installer` installe un vrai second établissement dans la même
+base et vérifie que le cloisonnement tient entre deux écoles réelles : la
+nouvelle ne voit pas un élève, pas une note, pas un franc de l'autre.
 
 ### L'annulation d'un paiement
 
@@ -573,10 +608,11 @@ Comptes de démonstration — le code s'affiche à l'écran, aucun SMS n'est env
 | `70000005` | Directeur |
 
 Vérifications : `npm run check:all` — typecheck strict, 60 tests unitaires,
-et dix-huit parcours dans un vrai navigateur :
+et dix-neuf parcours dans un vrai navigateur :
 
 | suite | ce qu'elle prouve |
 |---|---|
+| `test:installer` (24) | un second établissement s'installe, son chef se connecte, et aucune des deux écoles ne voit les données de l'autre |
 | `test:annulation` (28) | le reçu d'origine reste intact, l'annulation est un second reçu numéroté, et tous les écrans lisent le même solde |
 | `test:eleve` (35) | on retrouve un élève par le numéro de son tuteur, un tuteur partagé se corrige pour la fratrie, et voir n'est pas corriger |
 | `test:personnel` (29) | un établissement crée ses propres comptes ; le dernier chef ne peut être ni écarté ni rétrogradé ; écarter quelqu'un ferme ses sessions ouvertes |
