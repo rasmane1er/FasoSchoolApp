@@ -43,6 +43,8 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
   de celles du personnel, et leurs quatre fonctions d'authentification.
 - `db/migrations/0004_message_suivi.sql` — l'issue d'un message non remis :
   renvoyé, famille appelée, ou abandon assumé.
+- `db/migrations/0005_personnel.sql` — `auth_resolve` vérifie enfin
+  `is_active`, et `chefs_en_exercice()` empêche d'écarter le dernier chef.
 - `db/tests/rls_isolation.sql` — le test d'isolation contradictoire.
 
 **Métier**
@@ -88,6 +90,8 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
   interrogations par l'enseignant, compositions par le censeur seul.
 - `src/server/messages.ts` — suivi des messages non remis : ce que les familles
   n'ont pas reçu, et ce qu'on en a fait.
+- `src/server/personnel.ts` — les comptes du personnel : créer, changer de
+  fonction, écarter sans effacer.
 - `src/lib/roster.ts` — lecture d'un fichier de liste (encodage, séparateur,
   intitulés, dates, numéros). 22 tests.
 - `src/server/multipart.ts` — envoi de fichier, écrit à la main pour ne pas
@@ -104,6 +108,40 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
 **Démonstration** — `npm run demo` crée un établissement, une 6<sup>e</sup> de
 douze élèves, huit disciplines notées, la scolarité et un dossier de
 catégorisation entamé, puis écrit les bulletins dans `out/`.
+
+### Le personnel
+
+C'est le premier geste d'une installation — avant l'année scolaire, avant les
+classes, avant les élèves — et il n'existait pas. Une seule ligne du projet
+créait un compte : `scripts/demo.ts`. Un établissement qui installait
+FasoSchool ne pouvait inscrire ni son proviseur, ni son censeur, ni un seul de
+ses enseignants sans ouvrir psql.
+
+Un compte se crée avec un nom, un numéro à huit chiffres et une fonction. Le
+numéro **est** l'identifiant : il n'y a pas de mot de passe, un code à usage
+unique arrive par SMS. Deux comptes ne peuvent pas le partager — sinon l'un
+des deux ne se connecterait jamais et personne ne comprendrait pourquoi.
+
+**On n'efface personne.** Un membre du personnel porte des notes, des reçus,
+des décisions de conseil ; le supprimer arracherait la signature au bas d'un
+bulletin déjà remis. On l'écarte : son compte ne s'ouvre plus, et ce qu'il a
+signé reste signé.
+
+Deux verrous, tous deux posés parce que l'erreur qu'ils empêchent ne se
+rattrape pas :
+
+- **Le dernier chef d'établissement ne peut être ni écarté ni rétrogradé.**
+  Sans lui, plus personne ne gère le personnel et il n'existe aucune console
+  d'administration pour rattraper l'erreur : l'établissement serait fermé à
+  clé. La règle est en base autant que dans l'écran, parce qu'un écran se
+  contourne avec un formulaire fabriqué à la main.
+- **Écarter quelqu'un ferme ses sessions ouvertes.** `auth_resolve` ne
+  vérifiait pas `is_active` : désactiver un compte interdisait de *se
+  reconnecter*, mais chaque session déjà ouverte vivait jusqu'à son
+  expiration. Un établissement qui écarte une secrétaire soupçonnée d'avoir
+  touché aux reçus lisait « désactivé » à l'écran pendant qu'elle continuait
+  de travailler depuis son téléphone. Les sessions sont désormais révoquées,
+  et le contrôle en base ferme la course entre les deux gestes.
 
 ### Les messages non remis
 
@@ -461,10 +499,11 @@ Comptes de démonstration — le code s'affiche à l'écran, aucun SMS n'est env
 | `70000005` | Directeur |
 
 Vérifications : `npm run check:all` — typecheck strict, 60 tests unitaires,
-et quinze parcours dans un vrai navigateur :
+et seize parcours dans un vrai navigateur :
 
 | suite | ce qu'elle prouve |
 |---|---|
+| `test:personnel` (29) | un établissement crée ses propres comptes ; le dernier chef ne peut être ni écarté ni rétrogradé ; écarter quelqu'un ferme ses sessions ouvertes |
 | `test:messages` (26) | un refus de l'opérateur est enregistré avec sa raison, remonte au tableau de bord, et ne se referme que par un geste humain tracé |
 | `test:evaluations` (22) | un enseignant ouvre un devoir pour sa matière ; une composition ne s'ouvre que par le censeur, et pour tout le niveau |
 | `test:transferts` (23) | un parcours déclaré est accepté et étiqueté, une moyenne inventée est refusée, le certificat porte sa réserve |

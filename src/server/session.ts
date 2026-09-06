@@ -207,7 +207,7 @@ export function can(user: SessionUser, action:
   | "voir_notes" | "saisir_notes" | "publier_bulletins"
   | "faire_appel" | "voir_scolarite" | "encaisser"
   | "voir_categorisation" | "parametrer" | "inscrire"
-  | "suivre_messages"): boolean {
+  | "suivre_messages" | "gerer_personnel"): boolean {
   const r = new Set([...user.roles, user.fonction ?? ""]);
   const any = (...codes: string[]) => codes.some((x) => r.has(x));
 
@@ -239,5 +239,10 @@ export function can(user: SessionUser, action:
     case "suivre_messages":
       return any("surveillant_general", "secretaire", "econome", "intendant",
                  "censeur", "proviseur", "directeur");
+    // Créer un compte, c'est donner accès à tout l'établissement. Le geste
+    // appartient au chef d'établissement seul : un censeur qui pourrait
+    // ajouter du personnel pourrait se nommer proviseur.
+    case "gerer_personnel":
+      return any("proviseur", "directeur");
   }
 }

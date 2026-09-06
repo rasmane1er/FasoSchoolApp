@@ -41,6 +41,8 @@ import {
 import { communiquesPage, envoyer as envoyerCommunique } from "./communiques.ts";
 import { messagesPage, resoudre as resoudreMessage,
          renvoyer as renvoyerMessage } from "./messages.ts";
+import { personnelPage, ajouterMembre, changerFonction,
+         basculerActivite } from "./personnel.ts";
 import {
   transfertsPage, recordTransfer, addLivretEntry, certificatePage,
 } from "./transferts.ts";
@@ -1171,6 +1173,33 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
                   + `des messages pour joindre ces familles autrement.`
                 : ""),
         out.error));
+    }
+
+    // --- Personnel -----------------------------------------------------------
+    if (path === "/personnel" || path === "/personnel/fonction"
+        || path === "/personnel/activite") {
+      // Créer un compte, c'est donner accès à tout l'établissement : le
+      // contrôle est ici, pas dans la barre de navigation.
+      if (!can(user, "gerer_personnel")) return html(res, "Accès refusé.", 403);
+      const chrome = await chromeFor(user, "personnel");
+
+      if (path === "/personnel" && req.method === "GET") {
+        return html(res, await personnelPage(user, chrome, url));
+      }
+      if (req.method === "POST") {
+        const form = await formBody(req);
+        const out =
+          path === "/personnel" ? await ajouterMembre(user, form)
+          : path === "/personnel/fonction"
+            ? await changerFonction(user, form.get("membre") ?? "",
+                                    form.get("fonction") ?? "")
+          : path === "/personnel/activite"
+            ? await basculerActivite(user, form.get("membre") ?? "",
+                                     form.get("actif") === "1")
+          : { error: undefined, flash: undefined };
+        return html(res, await personnelPage(user, chrome, url,
+          out.flash, out.error));
+      }
     }
 
     // --- Suivi des messages --------------------------------------------------

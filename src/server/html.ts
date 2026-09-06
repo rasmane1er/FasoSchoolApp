@@ -132,6 +132,9 @@ input.note-cell{height:38px;width:74px;text-align:center;font-family:var(--mono)
 .btn.petit{height:34px;padding:0 11px;font-size:13px}
 .gestes{white-space:nowrap}
 .gestes form{display:inline-block;margin:2px 3px 2px 0}
+/* Une ligne écartée reste lisible : elle n'est pas effacée, elle est au repos. */
+tbody tr.pale td{color:var(--faint)}
+tbody tr.pale b{font-weight:500}
 textarea{font:inherit;font-size:13.5px;width:100%;padding:10px 12px;border:1px solid var(--line);
   border-radius:5px;background:var(--surface);color:var(--ink);resize:vertical;line-height:1.5}
 textarea:focus{outline:2px solid var(--indigo);outline-offset:-1px;border-color:var(--indigo)}
@@ -196,6 +199,8 @@ const NAV: Array<{ titre: string | null; liens: NavEntry[] }> = [
       droit: "suivre_messages" },
   ] },
   { titre: "Administration", liens: [
+    { href: "/personnel", label: "Personnel", key: "personnel",
+      droit: "gerer_personnel" },
     { href: "/annee", label: "Année scolaire", key: "annee", droit: "parametrer" },
     { href: "/services", label: "Services", key: "services", droit: "parametrer" },
     { href: "/parametres", label: "Règles de notation", key: "parametres",
