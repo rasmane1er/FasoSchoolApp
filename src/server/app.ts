@@ -39,6 +39,8 @@ import {
   listEvaluations, createEvaluation, deleteEvaluation, evaluationsCard,
 } from "./evaluations.ts";
 import { communiquesPage, envoyer as envoyerCommunique } from "./communiques.ts";
+import { messagesPage, resoudre as resoudreMessage,
+         renvoyer as renvoyerMessage } from "./messages.ts";
 import {
   transfertsPage, recordTransfer, addLivretEntry, certificatePage,
 } from "./transferts.ts";
@@ -817,10 +819,16 @@ async function saveAbsences(user: SessionUser, url: URL, form: URLSearchParams):
 
       await c.query(
         `insert into sms_messages (school_id, student_id, guardian_id, to_phone, body,
-                                   segments, cost_fcfa, status, provider, provider_ref, sent_at)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, case when $8 = 'envoye' then now() end)`,
+                                   segments, cost_fcfa, status, provider, provider_ref,
+                                   error_detail, sent_at)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,
+                 case when $8 = 'envoye' then now() end)`,
         [schoolId, studentId, row.guardian_id, row.phone, body, segments,
-         result.costFcfa, result.ok ? "envoye" : "echoue", sms.name, result.providerRef ?? null]);
+         result.costFcfa, result.ok ? "envoye" : "echoue", sms.name,
+         result.providerRef ?? null,
+         // Sans la raison, « échoué » ne dit pas s'il faut rappeler la famille
+         // ou corriger un chiffre du numéro.
+         result.ok ? null : (result.error ?? "Refus de l'opérateur, sans détail")]);
 
       if (result.ok) { queued += 1; cost += result.costFcfa; }
     }
@@ -1156,8 +1164,33 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
         user, await chromeFor(user, "communiques"), rejoue,
         out.error ? undefined
           : `${plural(out.envoyes, "famille prévenue", "familles prévenues")} `
-            + `pour ${out.cout} FCFA.`,
+            + `pour ${out.cout} FCFA.`
+            + (out.refuses
+                ? ` ${plural(out.refuses, "message n'est pas parti",
+                             "messages ne sont pas partis")} : voyez le suivi `
+                  + `des messages pour joindre ces familles autrement.`
+                : ""),
         out.error));
+    }
+
+    // --- Suivi des messages --------------------------------------------------
+    if (path === "/messages" && req.method === "GET") {
+      if (!can(user, "suivre_messages")) return html(res, "Accès refusé.", 403);
+      return html(res, await messagesPage(
+        user, await chromeFor(user, "messages"), url));
+    }
+    if ((path === "/messages/resoudre" || path === "/messages/renvoyer")
+        && req.method === "POST") {
+      if (!can(user, "suivre_messages")) return html(res, "Accès refusé.", 403);
+      const form = await formBody(req);
+      const out = path === "/messages/renvoyer"
+        ? await renvoyerMessage(user, form.get("message") ?? "")
+        : await resoudreMessage(user, form.get("message") ?? "",
+                                form.get("issue") ?? "");
+      const retour = new URL(url.toString());
+      retour.searchParams.set("filtre", form.get("filtre") ?? "a_traiter");
+      return html(res, await messagesPage(
+        user, await chromeFor(user, "messages"), retour, out.flash, out.error));
     }
 
     // --- Évaluations ---------------------------------------------------------

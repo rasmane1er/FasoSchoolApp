@@ -41,6 +41,8 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
   fonctions d'authentification.
 - `db/migrations/0003_guardian_access.sql` — sessions des familles, séparées
   de celles du personnel, et leurs quatre fonctions d'authentification.
+- `db/migrations/0004_message_suivi.sql` — l'issue d'un message non remis :
+  renvoyé, famille appelée, ou abandon assumé.
 - `db/tests/rls_isolation.sql` — le test d'isolation contradictoire.
 
 **Métier**
@@ -84,6 +86,8 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
   correctement.
 - `src/server/evaluations.ts` — création des évaluations : devoirs et
   interrogations par l'enseignant, compositions par le censeur seul.
+- `src/server/messages.ts` — suivi des messages non remis : ce que les familles
+  n'ont pas reçu, et ce qu'on en a fait.
 - `src/lib/roster.ts` — lecture d'un fichier de liste (encodage, séparateur,
   intitulés, dates, numéros). 22 tests.
 - `src/server/multipart.ts` — envoi de fichier, écrit à la main pour ne pas
@@ -100,6 +104,42 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
 **Démonstration** — `npm run demo` crée un établissement, une 6<sup>e</sup> de
 douze élèves, huit disciplines notées, la scolarité et un dossier de
 catégorisation entamé, puis écrit les bulletins dans `out/`.
+
+### Les messages non remis
+
+La deuxième des trois promesses du logiciel est : *la famille est prévenue le
+jour même de l'absence*. Elle n'était vraie qu'à moitié. Un SMS refusé par
+l'opérateur — numéro erroné, ligne résiliée — était écrit en base avec le
+statut `echoue`, et **rien ne lisait jamais ce statut** : ni un écran, ni une
+requête, ni un point d'attention. L'établissement croyait avoir prévenu. La
+famille n'avait rien reçu. L'enfant passait la journée dehors.
+
+Un échec n'est pas une ligne de journal : c'est une **tâche**. Quelqu'un doit
+appeler la famille, corriger le numéro, ou renoncer en le sachant. Tant que
+personne ne l'a fait, l'échec remonte au tableau de bord ; il ne s'efface pas
+avec le temps.
+
+Trois choses tiennent cet écran :
+
+- **Un renvoi n'écrase pas la tentative ratée.** Le registre est append-only,
+  comme les reçus. Une école qui doit prouver qu'elle a prévenu doit pouvoir
+  montrer ce qu'elle a *essayé*, pas seulement ce qui a fini par marcher. Un
+  renvoi qui échoue à son tour reparaît dans la liste — le problème ne
+  disparaît pas parce qu'on a cliqué dessus.
+- **« Famille appelée » est une issue de plein droit.** Quand le SMS ne passe
+  pas, on téléphone. Sans cette case, la vie scolaire tiendrait son vrai
+  registre sur un cahier et l'écran mentirait. Le logiciel la croit sur parole,
+  le dit, et enregistre qui l'a déclarée.
+- **Un message parti ne se « traite » pas.** Cocher « appelée » sur un SMS
+  reçu ferait d'une case une preuve d'un appel qui n'a jamais eu lieu. Le
+  refus est sur le chemin d'écriture, pas dans l'affichage : la suite le force
+  en postant à la main.
+
+Un défaut du même ordre a été corrigé dans les communiqués : la réponse de
+l'opérateur y était ignorée et **toutes** les lignes étaient écrites
+« envoyé ». Un communiqué à trois cents familles entièrement refusé était
+enregistré comme trois cents envois, et trois cents messages débités du crédit.
+Le statut vient désormais de l'opérateur, et seul ce qui part est débité.
 
 ### Les évaluations
 
@@ -421,10 +461,11 @@ Comptes de démonstration — le code s'affiche à l'écran, aucun SMS n'est env
 | `70000005` | Directeur |
 
 Vérifications : `npm run check:all` — typecheck strict, 60 tests unitaires,
-et quatorze parcours dans un vrai navigateur :
+et quinze parcours dans un vrai navigateur :
 
 | suite | ce qu'elle prouve |
 |---|---|
+| `test:messages` (26) | un refus de l'opérateur est enregistré avec sa raison, remonte au tableau de bord, et ne se referme que par un geste humain tracé |
 | `test:evaluations` (22) | un enseignant ouvre un devoir pour sa matière ; une composition ne s'ouvre que par le censeur, et pour tout le niveau |
 | `test:transferts` (23) | un parcours déclaré est accepté et étiqueté, une moyenne inventée est refusée, le certificat porte sa réserve |
 | `test:communiques` (17) | le coût est annoncé avant l'envoi, les tuteurs sont dédoublonnés, un crédit court refuse l'envoi en bloc |

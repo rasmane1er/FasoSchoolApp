@@ -85,6 +85,22 @@ export async function pointsDAttention(
       }
     }
 
+    // Un message refusé par l'opérateur n'est pas un incident technique : c'est
+    // une famille qui n'a pas été prévenue et qui l'ignore. Tant que personne
+    // ne s'en occupe, il remonte ici.
+    const nonRemis = await un(
+      `select count(*)::int as n from sms_messages
+        where status = 'echoue' and resolution is null`);
+    if (nonRemis > 0) {
+      points.push({
+        gravite: "important",
+        texte: `${plural(nonRemis, "message n'est pas parvenu",
+          "messages ne sont pas parvenus")} à la famille. `
+          + `${accord(nonRemis, "Elle croit", "Elles croient")} n'avoir rien à savoir.`,
+        action: "Traiter", lien: "/messages", droit: "suivre_messages",
+      });
+    }
+
     const credit = await un(
       `select coalesce(sum(case when direction = 'achat' then messages
                                 else -messages end), 0)::int as n

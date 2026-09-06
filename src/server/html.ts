@@ -127,6 +127,11 @@ input.note-cell{height:38px;width:74px;text-align:center;font-family:var(--mono)
 .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--ink)}
 .btn.ghost:hover{background:var(--surface2)}
 .btn.danger{background:var(--laterite)}
+/* Un geste posé dans une cellule de tableau : assez grand pour un pouce sur
+   un téléphone, assez discret pour ne pas dominer la ligne. */
+.btn.petit{height:34px;padding:0 11px;font-size:13px}
+.gestes{white-space:nowrap}
+.gestes form{display:inline-block;margin:2px 3px 2px 0}
 textarea{font:inherit;font-size:13.5px;width:100%;padding:10px 12px;border:1px solid var(--line);
   border-radius:5px;background:var(--surface);color:var(--ink);resize:vertical;line-height:1.5}
 textarea:focus{outline:2px solid var(--indigo);outline-offset:-1px;border-color:var(--indigo)}
@@ -187,6 +192,8 @@ const NAV: Array<{ titre: string | null; liens: NavEntry[] }> = [
     { href: "/transferts", label: "Transferts", key: "transferts", droit: "inscrire" },
     { href: "/communiques", label: "Communiqués", key: "communiques",
       droit: "publier_bulletins" },
+    { href: "/messages", label: "Suivi des messages", key: "messages",
+      droit: "suivre_messages" },
   ] },
   { titre: "Administration", liens: [
     { href: "/annee", label: "Année scolaire", key: "annee", droit: "parametrer" },

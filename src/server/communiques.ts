@@ -111,7 +111,9 @@ export async function devis(
   };
 }
 
-export interface EnvoiOutcome { envoyes: number; cout: number; error?: string }
+export interface EnvoiOutcome {
+  envoyes: number; cout: number; refuses?: number; error?: string;
+}
 
 export async function envoyer(
   user: SessionUser, form: URLSearchParams,
@@ -158,30 +160,41 @@ export async function envoyer(
       [cible === "classe" ? classId : null, titre, corps, staff.rows[0]?.id ?? null]);
 
     let envoyes = 0;
+    let refuses = 0;
     for (const g of gens) {
-      await sms.send({ to: g.phone, schoolId, body: corps });
+      // La réponse de l'opérateur est la seule source du statut. L'écrire
+      // « envoye » sans l'avoir lue faisait croire à trois cents envois là
+      // où l'opérateur avait pu tout refuser.
+      const r = await sms.send({ to: g.phone, schoolId, body: corps });
       await c.query(
         `insert into sms_messages (school_id, guardian_id, to_phone, body,
-                                   segments, cost_fcfa, status, sent_at)
-         values (current_school_id(), $1, $2, $3, $4, $5, 'envoye', now())`,
+                                   segments, cost_fcfa, status, provider,
+                                   provider_ref, error_detail, sent_at)
+         values (current_school_id(), $1, $2, $3, $4, $5, $6, $7, $8, $9,
+                 case when $6 = 'envoye' then now() end)`,
         [g.guardianId, g.phone, corps, d.segments,
-         d.segments * COST_PER_SEGMENT_FCFA]);
-      envoyes += 1;
+         r.ok ? d.segments * COST_PER_SEGMENT_FCFA : 0,
+         r.ok ? "envoye" : "echoue", sms.name, r.providerRef ?? null,
+         r.ok ? null : (r.error ?? "Refus de l'opérateur, sans détail")]);
+      if (r.ok) envoyes += 1; else refuses += 1;
     }
 
-    await c.query(
-      `insert into sms_credit_ledger (school_id, direction, messages, amount_fcfa, note)
-       values (current_school_id(), 'consommation', $1, $2, $3)`,
-      [envoyes * d.segments, envoyes * d.segments * COST_PER_SEGMENT_FCFA,
-       `Communiqué : ${titre}`]);
+    // On ne débite que ce qui est parti.
+    if (envoyes > 0) {
+      await c.query(
+        `insert into sms_credit_ledger (school_id, direction, messages, amount_fcfa, note)
+         values (current_school_id(), 'consommation', $1, $2, $3)`,
+        [envoyes * d.segments, envoyes * d.segments * COST_PER_SEGMENT_FCFA,
+         `Communiqué : ${titre}`]);
+    }
 
     await c.query(
       `insert into audit_log (school_id, actor_id, action, target_type, target_id, detail)
        values (current_school_id(), $1, 'communique.send', 'announcement', $2, $3)`,
       [user.userId, ann.rows[0].id,
-       JSON.stringify({ destinataires: envoyes, segments: d.segments })]);
+       JSON.stringify({ destinataires: envoyes, refuses, segments: d.segments })]);
 
-    return { envoyes, cout: envoyes * d.segments * COST_PER_SEGMENT_FCFA };
+    return { envoyes, refuses, cout: envoyes * d.segments * COST_PER_SEGMENT_FCFA };
   });
 }
 

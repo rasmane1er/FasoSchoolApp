@@ -271,10 +271,14 @@ export async function collect(
           studentId: inv.rows[0].student_id });
         await c.query(
           `insert into sms_messages (school_id, student_id, guardian_id, to_phone, body,
-                                     segments, cost_fcfa, status, provider, sent_at)
-           values ($1,$2,$3,$4,$5,$6,$7,$8,$9, case when $8 = 'envoye' then now() end)`,
+                                     segments, cost_fcfa, status, provider,
+                                     error_detail, sent_at)
+           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
+                   case when $8 = 'envoye' then now() end)`,
           [schoolId, inv.rows[0].student_id, row.gid, row.phone, body,
-           countSegments(body), result.costFcfa, result.ok ? "envoye" : "echoue", sms.name]);
+           countSegments(body), result.costFcfa, result.ok ? "envoye" : "echoue",
+           sms.name,
+           result.ok ? null : (result.error ?? "Refus de l'opérateur, sans détail")]);
         if (result.ok) {
           await c.query(
             `insert into sms_credit_ledger (school_id, direction, messages, amount_fcfa, note)

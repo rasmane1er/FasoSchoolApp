@@ -206,7 +206,8 @@ export async function revokeSession(token: string): Promise<void> {
 export function can(user: SessionUser, action:
   | "voir_notes" | "saisir_notes" | "publier_bulletins"
   | "faire_appel" | "voir_scolarite" | "encaisser"
-  | "voir_categorisation" | "parametrer" | "inscrire"): boolean {
+  | "voir_categorisation" | "parametrer" | "inscrire"
+  | "suivre_messages"): boolean {
   const r = new Set([...user.roles, user.fonction ?? ""]);
   const any = (...codes: string[]) => codes.some((x) => r.has(x));
 
@@ -232,5 +233,11 @@ export function can(user: SessionUser, action:
     // d'établissement. Le censeur en est, parce qu'il constitue les classes.
     case "inscrire":
       return any("secretaire", "censeur", "proviseur", "directeur");
+    // Un message d'absence non remis est une tâche de vie scolaire : c'est le
+    // surveillant général qui rappelle la famille. Le secrétariat en est parce
+    // que c'est lui qui corrige un numéro faux.
+    case "suivre_messages":
+      return any("surveillant_general", "secretaire", "econome", "intendant",
+                 "censeur", "proviseur", "directeur");
   }
 }
