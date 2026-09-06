@@ -77,6 +77,7 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
   un document remis ne change pas tout seul.
 - `src/server/frais.ts` — grille des frais et émission des factures, avec les
   deux garde-fous de l'arrêté.
+- `src/server/communiques.ts` — SMS aux familles, coût annoncé avant l'envoi.
 - `src/lib/roster.ts` — lecture d'un fichier de liste (encodage, séparateur,
   intitulés, dates, numéros). 22 tests.
 - `src/server/multipart.ts` — envoi de fichier, écrit à la main pour ne pas
@@ -93,6 +94,27 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
 **Démonstration** — `npm run demo` crée un établissement, une 6<sup>e</sup> de
 douze élèves, huit disciplines notées, la scolarité et un dossier de
 catégorisation entamé, puis écrit les bulletins dans `out/`.
+
+### Les communiqués aux familles
+
+Le canal SMS servait déjà aux absences ; c'est le même tuyau, pour « réunion
+des parents samedi 9 h » ou « reprise le 5 janvier ». Un directeur passe
+aujourd'hui ces messages par les élèves eux-mêmes, et la moitié n'arrive
+jamais.
+
+Trois décisions font la valeur de cet écran, et toutes trois protègent la
+trésorerie ou la parole de l'établissement :
+
+- **Le coût est annoncé avant l'envoi.** Destinataires, segments, total, et ce
+  qu'il restera de crédit. L'écran rappelle aussi qu'un accent fait tomber la
+  limite de 160 à 70 caractères : écrire « Reunion » plutôt que « Réunion »
+  divise la facture par deux, et c'est visible avant d'appuyer.
+- **Un envoi partiel est pire que pas d'envoi.** Crédit insuffisant : l'envoi
+  est refusé en bloc, plutôt que d'informer la moitié des familles et de
+  laisser l'autre moitié se présenter le mauvais jour. Le brouillon n'est pas
+  perdu pour autant.
+- **Un tuteur de trois enfants reçoit un message**, pas trois. C'est de
+  l'argent, et c'est aussi du respect.
 
 ### Les frais et les factures
 
@@ -336,6 +358,7 @@ et trois parcours dans un vrai navigateur :
 
 | suite | ce qu'elle prouve |
 |---|---|
+| `test:communiques` (17) | le coût est annoncé avant l'envoi, les tuteurs sont dédoublonnés, un crédit court refuse l'envoi en bloc |
 | `test:frais` (21) | un supplément sans autorisation est refusé, un dépassement de plafond est chiffré, une facture émise n'est pas recalculée |
 | `test:cloture` (25) | le bulletin remis ne bouge pas, l'écart est montré, le trimestre clos refuse les notes en ligne comme hors ligne |
 | `test:services` (12) | un enseignant ne voit et ne touche que ses classes — y compris en postant à la main |

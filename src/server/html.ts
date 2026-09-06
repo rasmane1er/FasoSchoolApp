@@ -156,6 +156,7 @@ const NAV: Array<[string, string, string]> = [
   ["/notes", "Notes", "notes"],
   ["/bulletins", "Bulletins", "bulletins"],
   ["/absences", "Absences", "absences"],
+  ["/communiques", "Communiqués", "communiques"],
   ["/conseil", "Conseil de classe", "conseil"],
   ["/annee", "Année scolaire", "annee"],
   ["/services", "Services", "services"],

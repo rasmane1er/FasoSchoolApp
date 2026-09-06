@@ -34,6 +34,7 @@ import { categorisationPage, saveDossier, addCriterion } from "./categorisation.
 import {
   fraisPage, addSchedule, addLine, removeLine, issueInvoices,
 } from "./frais.ts";
+import { communiquesPage, envoyer as envoyerCommunique } from "./communiques.ts";
 import { pointsDAttention, attentionCard } from "./attention.ts";
 import {
   servicesPage, addService, removeService,
@@ -1059,6 +1060,31 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       ].filter(Boolean).join(" ");
       const chrome = await chromeFor(user, "conseil");
       return html(res, await conseilPage(user, chrome, url, flash));
+    }
+
+    // --- Communiqués aux familles -------------------------------------------
+    if (path === "/communiques" && req.method === "GET") {
+      if (!can(user, "publier_bulletins")) return html(res, "Accès refusé.", 403);
+      return html(res, await communiquesPage(
+        user, await chromeFor(user, "communiques"), url));
+    }
+    if (path === "/communiques" && req.method === "POST") {
+      if (!can(user, "publier_bulletins")) return html(res, "Accès refusé.", 403);
+      const form = await formBody(req);
+      const out = await envoyerCommunique(user, form);
+      // On rejoue l'écran sur le même brouillon : en cas de refus, le message
+      // saisi ne doit pas être perdu.
+      const rejoue = new URL(url.toString());
+      for (const k of ["titre", "corps", "cible", "classe"]) {
+        rejoue.searchParams.set(k, form.get(k) ?? "");
+      }
+      if (!out.error) rejoue.search = "";
+      return html(res, await communiquesPage(
+        user, await chromeFor(user, "communiques"), rejoue,
+        out.error ? undefined
+          : `${plural(out.envoyes, "famille prévenue", "familles prévenues")} `
+            + `pour ${out.cout} FCFA.`,
+        out.error));
     }
 
     // --- Grille des frais et émission des factures --------------------------
