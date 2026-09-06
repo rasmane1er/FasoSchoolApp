@@ -115,7 +115,13 @@ try {
   const dash = await page.content();
   check("la classe 6e B est listée", dash.includes("6e B"));
   check("le crédit SMS est affiché", dash.includes("Crédit SMS"));
-  check("le score de catégorisation remonte", dash.includes("68"));
+  /* Le censeur n'a pas de droit sur la comptabilité ni sur le dossier de
+     catégorisation : les chiffres correspondants ne lui sont pas montrés
+     non plus. Un tableau de bord qui affiche ce qu'on ne peut pas ouvrir
+     invite à demander pourquoi. */
+  check("un chiffre sans écran n'est pas affiché",
+    !dash.includes("Reste à recouvrer") && !dash.includes("Catégorisation"),
+    "le censeur n'a ni voir_scolarite ni voir_categorisation");
 
   /* Le tableau de bord doit remonter ce qui demande une ACTION, pas seulement
      des indicateurs verts. Personne ne descend jusqu'aux tableaux. */
@@ -127,8 +133,28 @@ try {
   check("le nombre n'est pas répété dans une même phrase",
     !/\b(\d+)\s[^.<]*?:\s\1\s/.test(dash),
     "« 1 élève ... : 1 sa famille » — accord sans le nombre");
+  check("on ne signale que ce que l'on peut traiter",
+    !dash.includes("catégorisation portent des points"),
+    "annoncer au censeur un dossier qu'il ne peut pas ouvrir, "
+    + "c'est lui donner une inquiétude sans moyen d'agir");
   check("chaque point d'attention mène à l'écran où le traiter",
     !dash.includes("À traiter") || /href="\/(parametres|conflits|inscriptions|annee|categorisation|conseil|absences)"/.test(dash));
+
+  /* La barre ne doit proposer que ce que l'on peut ouvrir : un lien qui rend
+     « Accès refusé » fait conclure que le logiciel est cassé. */
+  const liens = await page.$$eval(".side nav a", (as) => as.map((a) => a.getAttribute("href")));
+  const refuses = [];
+  for (const h of liens) {
+    if (h === "/deconnexion") continue;
+    const r = await page.goto(`${BASE}${h}`);
+    if (r.status() === 403) refuses.push(h);
+  }
+  check("aucun lien de la barre ne mène à un refus", refuses.length === 0,
+    refuses.join(", "));
+  check("la barre est regroupée, pas une liste de quinze liens à plat",
+    (await page.$$eval(".navgroupe", (d) => d.length)) >= 3);
+  await page.goto(`${BASE}/`);
+  await page.waitForLoadState("networkidle");
 
   console.log("\nBulletins");
   await page.click("text=Bulletins");

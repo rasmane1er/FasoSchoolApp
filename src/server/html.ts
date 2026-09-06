@@ -10,7 +10,7 @@
  * mauvais ou absent.
  */
 
-import type { SessionUser } from "./session.ts";
+import { can, type SessionUser } from "./session.ts";
 
 export const esc = (v: unknown): string =>
   String(v ?? "").replace(/[&<>"']/g, (c) => (
@@ -65,6 +65,8 @@ h2{font-family:var(--serif);font-size:17px;font-weight:600;margin:0}
 .side nav a{display:block;padding:11px 12px;border-radius:5px;font-size:14px;color:rgba(255,255,255,.78);text-decoration:none}
 .side nav a:hover{background:rgba(255,255,255,.07);text-decoration:none}
 .side nav a.on{background:rgba(255,255,255,.13);color:#fff;font-weight:500}
+.navgroupe{padding:14px 12px 5px;font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:rgba(255,255,255,.42)}
+.navgroupe:first-child{padding-top:4px}
 .side .foot{margin-top:auto;padding:16px 20px;border-top:1px solid rgba(255,255,255,.12);font-size:11.5px;color:rgba(255,255,255,.6)}
 
 /* colonne principale */
@@ -151,23 +153,63 @@ code{font-family:var(--mono);font-size:.92em;background:var(--surface2);padding:
 }
 `;
 
-const NAV: Array<[string, string, string]> = [
-  ["/", "Tableau de bord", "dashboard"],
-  ["/notes", "Notes", "notes"],
-  ["/bulletins", "Bulletins", "bulletins"],
-  ["/absences", "Absences", "absences"],
-  ["/communiques", "Communiqués", "communiques"],
-  ["/conseil", "Conseil de classe", "conseil"],
-  ["/annee", "Année scolaire", "annee"],
-  ["/services", "Services", "services"],
-  ["/inscriptions", "Inscriptions", "inscriptions"],
-  ["/transferts", "Transferts", "transferts"],
-  ["/frais", "Frais", "frais"],
-  ["/scolarite", "Scolarité", "scolarite"],
-  ["/categorisation", "Catégorisation", "categorisation"],
-  ["/conflits", "Notes divergentes", "conflits"],
-  ["/parametres", "Règles de notation", "parametres"],
+/*
+ * La navigation ne montre QUE ce que l'utilisateur peut ouvrir.
+ *
+ * Une enseignante à qui l'on propose « Frais » et « Catégorisation » clique,
+ * reçoit « Accès refusé », et en conclut que le logiciel est cassé. Chaque
+ * entrée porte donc le droit qu'elle exige, et la barre est filtrée au rendu.
+ * Le contrôle d'accès reste dans les routes : ceci n'est qu'une politesse,
+ * jamais une protection.
+ *
+ * Le regroupement suit le métier de celui qui regarde, pas l'ordre dans lequel
+ * les écrans ont été écrits : quinze liens à plat, personne ne les lit.
+ */
+type Droit = Parameters<typeof can>[1];
+
+interface NavEntry { href: string; label: string; key: string; droit?: Droit }
+
+const NAV: Array<{ titre: string | null; liens: NavEntry[] }> = [
+  { titre: null, liens: [
+    { href: "/", label: "Tableau de bord", key: "dashboard" },
+  ] },
+  { titre: "Enseignement", liens: [
+    { href: "/notes", label: "Notes", key: "notes", droit: "voir_notes" },
+    { href: "/bulletins", label: "Bulletins", key: "bulletins", droit: "voir_notes" },
+    { href: "/absences", label: "Absences", key: "absences", droit: "faire_appel" },
+    { href: "/conflits", label: "Notes divergentes", key: "conflits",
+      droit: "publier_bulletins" },
+    { href: "/conseil", label: "Conseil de classe", key: "conseil",
+      droit: "publier_bulletins" },
+  ] },
+  { titre: "Vie scolaire", liens: [
+    { href: "/inscriptions", label: "Inscriptions", key: "inscriptions", droit: "inscrire" },
+    { href: "/transferts", label: "Transferts", key: "transferts", droit: "inscrire" },
+    { href: "/communiques", label: "Communiqués", key: "communiques",
+      droit: "publier_bulletins" },
+  ] },
+  { titre: "Administration", liens: [
+    { href: "/annee", label: "Année scolaire", key: "annee", droit: "parametrer" },
+    { href: "/services", label: "Services", key: "services", droit: "parametrer" },
+    { href: "/parametres", label: "Règles de notation", key: "parametres",
+      droit: "parametrer" },
+    { href: "/frais", label: "Frais", key: "frais", droit: "voir_scolarite" },
+    { href: "/scolarite", label: "Scolarité", key: "scolarite", droit: "voir_scolarite" },
+    { href: "/categorisation", label: "Catégorisation", key: "categorisation",
+      droit: "voir_categorisation" },
+  ] },
 ];
+
+function navPour(user: SessionUser, active: string): string {
+  return NAV.map((groupe) => {
+    const liens = groupe.liens.filter((l) => !l.droit || can(user, l.droit));
+    if (liens.length === 0) return "";
+    return (groupe.titre ? `<div class="navgroupe">${esc(groupe.titre)}</div>` : "")
+      + liens.map((l) =>
+        `<a href="${l.href}"${l.key === active ? ' class="on"' : ""}>${esc(l.label)}</a>`
+      ).join("\n      ");
+  }).filter(Boolean).join("\n      ");
+}
 
 export interface PageChrome {
   user: SessionUser;
@@ -194,8 +236,7 @@ export function page(chrome: PageChrome, title: string, body: string): string {
   <aside class="side">
     <div class="brand"><b>FasoSchool</b><span>${esc(chrome.schoolName)}</span></div>
     <nav>
-      ${NAV.map(([href, label, key]) =>
-        `<a href="${href}"${key === chrome.active ? ' class="on"' : ""}>${esc(label)}</a>`).join("\n      ")}
+      ${navPour(chrome.user, chrome.active)}
     </nav>
     <div class="foot">
       ${chrome.smsCredit !== undefined

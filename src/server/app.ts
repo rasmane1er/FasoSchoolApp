@@ -231,7 +231,7 @@ async function dashboard(user: SessionUser): Promise<string> {
   // Ce qui demande une action passe AVANT les indicateurs : un tableau de bord
   // se lit de haut en bas, et personne ne descend jusqu'aux tableaux.
   const attention = attentionCard(
-    await pointsDAttention(schoolId, period.year_id, Number(period.sequence)));
+    await pointsDAttention(user, period.year_id, Number(period.sequence)));
 
   return page(chrome, "Tableau de bord", `
     <div>
@@ -248,12 +248,12 @@ async function dashboard(user: SessionUser): Promise<string> {
       <div class="tile"><div class="k">Absences aujourd'hui</div>
         <div class="v">${data.absToday}</div>
         <div class="n">${data.smsToday} SMS envoyés</div></div>
-      <div class="tile"><div class="k">Reste à recouvrer</div>
+      ${can(user, "voir_scolarite") ? `<div class="tile"><div class="k">Reste à recouvrer</div>
         <div class="v" style="font-size:22px">${fcfa(data.reste)} F</div>
-        <div class="n">${plural(data.familles, "facture ouverte", "factures ouvertes")}</div></div>
-      <div class="tile"><div class="k">Catégorisation</div>
+        <div class="n">${plural(data.familles, "facture ouverte", "factures ouvertes")}</div></div>` : ""}
+      ${can(user, "voir_categorisation") ? `<div class="tile"><div class="k">Catégorisation</div>
         <div class="v">${data.cat ? fr(data.cat.total_score, 0) : "—"}<span style="font-size:15px;color:var(--faint)"> / 100</span></div>
-        <div class="n">${data.cat ? `Catégorie ${data.cat.category ?? "—"}` : "Dossier non commencé"}</div></div>
+        <div class="n">${data.cat ? `Catégorie ${data.cat.category ?? "—"}` : "Dossier non commencé"}</div></div>` : ""}
     </div>
 
     <div class="card">

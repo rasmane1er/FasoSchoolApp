@@ -13,6 +13,7 @@
 
 import { withSchool } from "../lib/db.ts";
 import { esc, plural, accord } from "./html.ts";
+import { can, type SessionUser } from "./session.ts";
 
 export type Gravite = "bloquant" | "important" | "a_faire";
 
@@ -21,13 +22,16 @@ export interface Point {
   texte: string;
   action: string;
   lien: string;
+  /** Droit requis pour ouvrir l'écran visé. Sans droit, le point est tu. */
+  droit?: Parameters<typeof can>[1];
 }
 
 const RANG: Record<Gravite, number> = { bloquant: 0, important: 1, a_faire: 2 };
 
 export async function pointsDAttention(
-  schoolId: string, yearId: string | null, termSequence: number | null,
+  user: SessionUser, yearId: string | null, termSequence: number | null,
 ): Promise<Point[]> {
+  const schoolId = user.schoolId!;
   const points: Point[] = [];
 
   await withSchool(schoolId, async (c) => {
@@ -42,7 +46,7 @@ export async function pointsDAttention(
       points.push({
         gravite: "bloquant",
         texte: `${plural(divergentes, "note divergente attend", "notes divergentes attendent")} un arbitrage.`,
-        action: "Arbitrer", lien: "/conflits",
+        action: "Arbitrer", lien: "/conflits", droit: "publier_bulletins",
       });
     }
 
@@ -53,7 +57,7 @@ export async function pointsDAttention(
         gravite: "bloquant",
         texte: "Les règles de notation n'ont pas été confirmées : toutes les "
           + "moyennes calculées restent indicatives.",
-        action: "Confirmer", lien: "/parametres",
+        action: "Confirmer", lien: "/parametres", droit: "parametrer",
       });
     }
 
@@ -76,7 +80,7 @@ export async function pointsDAttention(
             + `${accord(sansTuteur, "sa famille ne recevra",
                         "leurs familles ne recevront")} `
             + "aucun SMS d'absence.",
-          action: "Compléter", lien: "/inscriptions",
+          action: "Compléter", lien: "/inscriptions", droit: "inscrire",
         });
       }
     }
@@ -91,7 +95,7 @@ export async function pointsDAttention(
         texte: credit <= 0
           ? "Le crédit SMS est épuisé : plus aucune famille n'est prévenue."
           : `Il reste ${credit} SMS. À ce rythme le crédit tombera pendant le trimestre.`,
-        action: "Voir", lien: "/absences",
+        action: "Voir", lien: "/absences", droit: "faire_appel",
       });
     }
 
@@ -104,7 +108,7 @@ export async function pointsDAttention(
         points.push({
           gravite: "bloquant",
           texte: "Aucune classe n'est ouverte pour cette année.",
-          action: "Créer les classes", lien: "/annee",
+          action: "Créer les classes", lien: "/annee", droit: "parametrer",
         });
       } else {
         const eleves = await un(
@@ -113,7 +117,7 @@ export async function pointsDAttention(
           points.push({
             gravite: "bloquant",
             texte: "Aucun élève n'est inscrit pour cette année.",
-            action: "Importer la liste", lien: "/inscriptions",
+            action: "Importer la liste", lien: "/inscriptions", droit: "inscrire",
           });
         }
       }
@@ -129,7 +133,7 @@ export async function pointsDAttention(
           gravite: "a_faire",
           texte: `${plural(sansPiece, "critère de catégorisation porte des points",
             "critères de catégorisation portent des points")} sans pièce justificative.`,
-          action: "Compléter", lien: "/categorisation",
+          action: "Compléter", lien: "/categorisation", droit: "voir_categorisation",
         });
       }
 
@@ -147,14 +151,19 @@ export async function pointsDAttention(
             gravite: "important",
             texte: `${plural(sansDecision, "élève attend", "élèves attendent")} `
               + "la décision du conseil de classe.",
-            action: "Délibérer", lien: "/conseil",
+            action: "Délibérer", lien: "/conseil", droit: "publier_bulletins",
           });
         }
       }
     }
   });
 
-  return points.sort((a, b) => RANG[a.gravite] - RANG[b.gravite]);
+  /* On ne signale à quelqu'un que ce qu'il peut traiter. Annoncer au censeur
+     un dossier de catégorisation qu'il ne peut pas ouvrir, c'est lui donner
+     une inquiétude et aucun moyen d'agir. */
+  return points
+    .filter((p) => !p.droit || can(user, p.droit))
+    .sort((a, b) => RANG[a.gravite] - RANG[b.gravite]);
 }
 
 const PASTILLE: Record<Gravite, [string, string]> = {

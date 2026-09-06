@@ -385,9 +385,9 @@ et trois parcours dans un vrai navigateur :
 | `test:communiques` (17) | le coût est annoncé avant l'envoi, les tuteurs sont dédoublonnés, un crédit court refuse l'envoi en bloc |
 | `test:frais` (21) | un supplément sans autorisation est refusé, un dépassement de plafond est chiffré, une facture émise n'est pas recalculée |
 | `test:cloture` (25) | le bulletin remis ne bouge pas, l'écart est montré, le trimestre clos refuse les notes en ligne comme hors ligne |
-| `test:services` (12) | un enseignant ne voit et ne touche que ses classes — y compris en postant à la main |
+| `test:services` (14) | un enseignant ne voit et ne touche que ses classes — y compris en postant à la main |
 | `test:rentree` (19) | un établissement ouvre son année, pose ses trimestres et crée ses classes sans intervention en base |
-| `test:e2e` (47) | connexion, notes, bulletins, appel et SMS, encaissement, droits |
+| `test:e2e` (50) | connexion, notes, bulletins, appel et SMS, encaissement, droits |
 | `test:offline` (18) | le réseau est réellement coupé, l'onglet fermé puis rouvert ; rien n'est perdu, rien n'est écrasé |
 | `test:categorisation` (20) | le dossier se saisit, les points hors barème sont refusés, et l'écran ne devine ni la catégorie ni le plafond |
 | `test:famille` (22) | un parent voit ses enfants et personne d'autre ; les deux sessions ne communiquent pas ; la page tient sous 60 Ko sans JavaScript |
@@ -469,6 +469,20 @@ row-level security serait ouverte à tous les établissements à la fois.
 
 À lancer une fois par mois. Les trois cas ci-dessus ont été éprouvés en
 fabriquant volontairement chacune des trois sauvegardes défectueuses.
+
+---
+
+## Ce que chacun voit
+
+La barre latérale, les tuiles du tableau de bord et les points à traiter ne
+montrent **que ce que l'utilisateur peut ouvrir**. Une enseignante à qui l'on
+propose « Frais » clique, reçoit « Accès refusé », et en conclut que le
+logiciel est cassé ; un censeur à qui l'on signale un dossier de catégorisation
+qu'il ne peut pas ouvrir reçoit une inquiétude sans moyen d'agir.
+
+Le contrôle d'accès reste dans les routes — ce filtrage n'est qu'une politesse,
+jamais une protection. Le parcours principal vérifie qu'aucun lien de la barre
+ne mène à un refus, pour chaque compte.
 
 ---
 

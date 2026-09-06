@@ -87,6 +87,16 @@ try {
   check("la matière d'un collègue n'est pas dans la liste",
     !proposees.includes(autres[0].label), autres[0].label);
 
+  // La barre d'une enseignante ne doit pas lui proposer la comptabilité.
+  const sesLiens = await prof.$$eval(".side nav a",
+    (as) => as.map((a) => a.getAttribute("href")));
+  check("la barre d'une enseignante ne montre pas les écrans d'administration",
+    !sesLiens.includes("/frais") && !sesLiens.includes("/categorisation")
+    && !sesLiens.includes("/annee"),
+    sesLiens.join(", "));
+  check("mais elle garde ses propres écrans",
+    sesLiens.includes("/notes") && sesLiens.includes("/absences"));
+
   console.log("\nLa frontière tient sans passer par le formulaire");
   // Ouvrir directement la matière d'un collègue par l'URL.
   await prof.goto(`${BASE}/notes?classe=${classe[0].id}&matiere=${autres[0].id}`);
