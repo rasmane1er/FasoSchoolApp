@@ -31,6 +31,7 @@ import { isMultipart, readMultipart } from "./multipart.ts";
 import { rentreePage, saveYear, openYear, addClass } from "./rentree.ts";
 import { conseilPage, saveDeliberation } from "./conseil.ts";
 import { categorisationPage, saveDossier, addCriterion } from "./categorisation.ts";
+import { pointsDAttention, attentionCard } from "./attention.ts";
 import {
   guardianExists, createGuardianSession, resolveGuardian, revokeGuardian,
   loadChildren, famillePage, familleLoginPage, schoolNameOf,
@@ -132,8 +133,11 @@ async function dashboard(user: SessionUser): Promise<string> {
     period ? `Année ${period.year_label} — Trimestre ${period.sequence}` : undefined);
 
   if (!period) {
-    return page(chrome, "Tableau de bord",
-      `<h1>Tableau de bord</h1><div class="note warn">Aucune année scolaire en cours. Créez-en une pour commencer.</div>`);
+    return page(chrome, "Tableau de bord", `
+      <div><h1>Tableau de bord</h1></div>
+      <div class="note warn">Aucune année scolaire en cours.
+        <a href="/annee"><b>Ouvrez-en une</b></a> pour commencer : c'est elle qui
+        porte les trimestres, les classes et tout le reste.</div>`);
   }
 
   const data = await withSchool(schoolId, async (c) => {
@@ -209,11 +213,18 @@ async function dashboard(user: SessionUser): Promise<string> {
     </tr>`;
   }).join("");
 
+  // Ce qui demande une action passe AVANT les indicateurs : un tableau de bord
+  // se lit de haut en bas, et personne ne descend jusqu'aux tableaux.
+  const attention = attentionCard(
+    await pointsDAttention(schoolId, period.year_id, Number(period.sequence)));
+
   return page(chrome, "Tableau de bord", `
     <div>
       <h1>Bonjour ${esc(user.fullName.split(" ").slice(-1)[0])}</h1>
       <p style="margin:0;color:var(--muted)">${plural(data.classes.length, "classe")} — trimestre ${period.sequence}, clôture le ${new Date(period.ends_on).toLocaleDateString("fr-FR")}.</p>
     </div>
+
+    ${attention}
 
     <div class="tiles">
       <div class="tile"><div class="k">Bulletins prêts</div>

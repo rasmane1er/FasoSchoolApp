@@ -117,6 +117,19 @@ try {
   check("le crédit SMS est affiché", dash.includes("Crédit SMS"));
   check("le score de catégorisation remonte", dash.includes("68"));
 
+  /* Le tableau de bord doit remonter ce qui demande une ACTION, pas seulement
+     des indicateurs verts. Personne ne descend jusqu'aux tableaux. */
+  check("ce qui demande une action est en haut de page",
+    dash.includes("À traiter") || dash.includes("Rien à signaler"));
+  check("les règles non confirmées sont rappelées ici aussi",
+    dash.includes("n'ont pas été confirmées"),
+    "toutes les moyennes en dépendent");
+  check("le nombre n'est pas répété dans une même phrase",
+    !/\b(\d+)\s[^.<]*?:\s\1\s/.test(dash),
+    "« 1 élève ... : 1 sa famille » — accord sans le nombre");
+  check("chaque point d'attention mène à l'écran où le traiter",
+    !dash.includes("À traiter") || /href="\/(parametres|conflits|inscriptions|annee|categorisation|conseil|absences)"/.test(dash));
+
   console.log("\nBulletins");
   await page.click("text=Bulletins");
   await page.waitForLoadState("networkidle");

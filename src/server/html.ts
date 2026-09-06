@@ -27,7 +27,11 @@ export const fcfa = (n: number | null | undefined): string =>
 
 /** Accord du pluriel : « 1 classe », « 3 classes ». */
 export const plural = (n: number, singular: string, pluralForm?: string): string =>
-  `${n} ${n <= 1 ? singular : (pluralForm ?? singular + "s")}`;
+  `${n} ${accord(n, singular, pluralForm)}`;
+
+/** Le mot accordé, SANS le nombre : pour une phrase qui l'a déjà cité. */
+export const accord = (n: number, singular: string, pluralForm?: string): string =>
+  n <= 1 ? singular : (pluralForm ?? singular + "s");
 
 export const ordinal = (n: number | null): string =>
   n === null ? "—" : n === 1 ? "1<sup>er</sup>" : `${n}<sup>e</sup>`;

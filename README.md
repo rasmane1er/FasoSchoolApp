@@ -69,6 +69,8 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
   sur son propre cookie.
 - `src/server/categorisation.ts` — dossier de catégorisation : critères, pièces
   justificatives, score sur 100.
+- `src/server/attention.ts` — ce qui demande une action, en haut du tableau de
+  bord, et rien d'autre.
 - `src/lib/roster.ts` — lecture d'un fichier de liste (encodage, séparateur,
   intitulés, dates, numéros). 22 tests.
 - `src/server/multipart.ts` — envoi de fichier, écrit à la main pour ne pas
@@ -259,7 +261,7 @@ et trois parcours dans un vrai navigateur :
 | suite | ce qu'elle prouve |
 |---|---|
 | `test:rentree` (19) | un établissement ouvre son année, pose ses trimestres et crée ses classes sans intervention en base |
-| `test:e2e` (43) | connexion, notes, bulletins, appel et SMS, encaissement, droits |
+| `test:e2e` (47) | connexion, notes, bulletins, appel et SMS, encaissement, droits |
 | `test:offline` (18) | le réseau est réellement coupé, l'onglet fermé puis rouvert ; rien n'est perdu, rien n'est écrasé |
 | `test:categorisation` (20) | le dossier se saisit, les points hors barème sont refusés, et l'écran ne devine ni la catégorie ni le plafond |
 | `test:famille` (22) | un parent voit ses enfants et personne d'autre ; les deux sessions ne communiquent pas ; la page tient sous 60 Ko sans JavaScript |

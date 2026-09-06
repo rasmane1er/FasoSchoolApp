@@ -1,0 +1,190 @@
+/**
+ * Ce qui demande une action, et rien d'autre.
+ *
+ * Un tableau de bord qui affiche vingt indicateurs verts n'est pas lu. Celui-ci
+ * ne montre une ligne que lorsqu'il y a quelque chose à faire, chaque ligne dit
+ * quoi faire, et mène à l'écran où le faire. Quand il n'y a rien, il le dit en
+ * une phrase et se tait.
+ *
+ * L'ordre n'est pas décoratif : ce qui fausse un bulletin passe avant ce qui
+ * fait perdre du temps, et ce qui fait perdre du temps avant ce qui est
+ * simplement incomplet.
+ */
+
+import { withSchool } from "../lib/db.ts";
+import { esc, plural, accord } from "./html.ts";
+
+export type Gravite = "bloquant" | "important" | "a_faire";
+
+export interface Point {
+  gravite: Gravite;
+  texte: string;
+  action: string;
+  lien: string;
+}
+
+const RANG: Record<Gravite, number> = { bloquant: 0, important: 1, a_faire: 2 };
+
+export async function pointsDAttention(
+  schoolId: string, yearId: string | null, termSequence: number | null,
+): Promise<Point[]> {
+  const points: Point[] = [];
+
+  await withSchool(schoolId, async (c) => {
+    const un = async (sql: string, params: unknown[] = []): Promise<number> =>
+      Number((await c.query(sql, params)).rows[0]?.n ?? 0);
+
+    // --- Ce qui fausse un bulletin -----------------------------------------
+
+    const divergentes = await un(
+      `select count(*)::int as n from sync_conflicts where resolved_at is null`);
+    if (divergentes > 0) {
+      points.push({
+        gravite: "bloquant",
+        texte: `${plural(divergentes, "note divergente attend", "notes divergentes attendent")} un arbitrage.`,
+        action: "Arbitrer", lien: "/conflits",
+      });
+    }
+
+    const reglesNonConfirmees = await un(
+      `select count(*)::int as n from grading_policies where source_note is not null`);
+    if (reglesNonConfirmees > 0) {
+      points.push({
+        gravite: "bloquant",
+        texte: "Les règles de notation n'ont pas été confirmées : toutes les "
+          + "moyennes calculées restent indicatives.",
+        action: "Confirmer", lien: "/parametres",
+      });
+    }
+
+    // --- Ce qui fait perdre du temps ou de l'argent -------------------------
+
+    if (yearId) {
+      const sansTuteur = await un(
+        `select count(*)::int as n from enrolments e
+          where e.academic_year_id = $1
+            and not exists (
+              select 1 from student_guardians sg
+                join guardians g on g.id = sg.guardian_id
+               where sg.student_id = e.student_id and sg.receives_sms
+                 and g.phone is not null and g.phone <> '')`, [yearId]);
+      if (sansTuteur > 0) {
+        points.push({
+          gravite: "important",
+          texte: `${plural(sansTuteur, "élève n'a aucun numéro de tuteur",
+            "élèves n'ont aucun numéro de tuteur")} : `
+            + `${accord(sansTuteur, "sa famille ne recevra",
+                        "leurs familles ne recevront")} `
+            + "aucun SMS d'absence.",
+          action: "Compléter", lien: "/inscriptions",
+        });
+      }
+    }
+
+    const credit = await un(
+      `select coalesce(sum(case when direction = 'achat' then messages
+                                else -messages end), 0)::int as n
+         from sms_credit_ledger`);
+    if (credit < 100) {
+      points.push({
+        gravite: credit <= 0 ? "bloquant" : "important",
+        texte: credit <= 0
+          ? "Le crédit SMS est épuisé : plus aucune famille n'est prévenue."
+          : `Il reste ${credit} SMS. À ce rythme le crédit tombera pendant le trimestre.`,
+        action: "Voir", lien: "/absences",
+      });
+    }
+
+    // --- Ce qui est simplement incomplet -----------------------------------
+
+    if (yearId) {
+      const classes = await un(
+        `select count(*)::int as n from classes where academic_year_id = $1`, [yearId]);
+      if (classes === 0) {
+        points.push({
+          gravite: "bloquant",
+          texte: "Aucune classe n'est ouverte pour cette année.",
+          action: "Créer les classes", lien: "/annee",
+        });
+      } else {
+        const eleves = await un(
+          `select count(*)::int as n from enrolments where academic_year_id = $1`, [yearId]);
+        if (eleves === 0) {
+          points.push({
+            gravite: "bloquant",
+            texte: "Aucun élève n'est inscrit pour cette année.",
+            action: "Importer la liste", lien: "/inscriptions",
+          });
+        }
+      }
+
+      const sansPiece = await un(
+        `select count(*)::int as n from category_criteria cc
+           join category_assessments ca on ca.id = cc.category_assessment_id
+          where ca.academic_year_id = $1
+            and coalesce(cc.awarded_points, 0) > 0
+            and (cc.evidence_key is null or cc.evidence_key = '')`, [yearId]);
+      if (sansPiece > 0) {
+        points.push({
+          gravite: "a_faire",
+          texte: `${plural(sansPiece, "critère de catégorisation porte des points",
+            "critères de catégorisation portent des points")} sans pièce justificative.`,
+          action: "Compléter", lien: "/categorisation",
+        });
+      }
+
+      // Le conseil de classe n'a de sens qu'au troisième trimestre : le
+      // rappeler en novembre serait du bruit.
+      if (termSequence === 3) {
+        const sansDecision = await un(
+          `select count(*)::int as n from enrolments e
+            where e.academic_year_id = $1
+              and not exists (select 1 from conseil_decisions d
+                               where d.student_id = e.student_id
+                                 and d.academic_year_id = e.academic_year_id)`, [yearId]);
+        if (sansDecision > 0) {
+          points.push({
+            gravite: "important",
+            texte: `${plural(sansDecision, "élève attend", "élèves attendent")} `
+              + "la décision du conseil de classe.",
+            action: "Délibérer", lien: "/conseil",
+          });
+        }
+      }
+    }
+  });
+
+  return points.sort((a, b) => RANG[a.gravite] - RANG[b.gravite]);
+}
+
+const PASTILLE: Record<Gravite, [string, string]> = {
+  bloquant: ["p-bad", "à traiter"],
+  important: ["p-warn", "important"],
+  a_faire: ["p-info", "à faire"],
+};
+
+export function attentionCard(points: Point[]): string {
+  if (points.length === 0) {
+    return `<div class="card">
+      <header><b>Rien à signaler</b></header>
+      <div class="body"><p class="hint" style="margin:0">Aucune note en attente
+      d'arbitrage, aucune famille sans numéro, aucune règle à confirmer.</p></div>
+    </div>`;
+  }
+
+  return `<div class="card">
+    <header><b>À traiter</b>
+      <span style="color:var(--muted);font-size:13px">${
+        plural(points.length, "point", "points")}</span></header>
+    <table>
+      ${points.map((p) => {
+        const [pill, mot] = PASTILLE[p.gravite];
+        return `<tr>
+          <td style="width:1%"><span class="pill ${pill}">${mot}</span></td>
+          <td>${esc(p.texte)}</td>
+          <td class="r"><a href="${p.lien}">${esc(p.action)}</a></td>
+        </tr>`;
+      }).join("")}
+    </table>
+  </div>`;
+}
