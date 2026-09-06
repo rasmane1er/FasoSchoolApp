@@ -43,6 +43,8 @@ import { messagesPage, resoudre as resoudreMessage,
          renvoyer as renvoyerMessage } from "./messages.ts";
 import { personnelPage, ajouterMembre, changerFonction,
          basculerActivite } from "./personnel.ts";
+import { elevePage, elevesPage, corrigerIdentite, enregistrerTuteur,
+         retirerTuteur, enregistrerUrgence, retirerUrgence } from "./eleve.ts";
 import {
   transfertsPage, recordTransfer, addLivretEntry, certificatePage,
 } from "./transferts.ts";
@@ -1173,6 +1175,33 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
                   + `des messages pour joindre ces familles autrement.`
                 : ""),
         out.error));
+    }
+
+    // --- Fiche de l'élève ----------------------------------------------------
+    if (path === "/eleves" && req.method === "GET") {
+      if (!can(user, "voir_eleve")) return html(res, "Accès refusé.", 403);
+      return html(res, await elevesPage(user, await chromeFor(user, "eleves"), url));
+    }
+    if (path === "/eleve" && req.method === "GET") {
+      if (!can(user, "voir_eleve")) return html(res, "Accès refusé.", 403);
+      return html(res, await elevePage(user, await chromeFor(user, "eleves"), url));
+    }
+    if (path.startsWith("/eleve/") && req.method === "POST") {
+      // Voir n'est pas corriger : l'écriture reste au secrétariat.
+      if (!can(user, "inscrire")) return html(res, "Accès refusé.", 403);
+      const form = await formBody(req);
+      const out =
+        path === "/eleve/identite" ? await corrigerIdentite(user, form)
+        : path === "/eleve/tuteur" ? await enregistrerTuteur(user, form)
+        : path === "/eleve/tuteur/retirer" ? await retirerTuteur(user, form)
+        : path === "/eleve/urgence" ? await enregistrerUrgence(user, form)
+        : path === "/eleve/urgence/retirer" ? await retirerUrgence(user, form)
+        : null;
+      if (!out) return html(res, "Page introuvable.", 404);
+      const retour = new URL(url.toString());
+      retour.searchParams.set("id", out.studentId ?? form.get("eleve") ?? "");
+      return html(res, await elevePage(user, await chromeFor(user, "eleves"),
+        retour, out.flash, out.error));
     }
 
     // --- Personnel -----------------------------------------------------------

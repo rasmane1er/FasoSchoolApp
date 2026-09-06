@@ -207,7 +207,7 @@ export function can(user: SessionUser, action:
   | "voir_notes" | "saisir_notes" | "publier_bulletins"
   | "faire_appel" | "voir_scolarite" | "encaisser"
   | "voir_categorisation" | "parametrer" | "inscrire"
-  | "suivre_messages" | "gerer_personnel"): boolean {
+  | "suivre_messages" | "gerer_personnel" | "voir_eleve"): boolean {
   const r = new Set([...user.roles, user.fonction ?? ""]);
   const any = (...codes: string[]) => codes.some((x) => r.has(x));
 
@@ -244,5 +244,12 @@ export function can(user: SessionUser, action:
     // ajouter du personnel pourrait se nommer proviseur.
     case "gerer_personnel":
       return any("proviseur", "directeur");
+    // La fiche porte les numéros de téléphone d'une famille. Un enseignant n'en
+    // a pas besoin pour faire cours : quand il faut joindre des parents, cela
+    // passe par la vie scolaire, qui elle en répond. Modifier reste réservé à
+    // « inscrire » — voir n'est pas corriger.
+    case "voir_eleve":
+      return any("secretaire", "surveillant_general", "econome", "intendant",
+                 "censeur", "proviseur", "directeur");
   }
 }

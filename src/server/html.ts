@@ -191,6 +191,8 @@ const NAV: Array<{ titre: string | null; liens: NavEntry[] }> = [
       droit: "publier_bulletins" },
   ] },
   { titre: "Vie scolaire", liens: [
+    { href: "/eleves", label: "Chercher un élève", key: "eleves",
+      droit: "voir_eleve" },
     { href: "/inscriptions", label: "Inscriptions", key: "inscriptions", droit: "inscrire" },
     { href: "/transferts", label: "Transferts", key: "transferts", droit: "inscrire" },
     { href: "/communiques", label: "Communiqués", key: "communiques",

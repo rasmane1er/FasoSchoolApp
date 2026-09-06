@@ -17,7 +17,7 @@
     "start": "node --experimental-strip-types src/server/app.ts",
     "test:e2e": "node tests/app.e2e.mjs",
     "test:offline": "node tests/offline.e2e.mjs",
-    "check:all": "npm run typecheck && npm test && npm run test:rentree && npm run test:e2e && npm run test:offline && npm run test:evaluations && npm run test:messages && npm run test:personnel && npm run test:import && npm run test:conseil && npm run test:famille && npm run test:categorisation && npm run test:services && npm run test:cloture && npm run test:frais && npm run test:communiques && npm run test:transferts && npm run test:bourses",
+    "check:all": "npm run typecheck && npm test && npm run test:rentree && npm run test:e2e && npm run test:offline && npm run test:evaluations && npm run test:messages && npm run test:personnel && npm run test:eleve && npm run test:import && npm run test:conseil && npm run test:famille && npm run test:categorisation && npm run test:services && npm run test:cloture && npm run test:frais && npm run test:communiques && npm run test:transferts && npm run test:bourses",
     "test:import": "node tests/import.e2e.mjs",
     "test:rentree": "node tests/rentree.e2e.mjs",
     "test:conseil": "node tests/conseil.e2e.mjs",
@@ -33,7 +33,8 @@
     "test:bourses": "node tests/bourses.e2e.mjs",
     "test:evaluations": "node tests/evaluations.e2e.mjs",
     "test:messages": "node tests/messages.e2e.mjs",
-    "test:personnel": "node tests/personnel.e2e.mjs"
+    "test:personnel": "node tests/personnel.e2e.mjs",
+    "test:eleve": "node tests/eleve.e2e.mjs"
   },
   "dependencies": {
     "pg": "^8.23.0"

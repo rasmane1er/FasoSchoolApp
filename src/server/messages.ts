@@ -46,6 +46,7 @@ export type Filtre = "a_traiter" | "echecs" | "tous";
 
 export interface Ligne {
   id: string;
+  eleveId: string | null;
   eleve: string | null;
   tuteur: string | null;
   phone: string;
@@ -83,7 +84,7 @@ export async function loadRegistre(
 
     const r = await c.query(
       `select m.id, m.to_phone, m.body, m.status, m.error_detail, m.queued_at,
-              m.resolution, m.resolved_at,
+              m.resolution, m.resolved_at, m.student_id,
               st.first_names || ' ' || st.last_name as eleve,
               g.full_name as tuteur,
               rs.full_name as resolu_par
@@ -113,7 +114,8 @@ export async function loadRegistre(
       echecsAujourdhui: compte.rows[0].echecs_jour,
       envoyesAujourdhui: compte.rows[0].envoyes_jour,
       lignes: r.rows.map((x: any): Ligne => ({
-        id: x.id, eleve: x.eleve, tuteur: x.tuteur, phone: x.to_phone,
+        id: x.id, eleveId: x.student_id, eleve: x.eleve, tuteur: x.tuteur,
+        phone: x.to_phone,
         body: x.body, status: x.status, raison: x.error_detail,
         quand: heure(x.queued_at), resolution: x.resolution,
         resoluLe: x.resolved_at ? heure(x.resolved_at) : null,
@@ -311,7 +313,11 @@ ${r.lignes.length === 0 ? `
       ${r.lignes.map((l) => `
       <tr>
         <td class="num">${esc(l.quand)}</td>
-        <td>${esc(l.eleve ?? "—")}
+        <td>${l.eleveId
+          // Le lien vers la fiche : c'est là que se corrige un numéro faux,
+          // et c'est la seule chose que cet écran ne peut pas faire lui-même.
+          ? `<a href="/eleve?id=${l.eleveId}">${esc(l.eleve ?? "la fiche")}</a>`
+          : esc(l.eleve ?? "—")}
           <!-- Le texte du message, parce que « non remis » ne dit pas ce que
                la famille a manqué : une absence d'hier ou une réunion demain
                n'appellent pas la même urgence. -->

@@ -92,6 +92,8 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
   n'ont pas reçu, et ce qu'on en a fait.
 - `src/server/personnel.ts` — les comptes du personnel : créer, changer de
   fonction, écarter sans effacer.
+- `src/server/eleve.ts` — la fiche de l'élève : chercher, corriger l'identité,
+  tenir les tuteurs et leurs numéros.
 - `src/lib/roster.ts` — lecture d'un fichier de liste (encodage, séparateur,
   intitulés, dates, numéros). 22 tests.
 - `src/server/multipart.ts` — envoi de fichier, écrit à la main pour ne pas
@@ -108,6 +110,42 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
 **Démonstration** — `npm run demo` crée un établissement, une 6<sup>e</sup> de
 douze élèves, huit disciplines notées, la scolarité et un dossier de
 catégorisation entamé, puis écrit les bulletins dans `out/`.
+
+### La fiche de l'élève
+
+Elle manquait, et son absence rendait fausse une phrase écrite ailleurs : le
+suivi des messages annonce qu'un numéro erroné « se répare dans la fiche de
+l'élève, au secrétariat ». Cette fiche n'existait pas — on ne pouvait ni
+chercher un élève, ni voir ses tuteurs, ni corriger un chiffre.
+
+**On cherche par le numéro autant que par le nom.** Quand un SMS revient en
+échec, on tient un numéro et rien d'autre ; une recherche qui n'accepte que le
+nom oblige à deviner de quel élève il s'agit. Le registre des messages mène
+directement à la fiche : c'est la seule chose que cet écran-là ne peut pas
+faire lui-même.
+
+Trois choses que l'écran dit à voix haute, parce qu'elles ne se devinent pas :
+
+- **Un tuteur est partagé entre ses enfants.** Corriger son numéro le corrige
+  pour toute la fratrie. C'est juste, et c'est exactement ce qu'une secrétaire
+  ne devine pas — la fiche l'annonce avant, pas après. Rattacher un numéro
+  déjà connu rattache le tuteur existant au lieu de le recréer : une mère de
+  trois élèves doit recevoir un communiqué, pas trois. Détacher un tuteur ne
+  l'efface pas ; ses autres enfants le gardent, et ses messages passés le
+  référencent.
+- **Retirer le dernier numéro n'est pas interdit, il est annoncé.** Un élève
+  peut réellement n'avoir aucun téléphone joignable ; le logiciel n'invente pas
+  une contrainte que la vie n'a pas. Mais il dit que cette famille ne recevra
+  plus rien, et le tableau de bord le rappelle.
+- **Corriger un nom change une réimpression, pas l'exemplaire déjà remis.** Le
+  matricule, lui, ne se corrige pas ici : il figure sur des documents délivrés
+  et dans les états transmis, et le changer d'un clic ferait deux identités
+  pour un enfant.
+
+**Voir n'est pas corriger.** La fiche porte les numéros d'une famille : le
+surveillant général la lit — il doit pouvoir appeler — mais seul le
+secrétariat y écrit, et un enseignant n'y accède pas du tout. Quand il faut
+joindre des parents, cela passe par la vie scolaire, qui en répond.
 
 ### Le personnel
 
@@ -499,10 +537,11 @@ Comptes de démonstration — le code s'affiche à l'écran, aucun SMS n'est env
 | `70000005` | Directeur |
 
 Vérifications : `npm run check:all` — typecheck strict, 60 tests unitaires,
-et seize parcours dans un vrai navigateur :
+et dix-sept parcours dans un vrai navigateur :
 
 | suite | ce qu'elle prouve |
 |---|---|
+| `test:eleve` (35) | on retrouve un élève par le numéro de son tuteur, un tuteur partagé se corrige pour la fratrie, et voir n'est pas corriger |
 | `test:personnel` (29) | un établissement crée ses propres comptes ; le dernier chef ne peut être ni écarté ni rétrogradé ; écarter quelqu'un ferme ses sessions ouvertes |
 | `test:messages` (26) | un refus de l'opérateur est enregistré avec sa raison, remonte au tableau de bord, et ne se referme que par un geste humain tracé |
 | `test:evaluations` (22) | un enseignant ouvre un devoir pour sa matière ; une composition ne s'ouvre que par le censeur, et pour tout le niveau |
