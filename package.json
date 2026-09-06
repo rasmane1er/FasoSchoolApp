@@ -22,7 +22,9 @@
     "test:rentree": "node tests/rentree.e2e.mjs",
     "test:conseil": "node tests/conseil.e2e.mjs",
     "test:famille": "node tests/famille.e2e.mjs",
-    "test:categorisation": "node tests/categorisation.e2e.mjs"
+    "test:categorisation": "node tests/categorisation.e2e.mjs",
+    "db:sauvegarde": "./scripts/sauvegarde.sh",
+    "db:epreuve": "./scripts/restauration-verifiee.sh"
   },
   "dependencies": {
     "pg": "^8.23.0"

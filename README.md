@@ -78,6 +78,10 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
 - `public/offline.js` — file d'attente des notes dans IndexedDB.
 - `public/sw.js` — cache de l'écran de saisie.
 
+**Exploitation**
+- `scripts/sauvegarde.sh` — sauvegarde chiffrée, jamais écrite en clair.
+- `scripts/restauration-verifiee.sh` — l'épreuve de restauration.
+
 **Démonstration** — `npm run demo` crée un établissement, une 6<sup>e</sup> de
 douze élèves, huit disciplines notées, la scolarité et un dossier de
 catégorisation entamé, puis écrit les bulletins dans `out/`.
@@ -300,6 +304,43 @@ Une matinée avec un censeur coopératif et une photocopieuse ferme les cinq.
 - **Arrêté n°2026-101** : `fee_lines.cap_treatment` distingue plafonné,
   autorisé-supplémentaire et exclu. L'inscription est DANS le plafond ;
   l'hébergement en est exclu.
+
+---
+
+## Sauvegarde
+
+```bash
+FASOSCHOOL_PASSPHRASE='...' ./scripts/sauvegarde.sh /media/usb
+
+ADMIN_DATABASE_URL='postgres://postgres@localhost/postgres' \
+FASOSCHOOL_PASSPHRASE='...' \
+./scripts/restauration-verifiee.sh /media/usb/fasoschool-20260906-1400.dump.gpg
+```
+
+Le fichier produit contient les noms, les dates de naissance et les numéros des
+familles de tout un établissement. Il est donc **chiffré au vol** : `pg_dump`
+écrit sur la sortie standard et `gpg` chiffre dans le tuyau, le contenu en clair
+ne touche jamais le disque. Le scénario réel n'est pas une attaque
+sophistiquée — c'est l'ordinateur du secrétariat volé, ou la clé USB oubliée
+dans un taxi.
+
+**Une sauvegarde jamais restaurée n'est pas une sauvegarde.** Le mode d'échec
+ordinaire n'est pas l'absence de sauvegarde : c'est une sauvegarde quotidienne,
+fidèle, qui depuis huit mois écrit un fichier ne contenant que le schéma, et
+dont personne ne le sait. `restauration-verifiee.sh` restaure réellement dans
+une base jetable et échoue — code de sortie non nul — dans ces trois cas :
+
+| cas | ce qui se passe |
+|---|---|
+| fichier abîmé sur le support | l'empreinte SHA-256 ne correspond plus |
+| sauvegarde ne contenant que le schéma | toutes les tables vides → échec |
+| politiques RLS perdues | moins de 50 politiques restaurées → échec |
+
+Ce dernier point n'est pas théorique : une base restaurée sans son
+row-level security serait ouverte à tous les établissements à la fois.
+
+À lancer une fois par mois. Les trois cas ci-dessus ont été éprouvés en
+fabriquant volontairement chacune des trois sauvegardes défectueuses.
 
 ---
 
