@@ -22,6 +22,8 @@ import {
 import { page, loginPage, esc, fr, fcfa, ordinal, plural, type PageChrome } from "./html.ts";
 import { settingsPage, saveSettings, type Period } from "./settings.ts";
 import { financePage, collectPage, collect, receiptPage } from "./finance.ts";
+import { parseMutations, applyMutations, conflictsPage, resolveConflict, conflictCount } from "./sync.ts";
+import { readFile } from "node:fs/promises";
 
 const PORT = Number(process.env.PORT ?? 4180);
 
@@ -263,7 +265,8 @@ async function notesPage(user: SessionUser, url: URL, flash?: string): Promise<s
       [classId],
     );
     const grades = await c.query(
-      `select ge.evaluation_id, ge.student_id, ge.score, ge.is_absent, ge.is_justified
+      `select ge.evaluation_id, ge.student_id, ge.score, ge.is_absent, ge.is_justified,
+              ge.updated_at
          from grade_entries ge join evaluations ev on ev.id = ge.evaluation_id
         where ev.class_id = $1 and ev.term_id = $2 and ev.subject_id = $3`,
       [classId, period.term_id, chosen],
@@ -310,6 +313,9 @@ async function notesPage(user: SessionUser, url: URL, flash?: string): Promise<s
       const val = g?.is_absent ? "abs" : (g?.score !== undefined && g?.score !== null ? fr(Number(g.score)) : "");
       return `<td class="r"><input class="note-cell" name="n_${esc(e.id)}_${esc(st.id)}"
         value="${esc(val)}" inputmode="decimal" autocomplete="off"
+        data-eval="${esc(e.id)}" data-student="${esc(st.id)}"
+        data-original="${esc(val)}"
+        data-updated="${g?.updated_at ? new Date(g.updated_at).toISOString() : ""}"
         aria-label="${esc(st.last_name)} — ${esc(e.label ?? e.eval_type)}"></td>`;
     }).join("");
     return `<tr><td class="num" style="color:var(--faint)">${String(i + 1).padStart(2, "0")}</td>
@@ -323,7 +329,8 @@ async function notesPage(user: SessionUser, url: URL, flash?: string): Promise<s
     ${flash ? `<div class="ok">${esc(flash)}</div>` : ""}
     <div class="note">La moyenne suit la règle de l'établissement : les devoirs et la composition
       sont pondérés séparément, et une composition non encore passée n'abaisse pas la moyenne.</div>
-    <form method="post" action="/notes?classe=${esc(classId)}&amp;matiere=${esc((d as any).chosen)}">
+    <div id="etat-file" hidden></div>
+    <form method="post" data-offline action="/notes?classe=${esc(classId)}&amp;matiere=${esc((d as any).chosen)}">
       <div class="card"><div class="scroll"><table>
         <thead><tr><th>N°</th><th>Nom et prénoms</th>${heads}</tr></thead>
         <tbody>${body}</tbody>
@@ -331,8 +338,10 @@ async function notesPage(user: SessionUser, url: URL, flash?: string): Promise<s
       <div class="row" style="margin-top:16px">
         <button class="btn" type="submit">Enregistrer</button>
         <a class="btn ghost" href="/bulletins?classe=${esc(classId)}">Voir les bulletins</a>
+        <span style="font-size:12.5px;color:var(--muted)">Sans réseau, la saisie est conservée et repart toute seule.</span>
       </div>
-    </form>`);
+    </form>
+    <script src="/offline.js" defer></script>`);
 }
 
 async function saveNotes(user: SessionUser, url: URL, form: URLSearchParams): Promise<number> {
@@ -745,6 +754,24 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
   const token = cookies(req).fs_session ?? null;
   const user = await resolveSession(token);
 
+  // Fichiers statiques : liste blanche explicite, aucune traversée possible.
+  const STATIC: Record<string, string> = {
+    "/offline.js": "application/javascript; charset=utf-8",
+    "/sw.js": "application/javascript; charset=utf-8",
+  };
+  if (req.method === "GET" && STATIC[path]) {
+    try {
+      const body = await readFile(new URL(`../../public${path}`, import.meta.url), "utf-8");
+      res.writeHead(200, {
+        "content-type": STATIC[path]!,
+        "cache-control": "no-cache",
+        // Le service worker doit pouvoir contrôler toute l'origine.
+        ...(path === "/sw.js" ? { "service-worker-allowed": "/" } : {}),
+      });
+      return res.end(body);
+    } catch { return html(res, "Introuvable.", 404); }
+  }
+
   // Connexion
   if (path === "/connexion" && req.method === "GET") {
     return html(res, loginPage({ step: "phone" }));
@@ -818,6 +845,34 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       const r = await saveAbsences(user, url, await formBody(req));
       return html(res, await absencesPage(user, url,
         `Appel enregistré : ${plural(r.absents, "absence")}, ${plural(r.queued, "SMS envoyé", "SMS envoyés")} pour ${r.cost} F.`));
+    }
+
+    if (path === "/api/sync/notes" && req.method === "POST") {
+      if (!can(user, "saisir_notes")) {
+        res.writeHead(403, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ error: "forbidden" }));
+      }
+      const chunks: Buffer[] = [];
+      for await (const ch of req) chunks.push(ch as Buffer);
+      let payload: unknown = null;
+      try { payload = JSON.parse(Buffer.concat(chunks).toString("utf-8")); } catch { payload = null; }
+      const results = await applyMutations(user, parseMutations(payload));
+      res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+      return res.end(JSON.stringify({ results }));
+    }
+
+    if (path === "/conflits" && req.method === "GET") {
+      if (!can(user, "publier_bulletins")) return html(res, "Accès refusé.", 403);
+      const chrome = await chromeFor(user, "conflits");
+      return html(res, await conflictsPage(user, chrome));
+    }
+    if (path === "/conflits" && req.method === "POST") {
+      if (!can(user, "publier_bulletins")) return html(res, "Accès refusé.", 403);
+      const form = await formBody(req);
+      const choix = form.get("choix") === "appareil" ? "appareil" : "serveur";
+      const flash = await resolveConflict(user, form.get("id") ?? "", choix);
+      const chrome = await chromeFor(user, "conflits");
+      return html(res, await conflictsPage(user, chrome, flash));
     }
 
     if (path === "/parametres" && req.method === "GET") {

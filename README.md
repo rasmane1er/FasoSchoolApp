@@ -57,15 +57,38 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
 - `src/server/settings.ts` — règles de notation, corrigeables par le censeur
   avec aperçu immédiat sur une classe réelle.
 - `src/server/finance.ts` — encaissement au guichet et reçus numérotés.
+- `src/server/sync.ts` — réception des saisies hors ligne, détection des
+  divergences, écran d'arbitrage du censeur.
+- `public/offline.js` — file d'attente des notes dans IndexedDB.
+- `public/sw.js` — cache de l'écran de saisie.
 
 **Démonstration** — `npm run demo` crée un établissement, une 6<sup>e</sup> de
 douze élèves, huit disciplines notées, la scolarité et un dossier de
 catégorisation entamé, puis écrit les bulletins dans `out/`.
 
+### La saisie hors ligne
+
+C'est le point où un logiciel scolaire se perd au Burkina : l'enseignant
+saisit quarante notes, le réseau tombe, tout est perdu. Ici :
+
+1. La note est écrite dans **IndexedDB avant** toute tentative d'envoi. Si le
+   réseau tombe entre les deux, rien n'est perdu — et la file survit à la
+   fermeture de l'onglet.
+2. Chaque saisie porte un `mutation_id` généré par l'appareil. Le rejeu de la
+   même saisie répond `deja_applique` : renvoyer la file entière ne fait
+   jamais de mal.
+3. **Rien n'est écrasé en silence.** Si le serveur a bougé depuis la copie
+   qu'avait l'appareil et que la valeur diffère, la saisie est marquée
+   `conflit`, la valeur du serveur est conservée, et le censeur voit les deux
+   côte à côte dans `/conflits` pour trancher. Une note qui disparaît sans
+   trace détruit la confiance d'un établissement en une semaine.
+4. Sans JavaScript, le formulaire se poste normalement. Le hors-ligne est une
+   amélioration, jamais une dépendance.
+
 ### Ce qui n'existe pas encore
 
-La saisie hors-ligne, la saisie du dossier de catégorisation (l'écran est en
-lecture seule), Orange Money et Moov Money — bloqués sur le RCCM.
+La saisie du dossier de catégorisation (l'écran est en lecture seule), Orange
+Money et Moov Money — bloqués sur le RCCM.
 
 Volontairement : le reste attend un vrai bulletin burkinabè.
 
@@ -96,7 +119,9 @@ Comptes de démonstration — le code s'affiche à l'écran, aucun SMS n'est env
 | `70000005` | Directeur |
 
 Vérifications : `npm run check:all` — typecheck strict, 15 tests du moteur,
-27 assertions dans un vrai navigateur.
+42 assertions dans un vrai navigateur, plus 18 assertions hors ligne
+(`node tests/offline.e2e.mjs`) qui coupent réellement le réseau du navigateur,
+ferment l'onglet, le rouvrent et vérifient que rien n'a été perdu.
 
 ---
 
