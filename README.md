@@ -32,21 +32,39 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
 
 ### Ce qui existe
 
+**Base**
 - `db/migrations/0001_initial.sql` — le schéma. UUID, `school_id` partout,
   row-level security sur les 54 tables multi-locataires.
 - `db/migrations/0002_reference_data.sql` — le référentiel national
   (CP1→Tle, séries du BAC, matières par champ disciplinaire, fonctions
-  burkinabè) et `seed_school_defaults()`.
+  burkinabè), `seed_school_defaults()`, `provision_school()` et les quatre
+  fonctions d'authentification.
 - `db/tests/rls_isolation.sql` — le test d'isolation contradictoire.
+
+**Métier**
 - `src/lib/bulletin.ts` — le moteur de calcul. 15 tests.
+- `src/lib/repository.ts` — chargement d'une classe, règles choisies par date
+  d'effet.
+- `src/lib/render.ts` — bulletin A4 imprimable.
 - `src/lib/db.ts` — accès base avec contexte d'établissement obligatoire.
 - `src/lib/sms.ts` — canal SMS, adaptateur Orange Burkina.
 
+**Application**
+- `src/server/session.ts` — connexion par téléphone et code à usage unique.
+- `src/server/html.ts` — mise en page et composants.
+- `src/server/app.ts` — tableau de bord, saisie des notes, bulletins, appel
+  et SMS, scolarité, catégorisation.
+
+**Démonstration** — `npm run demo` crée un établissement, une 6<sup>e</sup> de
+douze élèves, huit disciplines notées, la scolarité et un dossier de
+catégorisation entamé, puis écrit les bulletins dans `out/`.
+
 ### Ce qui n'existe pas encore
 
-L'interface web, l'API, l'authentification par OTP, le rendu PDF du bulletin,
-la saisie hors-ligne. Volontairement : la maquette des écrans est faite,
-le code attend un vrai bulletin burkinabè.
+La saisie hors-ligne, l'encaissement (les écrans scolarité et catégorisation
+sont en lecture seule), Orange Money et Moov Money — bloqués sur le RCCM.
+
+Volontairement : le reste attend un vrai bulletin burkinabè.
 
 ---
 
@@ -60,8 +78,22 @@ export DATABASE_URL=postgres://fasoschool_app:...@localhost:5432/fasoschool
 npm install
 npm run db:migrate
 npm run db:test:rls        # doit passer avant tout développement
-npm test
+npm run demo               # établissement de démonstration + bulletins
+npm start                  # http://localhost:4180
 ```
+
+Comptes de démonstration — le code s'affiche à l'écran, aucun SMS n'est envoyé :
+
+| numéro | fonction |
+|---|---|
+| `70000001` | Censeur |
+| `70000002` | Enseignante |
+| `70000003` | Surveillant général |
+| `70000004` | Économe |
+| `70000005` | Directeur |
+
+Vérifications : `npm run check:all` — typecheck strict, 15 tests du moteur,
+27 assertions dans un vrai navigateur.
 
 ---
 
