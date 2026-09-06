@@ -30,6 +30,12 @@ import {
 import { isMultipart, readMultipart } from "./multipart.ts";
 import { rentreePage, saveYear, openYear, addClass } from "./rentree.ts";
 import { conseilPage, saveDeliberation } from "./conseil.ts";
+import {
+  guardianExists, createGuardianSession, resolveGuardian, revokeGuardian,
+  loadChildren, famillePage, familleLoginPage, schoolNameOf,
+} from "./famille.ts";
+import { issueOtp, consumeOtp } from "./session.ts";
+import { withoutSchool } from "../lib/db.ts";
 import { readFile } from "node:fs/promises";
 
 const PORT = Number(process.env.PORT ?? 4180);
@@ -777,6 +783,53 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       });
       return res.end(body);
     } catch { return html(res, "Introuvable.", 404); }
+  }
+
+  /* --- Espace famille -------------------------------------------------------
+   *
+   * Volontairement AVANT le mur d'authentification du personnel, et sur son
+   * propre cookie. Une session de famille ne traverse jamais resolveSession() :
+   * il n'existe aucun chemin qui la transforme en session de personnel.
+   */
+  const familyToken = cookies(req).fs_famille ?? null;
+
+  if (path === "/famille" && req.method === "GET") {
+    const g = await resolveGuardian(familyToken);
+    if (!g) return html(res, familleLoginPage("phone"));
+    const [nom, enfants] = await Promise.all([
+      schoolNameOf(g.schoolId), loadChildren(g),
+    ]);
+    return html(res, famillePage(g, nom, enfants));
+  }
+  if (path === "/famille/connexion" && req.method === "POST") {
+    const form = await formBody(req);
+    const phone = form.get("phone") ?? "";
+    // Le défi est créé même pour un numéro inconnu : répondre différemment
+    // ferait de cette page un annuaire des familles de l'établissement.
+    const r = await issueOtp(phone, (p, c) => guardianExists(c, p));
+    return html(res, r.ok
+      ? familleLoginPage("code", { phone, devCode: r.devCode })
+      : familleLoginPage("phone", { phone, error: r.error }));
+  }
+  if (path === "/famille/verifier" && req.method === "POST") {
+    const form = await formBody(req);
+    const phone = form.get("phone") ?? "";
+    const verdict = await withoutSchool(async (c) =>
+      consumeOtp(c, phone, form.get("code") ?? ""));
+    if (!verdict.ok) {
+      return html(res, familleLoginPage("code", { phone, error: verdict.error }));
+    }
+    const tok = await createGuardianSession(phone);
+    if (!tok) {
+      return html(res, familleLoginPage("phone", { phone,
+        error: "Ce numéro n'est rattaché à aucun élève. Voyez le secrétariat." }));
+    }
+    return redirect(res, "/famille",
+      `fs_famille=${tok}; Path=/famille; HttpOnly; SameSite=Lax; Max-Age=43200`);
+  }
+  if (path === "/famille/sortie") {
+    if (familyToken) await revokeGuardian(familyToken);
+    return redirect(res, "/famille", "fs_famille=; Path=/famille; HttpOnly; Max-Age=0");
   }
 
   // Connexion

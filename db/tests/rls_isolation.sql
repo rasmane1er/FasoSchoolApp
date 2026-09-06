@@ -32,6 +32,15 @@ insert into guardians (id, school_id, full_name, phone) values
   ('aaaaaaaa-0000-0000-0000-000000000003','11111111-1111-1111-1111-111111111111','Tuteur A','70000001'),
   ('bbbbbbbb-0000-0000-0000-000000000003','22222222-2222-2222-2222-222222222222','Tuteur B','70000002');
 
+-- Sessions des familles : le cloisonnement doit valoir aussi pour la porte
+-- que le projet ouvre vers l'extérieur. C'est la table dont une fuite serait
+-- la plus grave : elle donnerait accès au dossier d'un enfant.
+insert into guardian_sessions (school_id, guardian_id, access_token_hash, expires_at) values
+  ('11111111-1111-1111-1111-111111111111','aaaaaaaa-0000-0000-0000-000000000003',
+   'jeton-a', now() + interval '1 hour'),
+  ('22222222-2222-2222-2222-222222222222','bbbbbbbb-0000-0000-0000-000000000003',
+   'jeton-b', now() + interval '1 hour');
+
 \echo '--- contexte : établissement A ---'
 set role fasoschool_app;
 select set_config('fasoschool.school_id', '11111111-1111-1111-1111-111111111111', false);
@@ -56,6 +65,20 @@ begin
   if n <> 1 then raise exception 'FAIL schools: attendu 1, obtenu %', n; end if;
 
   raise notice 'OK  lectures isolées';
+end $$;
+
+-- Les sessions de famille de l'établissement B sont invisibles depuis A.
+do $$
+declare n int;
+begin
+  select count(*) into n from guardian_sessions;
+  if n <> 1 then
+    raise exception 'FUITE guardian_sessions: % lignes visibles depuis A', n;
+  end if;
+  select count(*) into n from guardian_sessions where access_token_hash = 'jeton-b';
+  if n <> 0 then
+    raise exception 'FUITE GRAVE: le jeton d''une famille de B est lisible depuis A';
+  end if;
 end $$;
 
 -- Écriture dans un autre établissement : doit être refusée par WITH CHECK.

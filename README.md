@@ -39,6 +39,8 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
   (CP1→Tle, séries du BAC, matières par champ disciplinaire, fonctions
   burkinabè), `seed_school_defaults()`, `provision_school()` et les quatre
   fonctions d'authentification.
+- `db/migrations/0003_guardian_access.sql` — sessions des familles, séparées
+  de celles du personnel, et leurs quatre fonctions d'authentification.
 - `db/tests/rls_isolation.sql` — le test d'isolation contradictoire.
 
 **Métier**
@@ -63,6 +65,8 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
   sur place, réinscription sans doublon.
 - `src/server/conseil.ts` — conseil de classe : proposition motivée, décision
   humaine, livret scolaire cumulatif.
+- `src/server/famille.ts` — espace des familles : une page, sans JavaScript,
+  sur son propre cookie.
 - `src/lib/roster.ts` — lecture d'un fichier de liste (encodage, séparateur,
   intitulés, dates, numéros). 22 tests.
 - `src/server/multipart.ts` — envoi de fichier, écrit à la main pour ne pas
@@ -125,6 +129,32 @@ Et trois règles de conduite :
    et que deux élèves portent ce nom, la ligne est **bloquée** plutôt que
    rattachée au hasard : rattacher un enfant à la fiche d'un homonyme est pire
    qu'un import incomplet.
+
+### L'espace des familles
+
+`/famille` — l'idée d'origine du projet. Un parent entre le numéro qu'il a
+donné à l'établissement, reçoit un code, et voit les notes, les absences et la
+scolarité de ses enfants. Une seule page, **sans JavaScript**, sous 60 Ko :
+c'est un téléphone bon marché sur un réseau médiocre.
+
+Trois décisions structurent cet écran :
+
+- **Un tuteur n'est pas un membre du personnel, et n'en devient pas un.**
+  Table de sessions séparée, cookie séparé limité à `/famille`, quatre
+  fonctions d'authentification distinctes. Il n'existe aucun chemin de code qui
+  transforme une session de famille en session du personnel — le test le
+  vérifie dans les deux sens.
+- **Le périmètre est l'enfant, pas l'établissement.** Ce qui s'affiche vient de
+  `student_guardians`. Le test d'isolation vérifie qu'une session de famille
+  d'un établissement est invisible depuis un autre : c'est la table dont une
+  fuite serait la plus grave.
+- **Un numéro inconnu reçoit exactement la même page qu'un numéro connu.**
+  Répondre différemment ferait de cette page l'annuaire des familles de
+  l'établissement.
+
+Les chiffres affichés viennent du moteur de bulletin, sur la classe entière —
+la famille lit exactement les nombres du bulletin, rang compris. Et une moyenne
+calculée avec des règles encore non confirmées est annoncée comme indicative.
 
 ### Le conseil de classe
 
@@ -207,6 +237,7 @@ et trois parcours dans un vrai navigateur :
 | `test:rentree` (19) | un établissement ouvre son année, pose ses trimestres et crée ses classes sans intervention en base |
 | `test:e2e` (42) | connexion, notes, bulletins, appel et SMS, encaissement, droits |
 | `test:offline` (18) | le réseau est réellement coupé, l'onglet fermé puis rouvert ; rien n'est perdu, rien n'est écrasé |
+| `test:famille` (22) | un parent voit ses enfants et personne d'autre ; les deux sessions ne communiquent pas ; la page tient sous 60 Ko sans JavaScript |
 | `test:conseil` (19) | la proposition est motivée, la décision humaine prime, un redoublement interdit est refusé et le livret n'est pas dupliqué |
 | `test:import` (30) | un vrai fichier Windows-1252 est importé, corrigé dans l'aperçu, puis réimporté sans créer de doublon |
 

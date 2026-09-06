@@ -57,14 +57,23 @@ async function rateLimit(c: PoolClient, key: string): Promise<boolean> {
 }
 
 /**
- * Démarre une connexion. Renvoie le code en clair UNIQUEMENT hors production,
- * pour que la démonstration soit utilisable sans forfait SMS.
+ * Émet un code à usage unique pour ce numéro.
+ *
+ * Le défi est créé MÊME si le numéro est inconnu : répondre différemment
+ * transformerait la page de connexion en annuaire — on saurait qui possède un
+ * compte en essayant des numéros.
+ *
+ * `known` dit seulement s'il faut réellement envoyer un SMS. Le code en clair
+ * n'est renvoyé qu'à défaut d'envoi, pour que la démonstration soit utilisable
+ * sans forfait.
+ *
+ * Partagé par le personnel et par les familles : deux portes, un seul mécanisme
+ * de code, une seule limitation de débit.
  */
-export async function startLogin(rawPhone: string): Promise<{
-  ok: boolean;
-  devCode?: string;
-  error?: string;
-}> {
+export async function issueOtp(
+  rawPhone: string,
+  isKnown: (phone: string, c: PoolClient) => Promise<boolean>,
+): Promise<{ ok: boolean; devCode?: string; error?: string }> {
   const phone = normalisePhone(rawPhone);
   if (phone.length < 8) return { ok: false, error: "Numéro invalide." };
 
@@ -73,8 +82,6 @@ export async function startLogin(rawPhone: string): Promise<{
       return { ok: false, error: "Trop de tentatives. Réessayez dans quelques minutes." };
     }
 
-    // On crée le défi même si le numéro est inconnu : révéler qui possède un
-    // compte transformerait la page de connexion en annuaire.
     const code = String(randomBytes(3).readUIntBE(0, 3) % 1_000_000).padStart(6, "0");
 
     await c.query(
@@ -87,11 +94,7 @@ export async function startLogin(rawPhone: string): Promise<{
         where expires_at < now() - interval '1 hour'`,
     );
 
-    // Passe par auth_lookup_user : sous RLS strict, un SELECT direct sur users
-    // ne renvoie rien tant qu'aucun établissement n'est en contexte.
-    const known = await c.query(`select id from auth_lookup_user($1)`, [phone]);
-
-    if ((known.rowCount ?? 0) > 0 && process.env.SMS_PROVIDER === "orange_bf") {
+    if (await isKnown(phone, c) && process.env.SMS_PROVIDER === "orange_bf") {
       const sms = createSmsChannel();
       await sms.send({
         to: phone,
@@ -105,6 +108,50 @@ export async function startLogin(rawPhone: string): Promise<{
   });
 }
 
+/**
+ * Consomme un code. Un code juste est consommé même si le numéro ne mène à
+ * rien : il ne doit jamais pouvoir servir deux fois.
+ */
+export async function consumeOtp(
+  c: PoolClient, rawPhone: string, code: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const phone = normalisePhone(rawPhone);
+  const ch = await c.query(
+    `select id, code_hash, attempts
+       from auth_otp_challenges
+      where phone = $1 and consumed_at is null and expires_at > now()
+      order by created_at desc limit 1`,
+    [phone],
+  );
+  if (ch.rowCount === 0) return { ok: false, error: "Code expiré. Demandez-en un nouveau." };
+  const challenge = ch.rows[0];
+
+  if (Number(challenge.attempts) >= MAX_OTP_ATTEMPTS) {
+    return { ok: false, error: "Trop d'essais sur ce code." };
+  }
+  if (!equals(sha256(code.trim()), challenge.code_hash)) {
+    await c.query(
+      `update auth_otp_challenges set attempts = attempts + 1 where id = $1`,
+      [challenge.id]);
+    return { ok: false, error: "Code incorrect." };
+  }
+  await c.query(`update auth_otp_challenges set consumed_at = now() where id = $1`,
+    [challenge.id]);
+  return { ok: true };
+}
+
+/** Démarre une connexion du personnel. */
+export async function startLogin(rawPhone: string): Promise<{
+  ok: boolean;
+  devCode?: string;
+  error?: string;
+}> {
+  // Passe par auth_lookup_user : sous RLS strict, un SELECT direct sur users
+  // ne renvoie rien tant qu'aucun établissement n'est en contexte.
+  return issueOtp(rawPhone, async (phone, c) =>
+    ((await c.query(`select id from auth_lookup_user($1)`, [phone])).rowCount ?? 0) > 0);
+}
+
 export async function verifyLogin(
   rawPhone: string,
   code: string,
@@ -112,39 +159,14 @@ export async function verifyLogin(
   const phone = normalisePhone(rawPhone);
 
   return withoutSchool(async (c) => {
-    const ch = await c.query(
-      `select id, code_hash, attempts
-         from auth_otp_challenges
-        where phone = $1 and consumed_at is null and expires_at > now()
-        order by created_at desc limit 1`,
-      [phone],
-    );
-    if (ch.rowCount === 0) {
-      return { ok: false, error: "Code expiré. Demandez-en un nouveau." };
-    }
-    const challenge = ch.rows[0];
-
-    if (Number(challenge.attempts) >= MAX_OTP_ATTEMPTS) {
-      return { ok: false, error: "Trop d'essais sur ce code." };
-    }
-    if (!equals(sha256(code.trim()), challenge.code_hash)) {
-      await c.query(
-        `update auth_otp_challenges set attempts = attempts + 1 where id = $1`,
-        [challenge.id],
-      );
-      return { ok: false, error: "Code incorrect." };
-    }
+    const otp = await consumeOtp(c, phone, code);
+    if (!otp.ok) return { ok: false, error: otp.error };
 
     const user = await c.query(
       `select id, school_id, full_name from auth_lookup_user($1)`, [phone]);
     if (user.rowCount === 0) {
-      // Le code était bon mais le numéro n'est rattaché à aucun compte : on le
-      // consomme quand même pour qu'il ne serve pas deux fois.
-      await c.query(`update auth_otp_challenges set consumed_at = now() where id = $1`, [challenge.id]);
       return { ok: false, error: "Ce numéro n'est rattaché à aucun compte." };
     }
-
-    await c.query(`update auth_otp_challenges set consumed_at = now() where id = $1`, [challenge.id]);
 
     const token = randomBytes(32).toString("base64url");
     const refresh = randomBytes(32).toString("base64url");
