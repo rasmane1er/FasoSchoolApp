@@ -112,6 +112,70 @@ on conflict (code) do nothing;
 -- Appelée à la création d'un établissement. Chaque valeur porte sa provenance
 -- et est modifiable ensuite par le censeur.
 
+-- ---------------------------------------------------------------------------
+-- Chemin d'authentification
+-- ---------------------------------------------------------------------------
+--
+-- L'authentification est PAR NATURE antérieure au locataire : on cherche un
+-- utilisateur par son téléphone avant de savoir de quel établissement il
+-- relève, donc avant de pouvoir poser fasoschool.school_id. Sous RLS strict,
+-- cette recherche ne renvoie rien et personne ne peut se connecter.
+--
+-- Plutôt que d'affaiblir les politiques de users, staff, user_roles et
+-- auth_sessions, on ouvre une brèche étroite et nommée : quatre fonctions
+-- SECURITY DEFINER qui ne renvoient QUE ce dont la connexion a besoin. Le
+-- reste du code applicatif reste soumis au cloisonnement.
+--
+-- En production, le propriétaire des tables doit porter BYPASSRLS et ne doit
+-- jamais être le rôle applicatif.
+
+create or replace function auth_lookup_user(p_phone text)
+returns table (id uuid, school_id uuid, full_name text)
+security definer set search_path = public
+as $$
+  select u.id, u.school_id, u.full_name
+    from users u
+   where u.phone = p_phone and u.is_active
+   limit 1;
+$$ language sql stable;
+
+create or replace function auth_create_session(
+  p_user_id uuid, p_school_id uuid, p_access_hash text, p_refresh_hash text
+) returns void
+security definer set search_path = public
+as $$
+  insert into auth_sessions (user_id, school_id, access_token_hash, refresh_token_hash, expires_at)
+  values (p_user_id, p_school_id, p_access_hash, p_refresh_hash, now() + interval '12 hours');
+$$ language sql;
+
+create or replace function auth_resolve(p_access_hash text)
+returns table (user_id uuid, school_id uuid, full_name text, fonction text, roles text[])
+security definer set search_path = public
+as $$
+  select u.id, s.school_id, u.full_name,
+         (select st.fonction from staff st where st.user_id = u.id limit 1),
+         coalesce((select array_agg(ur.role_code) from user_roles ur where ur.user_id = u.id),
+                  array[]::text[])
+    from auth_sessions s
+    join users u on u.id = s.user_id
+   where s.access_token_hash = p_access_hash
+     and s.revoked_at is null
+     and s.expires_at > now()
+   limit 1;
+$$ language sql stable;
+
+create or replace function auth_revoke(p_access_hash text)
+returns void
+security definer set search_path = public
+as $$
+  update auth_sessions set revoked_at = now()
+   where access_token_hash = p_access_hash and revoked_at is null;
+$$ language sql;
+
+comment on function auth_lookup_user(text) is
+  'Brèche volontaire au RLS, limitée au strict nécessaire de la connexion. '
+  'Le propriétaire doit porter BYPASSRLS et ne pas être le rôle applicatif.';
+
 -- Création d'un établissement.
 --
 -- Passer par cette fonction est OBLIGATOIRE : la politique RLS de schools

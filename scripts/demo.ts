@@ -90,12 +90,31 @@ async function main() {
     );
     const classId = klass.rows[0].id;
 
-    const staff = await c.query(
-      `insert into staff (school_id, full_name, fonction)
-       values ($1, 'ZONGO Alimata', 'enseignant') returning id`,
-      [schoolId],
-    );
-    const staffId = staff.rows[0].id;
+    // Comptes de démonstration : le téléphone est l'identifiant.
+    const comptes: Array<[string, string, string, string]> = [
+      ["70000001", "OUÉDRAOGO Séraphin", "censeur",             "censeur"],
+      ["70000002", "ZONGO Alimata",      "enseignant",          "enseignant"],
+      ["70000003", "ZOUNGRANA Issa",     "surveillant_general", "surveillant_general"],
+      ["70000004", "TAPSOBA Michel",     "econome",             "econome"],
+      ["70000005", "KABORÉ Paul",        "directeur",           "directeur"],
+    ];
+    let staffId = "";
+    for (const [phone, nom, fonction, role] of comptes) {
+      const u = await c.query(
+        `insert into users (school_id, full_name, phone) values ($1,$2,$3) returning id`,
+        [schoolId, nom, phone],
+      );
+      const st = await c.query(
+        `insert into staff (school_id, user_id, full_name, fonction)
+         values ($1,$2,$3,$4) returning id`,
+        [schoolId, u.rows[0].id, nom, fonction],
+      );
+      await c.query(
+        `insert into user_roles (user_id, role_code, school_id) values ($1,$2,$3)`,
+        [u.rows[0].id, role, schoolId],
+      );
+      if (fonction === "enseignant") staffId = st.rows[0].id;
+    }
 
     // Élèves + inscriptions
     const studentIds: string[] = [];
@@ -112,6 +131,104 @@ async function main() {
         `insert into enrolments (school_id, student_id, academic_year_id, class_id, status)
          values ($1, $2, $3, $4, 'inscrit')`,
         [schoolId, s.rows[0].id, yearId, classId],
+      );
+
+      // Un tuteur joignable par SMS pour chaque élève, sauf un — pour que
+      // l'écran d'appel montre aussi le cas « aucun tuteur joignable ».
+      if (i !== 7) {
+        const g = await c.query(
+          `insert into guardians (school_id, full_name, phone) values ($1,$2,$3) returning id`,
+          [schoolId, `Tuteur de ${prenoms}`, `7010${String(1000 + i)}`],
+        );
+        await c.query(
+          `insert into student_guardians (student_id, guardian_id, school_id, relationship,
+                                          is_primary, receives_sms)
+           values ($1,$2,$3,'parent',true,true)`,
+          [s.rows[0].id, g.rows[0].id, schoolId],
+        );
+      }
+    }
+
+    // Scolarité : grille conforme au plafond catégorie 2 en zone Ouaga/Bobo.
+    const fs = await c.query(
+      `insert into fee_schedules (school_id, academic_year_id, level_code, label)
+       values ($1,$2,'6E','Grille 6e — 2026-2027') returning id`,
+      [schoolId, yearId],
+    );
+    const lignes: Array<[string, number, string]> = [
+      ["Inscription",           15000, "plafonne"],
+      ["Scolarité annuelle",    58000, "plafonne"],
+      ["Frais de dossier",       5000, "plafonne"],
+      ["Hébergement",           40000, "exclu"],
+    ];
+    for (const [label, montant, cap] of lignes) {
+      await c.query(
+        `insert into fee_lines (school_id, fee_schedule_id, label, amount_fcfa, cap_treatment)
+         values ($1,$2,$3,$4,$5)`,
+        [schoolId, fs.rows[0].id, label, montant, cap],
+      );
+    }
+
+    for (let i = 0; i < studentIds.length; i += 1) {
+      const inv = await c.query(
+        `insert into invoices (school_id, student_id, academic_year_id, fee_schedule_id,
+                               reference, total_fcfa, status)
+         values ($1,$2,$3,$4,$5,78000,'ouverte') returning id`,
+        [schoolId, studentIds[i], yearId, fs.rows[0].id, `F-2026-${String(i + 1).padStart(4, "0")}`],
+      );
+      // Deux tiers des familles ont payé une partie ou la totalité.
+      const part = i % 3 === 0 ? 0 : i % 3 === 1 ? 40000 : 78000;
+      if (part > 0) {
+        const p = await c.query(
+          `insert into payments (school_id, invoice_id, amount_fcfa, method, status,
+                                 idempotency_key, confirmed_at)
+           values ($1,$2,$3,'especes','confirme',$4, now()) returning id`,
+          [schoolId, inv.rows[0].id, part, `demo-${i}`],
+        );
+        await c.query(
+          `insert into receipts (school_id, payment_id, receipt_number, sequence, amount_fcfa)
+           values ($1,$2,$3,$4,$5)`,
+          [schoolId, p.rows[0].id, `R-2026-${String(i + 1).padStart(4, "0")}`, i + 1, part],
+        );
+      }
+    }
+
+    // Crédit SMS de départ : un forfait Silver de 1 000 messages à 8 000 FCFA.
+    await c.query(
+      `insert into sms_credit_ledger (school_id, direction, messages, amount_fcfa, note)
+       values ($1,'achat',1000,8000,'Forfait Silver Orange BF')`,
+      [schoolId],
+    );
+
+    // Dossier de catégorisation entamé.
+    const ca = await c.query(
+      `insert into category_assessments (school_id, academic_year_id, investment_score,
+                                         quality_score, category, status)
+       values ($1,$2,31,37,2,'brouillon') returning id`,
+      [schoolId, yearId],
+    );
+    const criteres: Array<[string, string, string, number, number, boolean]> = [
+      ["investissement", "BATI",    "Qualité du bâti et clôture",        8,  8, true],
+      ["investissement", "EAU",     "Eau potable et assainissement",     7,  0, false],
+      ["investissement", "ENERGIE", "Énergie",                           5,  5, true],
+      ["investissement", "INFO",    "Équipement informatique",           8,  3, false],
+      ["investissement", "BIBLIO",  "Bibliothèque",                      6,  6, true],
+      ["investissement", "SPORT",   "Installations sportives",           8,  5, true],
+      ["investissement", "CANTINE", "Cantine",                           8,  4, true],
+      ["qualite",        "EXAMENS", "Résultats aux examens",            12, 10, true],
+      ["qualite",        "EFFECTIF","Effectifs par classe",               8,  6, true],
+      ["qualite",        "STAB",    "Stabilité du personnel",             8,  7, true],
+      ["qualite",        "QUALIF",  "Qualification des enseignants",     10,  6, false],
+      ["qualite",        "TIC",     "Enseignement des TIC",               6,  2, false],
+      ["qualite",        "GOUV",    "Gouvernance de l'établissement",     6,  6, true],
+    ];
+    for (const [axis, code, label, max, got, justified] of criteres) {
+      await c.query(
+        `insert into category_criteria (school_id, category_assessment_id, axis, code,
+                                        label, max_points, awarded_points, evidence_key)
+         values ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [schoolId, ca.rows[0].id, axis, code, label, max, got,
+         justified ? `evidence/${code.toLowerCase()}.pdf` : null],
       );
     }
 
@@ -215,6 +332,9 @@ async function main() {
   console.log("─".repeat(62));
   console.log(`      Moyenne de la classe          ${klass.moyenneDeClasse?.toFixed(2).replace(".", ",")}`);
   console.log(`\nBulletins écrits dans ${path}`);
+  console.log(`\nComptes de démonstration (code affiché à l'écran) :`);
+  console.log("  70000001  Censeur      70000003  Surveillant général");
+  console.log("  70000002  Enseignante  70000004  Économe   70000005  Directeur");
 
   if (inputs.sourceNotes.policy) {
     console.log(`\n⚠ Règle de notation : ${inputs.sourceNotes.policy}`);

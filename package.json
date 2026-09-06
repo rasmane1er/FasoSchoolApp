@@ -13,7 +13,10 @@
     "test": "node --experimental-strip-types --test tests/",
     "test:bulletin": "node --experimental-strip-types --test tests/bulletin.test.ts",
     "demo": "node --experimental-strip-types scripts/demo.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "start": "node --experimental-strip-types src/server/app.ts",
+    "test:e2e": "node tests/app.e2e.mjs",
+    "check:all": "npm run typecheck && npm test && npm run test:e2e"
   },
   "dependencies": {
     "pg": "^8.23.0"
@@ -21,6 +24,7 @@
   "devDependencies": {
     "@types/node": "^22.20.1",
     "@types/pg": "^8.23.1",
+    "playwright": "^1.49.0",
     "typescript": "^5.9.3"
   }
 }
