@@ -47,6 +47,8 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
   `is_active`, et `chefs_en_exercice()` empêche d'écarter le dernier chef.
 - `db/migrations/0006_annulation_paiement.sql` — la contrepassation d'un
   paiement, et `montant_regle()` : la seule définition du net encaissé.
+- `db/migrations/0007_discipline.sql` — le vocabulaire des sanctions, et le
+  retrait d'un incident sans effacement.
 - `db/tests/rls_isolation.sql` — le test d'isolation contradictoire.
 
 **Métier**
@@ -96,6 +98,8 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
   fonction, écarter sans effacer.
 - `src/server/eleve.ts` — la fiche de l'élève : chercher, corriger l'identité,
   tenir les tuteurs et leurs numéros.
+- `src/server/discipline.ts` — le registre de discipline du surveillant
+  général, et la limite du pouvoir de sanctionner.
 - `src/lib/roster.ts` — lecture d'un fichier de liste (encodage, séparateur,
   intitulés, dates, numéros). 22 tests.
 - `src/server/multipart.ts` — envoi de fichier, écrit à la main pour ne pas
@@ -113,6 +117,43 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
 **Démonstration** — `npm run demo` crée un établissement, une 6<sup>e</sup> de
 douze élèves, huit disciplines notées, la scolarité et un dossier de
 catégorisation entamé, puis écrit les bulletins dans `out/`.
+
+### Le registre de discipline
+
+`behavior_incidents` dormait dans le schéma depuis le premier jour. Le
+surveillant général — celui qui, dans un établissement burkinabè, tient le
+cahier de discipline et convoque les parents — n'avait dans ce logiciel que
+l'appel du matin.
+
+**L'exclusion définitive n'appartient pas au surveillant.** Elle relève du
+conseil de discipline, présidé par le chef d'établissement. Un logiciel qui la
+met dans la même liste déroulante que « avertissement » déplace un pouvoir
+réel d'une personne à une autre, en silence. Elle est refusée sur le chemin
+d'écriture, pas seulement absente de la liste — la suite le force en postant à
+la main.
+
+**Une étiquette n'est pas un fait.** « Indiscipline » n'est opposable à
+personne : ni au conseil de classe qui lira le registre, ni à l'élève à qui on
+l'oppose. L'écran demande une phrase — ce qui s'est passé, où, quand — sans
+pour autant exiger une rédaction : un surveillant écrit vite, entre deux cours,
+et un contrôle trop dur ferait écrire n'importe quoi pour le franchir.
+
+**On n'efface pas un incident, on le retire en le disant.** Une trace écrite
+sur un enfant pèse sur une décision de passage. Elle doit pouvoir être réparée
+— on se trompe d'élève, on écrit sous le coup de la colère — mais rien ne doit
+disparaître en silence : effacer détruit aussi ce qui pouvait servir *en
+faveur* de l'élève, et un registre qu'on peut vider ne prouve plus rien à
+personne. Un fait retiré reste écrit, barré, avec le nom de qui l'a retiré et
+son motif.
+
+**La famille est prévenue par le même tuyau que les absences**, donc avec le
+même suivi : si l'opérateur refuse, cela remonte dans les messages à traiter au
+lieu de disparaître. Une exclusion temporaire que les parents découvrent le
+soir, c'est un enfant dehors trois jours sans que personne le sache.
+
+Une sanction n'est pas obligatoire : beaucoup de faits se consignent sans être
+punis, et c'est précisément ce registre qui permet de dire, au conseil, qu'un
+élève a été signalé quatre fois sans qu'on ait jamais rien fait.
 
 ### Installer un établissement
 
@@ -608,10 +649,11 @@ Comptes de démonstration — le code s'affiche à l'écran, aucun SMS n'est env
 | `70000005` | Directeur |
 
 Vérifications : `npm run check:all` — typecheck strict, 60 tests unitaires,
-et dix-neuf parcours dans un vrai navigateur :
+et vingt parcours dans un vrai navigateur :
 
 | suite | ce qu'elle prouve |
 |---|---|
+| `test:discipline` (29) | l'exclusion définitive est refusée au surveillant même en postant à la main, et un incident retiré reste écrit et barré |
 | `test:installer` (24) | un second établissement s'installe, son chef se connecte, et aucune des deux écoles ne voit les données de l'autre |
 | `test:annulation` (28) | le reçu d'origine reste intact, l'annulation est un second reçu numéroté, et tous les écrans lisent le même solde |
 | `test:eleve` (35) | on retrouve un élève par le numéro de son tuteur, un tuteur partagé se corrige pour la fratrie, et voir n'est pas corriger |

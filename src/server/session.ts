@@ -207,7 +207,8 @@ export function can(user: SessionUser, action:
   | "voir_notes" | "saisir_notes" | "publier_bulletins"
   | "faire_appel" | "voir_scolarite" | "encaisser"
   | "voir_categorisation" | "parametrer" | "inscrire"
-  | "suivre_messages" | "gerer_personnel" | "voir_eleve"): boolean {
+  | "suivre_messages" | "gerer_personnel" | "voir_eleve"
+  | "tenir_discipline"): boolean {
   const r = new Set([...user.roles, user.fonction ?? ""]);
   const any = (...codes: string[]) => codes.some((x) => r.has(x));
 
@@ -251,5 +252,11 @@ export function can(user: SessionUser, action:
     case "voir_eleve":
       return any("secretaire", "surveillant_general", "econome", "intendant",
                  "censeur", "proviseur", "directeur");
+    // Le cahier de discipline est celui du surveillant général. Le censeur et
+    // le chef y ont accès parce qu'ils le lisent au conseil de classe et au
+    // conseil de discipline ; l'exclusion définitive, elle, reste au chef seul
+    // (voir discipline.ts).
+    case "tenir_discipline":
+      return any("surveillant_general", "censeur", "proviseur", "directeur");
   }
 }

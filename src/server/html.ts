@@ -197,6 +197,8 @@ const NAV: Array<{ titre: string | null; liens: NavEntry[] }> = [
     { href: "/transferts", label: "Transferts", key: "transferts", droit: "inscrire" },
     { href: "/communiques", label: "Communiqués", key: "communiques",
       droit: "publier_bulletins" },
+    { href: "/discipline", label: "Discipline", key: "discipline",
+      droit: "tenir_discipline" },
     { href: "/messages", label: "Suivi des messages", key: "messages",
       droit: "suivre_messages" },
   ] },

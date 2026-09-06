@@ -46,6 +46,7 @@ import { personnelPage, ajouterMembre, changerFonction,
          basculerActivite } from "./personnel.ts";
 import { elevePage, elevesPage, corrigerIdentite, enregistrerTuteur,
          retirerTuteur, enregistrerUrgence, retirerUrgence } from "./eleve.ts";
+import { disciplinePage, consigner, retirer as retirerIncident } from "./discipline.ts";
 import {
   transfertsPage, recordTransfer, addLivretEntry, certificatePage,
 } from "./transferts.ts";
@@ -1190,6 +1191,25 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
                   + `des messages pour joindre ces familles autrement.`
                 : ""),
         out.error));
+    }
+
+    // --- Discipline ----------------------------------------------------------
+    if (path === "/discipline" || path === "/discipline/retirer") {
+      if (!can(user, "tenir_discipline")) return html(res, "Accès refusé.", 403);
+      const chrome = await chromeFor(user, "discipline");
+      if (path === "/discipline" && req.method === "GET") {
+        return html(res, await disciplinePage(user, chrome, url));
+      }
+      if (req.method === "POST") {
+        const form = await formBody(req);
+        const out = path === "/discipline"
+          ? await consigner(user, form)
+          : await retirerIncident(user, form);
+        const retour = new URL(url.toString());
+        if (out.classId) retour.searchParams.set("classe", out.classId);
+        return html(res, await disciplinePage(user, chrome, retour,
+          out.flash, out.error));
+      }
     }
 
     // --- Fiche de l'élève ----------------------------------------------------
