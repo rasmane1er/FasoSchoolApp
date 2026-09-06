@@ -31,6 +31,9 @@ import { isMultipart, readMultipart } from "./multipart.ts";
 import { rentreePage, saveYear, openYear, addClass } from "./rentree.ts";
 import { conseilPage, saveDeliberation } from "./conseil.ts";
 import { categorisationPage, saveDossier, addCriterion } from "./categorisation.ts";
+import {
+  fraisPage, addSchedule, addLine, removeLine, issueInvoices,
+} from "./frais.ts";
 import { pointsDAttention, attentionCard } from "./attention.ts";
 import {
   servicesPage, addService, removeService,
@@ -1056,6 +1059,36 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       ].filter(Boolean).join(" ");
       const chrome = await chromeFor(user, "conseil");
       return html(res, await conseilPage(user, chrome, url, flash));
+    }
+
+    // --- Grille des frais et émission des factures --------------------------
+    if (path === "/frais" && req.method === "GET") {
+      if (!can(user, "voir_scolarite")) return html(res, "Accès refusé.", 403);
+      return html(res, await fraisPage(user, await chromeFor(user, "frais")));
+    }
+    if (path === "/frais/grille" && req.method === "POST") {
+      if (!can(user, "voir_scolarite")) return html(res, "Accès refusé.", 403);
+      const r = await addSchedule(user, await formBody(req));
+      return html(res, await fraisPage(user, await chromeFor(user, "frais"), r.flash, r.error));
+    }
+    if (path === "/frais/ligne" && req.method === "POST") {
+      if (!can(user, "voir_scolarite")) return html(res, "Accès refusé.", 403);
+      const r = await addLine(user, await formBody(req));
+      return html(res, await fraisPage(user, await chromeFor(user, "frais"), r.flash, r.error));
+    }
+    if (path === "/frais/ligne/retirer" && req.method === "POST") {
+      if (!can(user, "voir_scolarite")) return html(res, "Accès refusé.", 403);
+      const r = await removeLine(user, (await formBody(req)).get("id") ?? "");
+      return html(res, await fraisPage(user, await chromeFor(user, "frais"), r.flash, r.error));
+    }
+    if (path === "/frais/emettre" && req.method === "POST") {
+      if (!can(user, "voir_scolarite")) return html(res, "Accès refusé.", 403);
+      const out = await issueInvoices(user, (await formBody(req)).get("classe") ?? "");
+      const flash = out.error ? undefined
+        : `${plural(out.emises, "facture émise", "factures émises")}`
+          + `${out.deja ? `, ${out.deja} élève(s) déjà facturé(s)` : ""}.`;
+      return html(res, await fraisPage(
+        user, await chromeFor(user, "frais"), flash, out.error));
     }
 
     // --- Publication et clôture ---------------------------------------------

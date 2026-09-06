@@ -75,6 +75,8 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
   quelle classe, et ce que cela autorise.
 - `src/server/cloture.ts` — publication des bulletins et clôture du trimestre :
   un document remis ne change pas tout seul.
+- `src/server/frais.ts` — grille des frais et émission des factures, avec les
+  deux garde-fous de l'arrêté.
 - `src/lib/roster.ts` — lecture d'un fichier de liste (encodage, séparateur,
   intitulés, dates, numéros). 22 tests.
 - `src/server/multipart.ts` — envoi de fichier, écrit à la main pour ne pas
@@ -91,6 +93,31 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
 **Démonstration** — `npm run demo` crée un établissement, une 6<sup>e</sup> de
 douze élèves, huit disciplines notées, la scolarité et un dossier de
 catégorisation entamé, puis écrit les bulletins dans `out/`.
+
+### Les frais et les factures
+
+L'encaissement existait ; rien ne permettait de créer ce qu'on encaisse. Un
+établissement ne pouvait facturer personne — la grille et les factures ne
+venaient que du script de démonstration.
+
+Deux règles de l'arrêté n°2026-101 sont **appliquées**, pas seulement
+documentées :
+
+- Le plafond porte sur la somme des lignes marquées « comptées dans le
+  plafond », comparée au plafond que l'établissement a lu dans le texte et
+  inscrit à son dossier de catégorisation. Le dépassement est chiffré à
+  l'écran. Le logiciel n'invente pas le plafond : il vient du dossier, saisi
+  par un humain.
+- Un **supplément autorisé exige la référence de l'autorisation
+  ministérielle**. Sans elle, la ligne est refusée. C'est la différence entre
+  un établissement en règle et un établissement qui apprend son irrégularité
+  par une inspection.
+
+Et une règle de prudence, la même que pour les bulletins : une facture émise
+n'est jamais recalculée. Elle porte le montant du jour de son émission. Une
+famille qui a payé 78 000 F ne doit pas découvrir qu'elle en doit 92 000 parce
+qu'une ligne a bougé. Les échéances suivent les trimestres — au Burkina on ne
+modélise pas un solde unique.
 
 ### La publication des bulletins
 
@@ -309,6 +336,7 @@ et trois parcours dans un vrai navigateur :
 
 | suite | ce qu'elle prouve |
 |---|---|
+| `test:frais` (21) | un supplément sans autorisation est refusé, un dépassement de plafond est chiffré, une facture émise n'est pas recalculée |
 | `test:cloture` (25) | le bulletin remis ne bouge pas, l'écart est montré, le trimestre clos refuse les notes en ligne comme hors ligne |
 | `test:services` (12) | un enseignant ne voit et ne touche que ses classes — y compris en postant à la main |
 | `test:rentree` (19) | un établissement ouvre son année, pose ses trimestres et crée ses classes sans intervention en base |
