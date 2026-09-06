@@ -57,6 +57,8 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
 - `src/server/settings.ts` — règles de notation, corrigeables par le censeur
   avec aperçu immédiat sur une classe réelle.
 - `src/server/finance.ts` — encaissement au guichet et reçus numérotés.
+- `src/server/rentree.ts` — année scolaire, trimestres et classes : un
+  établissement s'installe seul, sans qu'on touche à sa base.
 - `src/server/roster.ts` — import de la liste des élèves : aperçu, correction
   sur place, réinscription sans doublon.
 - `src/lib/roster.ts` — lecture d'un fichier de liste (encodage, séparateur,
@@ -71,6 +73,23 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
 **Démonstration** — `npm run demo` crée un établissement, une 6<sup>e</sup> de
 douze élèves, huit disciplines notées, la scolarité et un dossier de
 catégorisation entamé, puis écrit les bulletins dans `out/`.
+
+### La rentrée
+
+Le calendrier de l'établissement se saisit à l'écran : libellé de l'année,
+bornes, et les **trois trimestres, dates réelles**. La validation porte les
+deux règles du pays :
+
+- Le troisième trimestre est **tronqué par la session d'examens**. Si les trois
+  durées sortent égales à quelques jours près, l'écran le dit : c'est presque
+  toujours quelqu'un qui a divisé l'année par trois, et les moyennes du T3
+  porteront alors sur des évaluations qui n'ont pas eu lieu.
+- Le calendrier est **amendable par région**. Une année close fin mai pour la
+  Semaine nationale de la culture est acceptée sans réserve.
+
+Les classes se créent au même endroit et prennent le nom qu'on leur donne
+ici : `6e A` au post-primaire, `Tle D1` au secondaire. Une série ne s'attribue
+qu'en seconde, première ou terminale.
 
 ### L'import de la liste des élèves
 
@@ -127,8 +146,7 @@ saisit quarante notes, le réseau tombe, tout est perdu. Ici :
 ### Ce qui n'existe pas encore
 
 La saisie du dossier de catégorisation (l'écran est en lecture seule), Orange
-Money et Moov Money — bloqués sur le RCCM. La création des classes et de
-l'année scolaire se fait encore en base.
+Money et Moov Money — bloqués sur le RCCM.
 
 Volontairement : le reste attend un vrai bulletin burkinabè.
 
@@ -158,11 +176,12 @@ Comptes de démonstration — le code s'affiche à l'écran, aucun SMS n'est env
 | `70000004` | Économe |
 | `70000005` | Directeur |
 
-Vérifications : `npm run check:all` — typecheck strict, 37 tests unitaires,
+Vérifications : `npm run check:all` — typecheck strict, 50 tests unitaires,
 et trois parcours dans un vrai navigateur :
 
 | suite | ce qu'elle prouve |
 |---|---|
+| `test:rentree` (19) | un établissement ouvre son année, pose ses trimestres et crée ses classes sans intervention en base |
 | `test:e2e` (42) | connexion, notes, bulletins, appel et SMS, encaissement, droits |
 | `test:offline` (18) | le réseau est réellement coupé, l'onglet fermé puis rouvert ; rien n'est perdu, rien n'est écrasé |
 | `test:import` (30) | un vrai fichier Windows-1252 est importé, corrigé dans l'aperçu, puis réimporté sans créer de doublon |

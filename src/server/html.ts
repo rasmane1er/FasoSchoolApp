@@ -133,6 +133,7 @@ textarea:focus{outline:2px solid var(--indigo);outline-offset:-1px;border-color:
 code{font-family:var(--mono);font-size:.92em;background:var(--surface2);padding:1px 5px;border-radius:3px}
 .row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .grow{flex-grow:1}
+.trois{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px}
 .err{background:#F6E3DE;color:#7C2E1D;border-radius:5px;padding:11px 14px;font-size:13.5px}
 .ok{background:#E4EDE6;color:#2C4A36;border-radius:5px;padding:11px 14px;font-size:13.5px}
 
@@ -151,6 +152,7 @@ const NAV: Array<[string, string, string]> = [
   ["/notes", "Notes", "notes"],
   ["/bulletins", "Bulletins", "bulletins"],
   ["/absences", "Absences", "absences"],
+  ["/annee", "Année scolaire", "annee"],
   ["/inscriptions", "Inscriptions", "inscriptions"],
   ["/scolarite", "Scolarité", "scolarite"],
   ["/categorisation", "Catégorisation", "categorisation"],

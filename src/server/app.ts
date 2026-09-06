@@ -28,6 +28,7 @@ import {
   readSubmitted, decodeRows, applyCorrections,
 } from "./roster.ts";
 import { isMultipart, readMultipart } from "./multipart.ts";
+import { rentreePage, saveYear, openYear, addClass } from "./rentree.ts";
 import { readFile } from "node:fs/promises";
 
 const PORT = Number(process.env.PORT ?? 4180);
@@ -926,6 +927,37 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     if (path === "/categorisation" && req.method === "GET") {
       if (!can(user, "voir_categorisation")) return html(res, "Accès refusé.", 403);
       return html(res, await simplePage(user, "categorisation"));
+    }
+
+    // --- Rentrée : année, trimestres, classes ------------------------------
+    if (path === "/annee" && req.method === "GET") {
+      if (!can(user, "parametrer")) return html(res, "Accès refusé.", 403);
+      const chrome = await chromeFor(user, "annee");
+      return html(res, await rentreePage(user, chrome,
+        url.searchParams.get("annee") ?? undefined, undefined, undefined,
+        url.searchParams.has("nouvelle")));
+    }
+    if (path === "/annee" && req.method === "POST") {
+      if (!can(user, "parametrer")) return html(res, "Accès refusé.", 403);
+      const r = await saveYear(user, await formBody(req));
+      const chrome = await chromeFor(user, "annee");
+      return html(res, await rentreePage(user, chrome, r.yearId, r.flash, r.error));
+    }
+    if (path === "/annee/ouvrir" && req.method === "POST") {
+      if (!can(user, "parametrer")) return html(res, "Accès refusé.", 403);
+      const form = await formBody(req);
+      const annee = form.get("annee") ?? "";
+      const r = await openYear(user, annee);
+      const chrome = await chromeFor(user, "annee");
+      return html(res, await rentreePage(user, chrome, annee, r.flash, r.error));
+    }
+    if (path === "/annee/classe" && req.method === "POST") {
+      if (!can(user, "parametrer")) return html(res, "Accès refusé.", 403);
+      const form = await formBody(req);
+      const annee = form.get("annee") ?? "";
+      const r = await addClass(user, form);
+      const chrome = await chromeFor(user, "annee");
+      return html(res, await rentreePage(user, chrome, annee, r.flash, r.error));
     }
 
     // --- Inscriptions -----------------------------------------------------
