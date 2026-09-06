@@ -35,6 +35,9 @@ import {
   fraisPage, addSchedule, addLine, removeLine, issueInvoices,
 } from "./frais.ts";
 import { boursesPage, grantBourse, revokeBourse } from "./bourses.ts";
+import {
+  listEvaluations, createEvaluation, deleteEvaluation, evaluationsCard,
+} from "./evaluations.ts";
 import { communiquesPage, envoyer as envoyerCommunique } from "./communiques.ts";
 import {
   transfertsPage, recordTransfer, addLivretEntry, certificatePage,
@@ -310,7 +313,20 @@ async function notesPage(user: SessionUser, url: URL, flash?: string): Promise<s
     if (chosen && !peutMatiere(perimetre, classId, chosen)) {
       return { classes: classes.rows, subjects: subjects.rows, evals: [], students: [], grades: [] };
     }
-    if (!chosen) return { classes: classes.rows, subjects: subjects.rows, evals: [], students: [], grades: [] };
+    /* Une matière sans aucune évaluation reste ouverte : c'est précisément là
+       qu'on vient pour en créer une. Fermer l'écran laisserait l'enseignant
+       sans porte d'entrée. */
+    if (!chosen) {
+      const toutesMatieres = await c.query(
+        `select id, label from subjects
+          where school_id = current_school_id() or school_id is null
+          order by label`);
+      const permises = toutesMatieres.rows.filter((x: any) =>
+        peutMatiere(perimetre, classId, x.id));
+      return { classes: classes.rows, subjects: permises, evals: [],
+               students: [], grades: [],
+               chosen: permises[0]?.id ?? null, aucuneEvaluation: true };
+    }
 
     const evals = await c.query(
       `select id, eval_type, label, held_on from evaluations
@@ -349,11 +365,26 @@ async function notesPage(user: SessionUser, url: URL, flash?: string): Promise<s
       <noscript><button class="btn ghost" type="submit">Afficher</button></noscript>
     </form>`;
 
+  /* Aucune évaluation encore : l'écran reste ouvert, et il porte le formulaire
+     de création — c'est précisément là qu'on vient. Le message de la dernière
+     action est rendu ici AUSSI : sans cela, un refus de création disparaîtrait
+     dans cette branche et l'enseignant croirait son évaluation créée. */
   if (!classId || d.evals.length === 0) {
+    const carte = classId && (d as any).chosen
+      ? evaluationsCard(user,
+          await listEvaluations(schoolId, classId, period.term_id, (d as any).chosen),
+          classId, (d as any).chosen, period.term_id,
+          await termIsClosed(schoolId, period.term_id))
+      : "";
     return page(chrome, "Notes", `
       <div class="row"><div><h1>Saisie des notes</h1>
-        <p style="margin:0;color:var(--muted)">Choisissez une classe et une matière.</p></div>${selector}</div>
-      ${classId ? `<div class="note warn">Aucune évaluation pour cette matière ce trimestre.</div>` : ""}`);
+        <p style="margin:0;color:var(--muted)">${classId
+          ? "Créez une évaluation pour pouvoir saisir des notes."
+          : "Choisissez une classe et une matière."}</p></div>${selector}</div>
+      ${flash ? `<div class="ok">${esc(flash)}</div>` : ""}
+      ${classId && !carte ? `<div class="note warn">Aucune évaluation pour cette
+        matière ce trimestre.</div>` : ""}
+      ${carte}`);
   }
 
   const key = new Map<string, any>();
@@ -382,6 +413,13 @@ async function notesPage(user: SessionUser, url: URL, flash?: string): Promise<s
       <td><b>${esc(st.last_name)}</b> ${esc(st.first_names)}</td>${cells}</tr>`;
   }).join("");
 
+  const carteEvaluations = (d as any).chosen
+    ? evaluationsCard(user,
+        await listEvaluations(schoolId, classId, period.term_id, (d as any).chosen),
+        classId, (d as any).chosen, period.term_id,
+        await termIsClosed(schoolId, period.term_id))
+    : "";
+
   return page(chrome, "Notes", `
     <div class="row"><div><h1>Saisie des notes</h1>
       <p style="margin:0;color:var(--muted)">${plural(d.students.length, "élève")} — saisir une note sur 20, ou <code>abs</code> pour une absence.</p>
@@ -401,6 +439,7 @@ async function notesPage(user: SessionUser, url: URL, flash?: string): Promise<s
         <span style="font-size:12.5px;color:var(--muted)">Sans réseau, la saisie est conservée et repart toute seule.</span>
       </div>
     </form>
+    ${carteEvaluations}
     <script src="/offline.js" defer></script>`);
 }
 
@@ -1119,6 +1158,26 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
           : `${plural(out.envoyes, "famille prévenue", "familles prévenues")} `
             + `pour ${out.cout} FCFA.`,
         out.error));
+    }
+
+    // --- Évaluations ---------------------------------------------------------
+    if (path === "/notes/evaluation" && req.method === "POST") {
+      if (!can(user, "saisir_notes")) return html(res, "Accès refusé.", 403);
+      const form = await formBody(req);
+      const r = await createEvaluation(user, form);
+      const u = new URL(`${url.origin}/notes`);
+      u.searchParams.set("classe", form.get("classe") ?? "");
+      u.searchParams.set("matiere", form.get("matiere") ?? "");
+      return html(res, await notesPage(user, u, r.flash ?? r.error));
+    }
+    if (path === "/notes/evaluation/retirer" && req.method === "POST") {
+      if (!can(user, "saisir_notes")) return html(res, "Accès refusé.", 403);
+      const form = await formBody(req);
+      const r = await deleteEvaluation(user, form.get("id") ?? "");
+      const u = new URL(`${url.origin}/notes`);
+      u.searchParams.set("classe", form.get("classe") ?? "");
+      u.searchParams.set("matiere", form.get("matiere") ?? "");
+      return html(res, await notesPage(user, u, r.flash ?? r.error));
     }
 
     // --- Bourses et remises ---------------------------------------------------

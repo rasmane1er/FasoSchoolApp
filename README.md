@@ -82,6 +82,8 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
   certificat de transfert imprimable.
 - `src/server/bourses.ts` — bourses et remises, nominatives et cumulées
   correctement.
+- `src/server/evaluations.ts` — création des évaluations : devoirs et
+  interrogations par l'enseignant, compositions par le censeur seul.
 - `src/lib/roster.ts` — lecture d'un fichier de liste (encodage, séparateur,
   intitulés, dates, numéros). 22 tests.
 - `src/server/multipart.ts` — envoi de fichier, écrit à la main pour ne pas
@@ -98,6 +100,27 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
 **Démonstration** — `npm run demo` crée un établissement, une 6<sup>e</sup> de
 douze élèves, huit disciplines notées, la scolarité et un dossier de
 catégorisation entamé, puis écrit les bulletins dans `out/`.
+
+### Les évaluations
+
+Une note ne flotte pas : elle appartient à une évaluation datée, d'un type et
+d'un barème donnés. Jusqu'ici les évaluations n'existaient que dans le jeu de
+démonstration — un enseignant ne pouvait pas déclarer « j'ai donné un devoir
+surveillé le 12 novembre », et tous les écrans de saisie en dépendaient. Il
+peut désormais en ouvrir une depuis l'écran des notes, pour sa classe et sa
+matière, et pour le trimestre en cours seulement.
+
+**La composition n'appartient pas à l'enseignant.** C'est la différence
+burkinabè à laquelle un logiciel importé ne pense pas : le sujet de composition
+est *harmonisé*, arrêté au niveau du district, et passé le même jour dans
+toutes les classes d'un niveau. L'écran le traduit littéralement — seul le
+censeur ou le proviseur peut ouvrir une composition, et l'ouvrir la crée d'un
+coup pour **toutes les classes du niveau**, pas seulement celle affichée. Un
+enseignant qui essaie se voit refuser, avec la raison, pas un bouton grisé.
+
+Une évaluation portant des notes ne se supprime pas : le logiciel dit combien
+de notes elle porte et laisse l'enseignant les vider d'abord s'il le veut
+vraiment. Après clôture du trimestre, plus rien ne s'ouvre ni ne se retire.
 
 ### Les transferts et le livret
 
@@ -398,10 +421,11 @@ Comptes de démonstration — le code s'affiche à l'écran, aucun SMS n'est env
 | `70000005` | Directeur |
 
 Vérifications : `npm run check:all` — typecheck strict, 60 tests unitaires,
-et trois parcours dans un vrai navigateur :
+et quatorze parcours dans un vrai navigateur :
 
 | suite | ce qu'elle prouve |
 |---|---|
+| `test:evaluations` (22) | un enseignant ouvre un devoir pour sa matière ; une composition ne s'ouvre que par le censeur, et pour tout le niveau |
 | `test:transferts` (23) | un parcours déclaré est accepté et étiqueté, une moyenne inventée est refusée, le certificat porte sa réserve |
 | `test:communiques` (17) | le coût est annoncé avant l'envoi, les tuteurs sont dédoublonnés, un crédit court refuse l'envoi en bloc |
 | `test:bourses` (19) | les remises se cumulent sans atteindre la gratuité, une facture émise n'est pas rabotée |
