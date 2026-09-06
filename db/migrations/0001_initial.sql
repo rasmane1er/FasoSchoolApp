@@ -55,6 +55,10 @@ create table schools (
   autorisation_ouverture text,
   phone                 text,
   default_locale        text not null default 'fr-BF',
+  -- Compteur monotone des reçus. On ne dérive PAS le numéro de max(sequence) :
+  -- si le reçu le plus haut disparaissait, le suivant réutiliserait son numéro.
+  -- Un livre de reçus d'un comptable ne réutilise jamais un numéro.
+  receipt_sequence      integer not null default 0,
   created_at            timestamptz not null default now()
 );
 
@@ -689,6 +693,8 @@ create index on payment_events (school_id, payment_id);
 
 -- Numérotation séquentielle et sans trou par établissement : un comptable
 -- vérifiera. Émis uniquement à la confirmation, et une seule fois.
+-- Append-only par nature : un paiement annulé produit un reçu d'annulation,
+-- jamais la suppression de l'original.
 create table receipts (
   id              uuid primary key default uuid_generate_v4(),
   school_id       uuid not null references schools(id) on delete cascade,

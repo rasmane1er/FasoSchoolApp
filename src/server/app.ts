@@ -21,6 +21,7 @@ import {
 } from "./session.ts";
 import { page, loginPage, esc, fr, fcfa, ordinal, plural, type PageChrome } from "./html.ts";
 import { settingsPage, saveSettings, type Period } from "./settings.ts";
+import { financePage, collectPage, collect, receiptPage } from "./finance.ts";
 
 const PORT = Number(process.env.PORT ?? 4180);
 
@@ -837,7 +838,30 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
 
     if (path === "/scolarite" && req.method === "GET") {
       if (!can(user, "voir_scolarite")) return html(res, "Accès refusé.", 403);
-      return html(res, await simplePage(user, "scolarite"));
+      const chrome = await chromeFor(user, "scolarite");
+      const recu = url.searchParams.get("recu");
+      const flash = recu
+        ? `Paiement enregistré. <a href="/recus/${esc(recu)}" target="_blank" rel="noopener"><b>Ouvrir le reçu ${esc(recu)}</b></a>`
+        : undefined;
+      return html(res, await financePage(user, chrome, url, flash));
+    }
+    if (path === "/scolarite/encaisser" && req.method === "GET") {
+      if (!can(user, "encaisser")) return html(res, "Accès refusé.", 403);
+      const chrome = await chromeFor(user, "scolarite");
+      return html(res, await collectPage(user, chrome, url.searchParams.get("facture") ?? ""));
+    }
+    if (path === "/scolarite/encaisser" && req.method === "POST") {
+      if (!can(user, "encaisser")) return html(res, "Accès refusé.", 403);
+      const r = await collect(user, await formBody(req));
+      if (r.ok) return redirect(res, `/scolarite?recu=${encodeURIComponent(r.receipt)}`);
+      const chrome = await chromeFor(user, "scolarite");
+      return html(res, await collectPage(user, chrome, r.invoiceId, r.error));
+    }
+    if (path.startsWith("/recus/") && req.method === "GET") {
+      if (!can(user, "voir_scolarite")) return html(res, "Accès refusé.", 403);
+      const body = await receiptPage(user.schoolId, decodeURIComponent(path.slice(7)));
+      if (!body) return html(res, "Reçu introuvable.", 404);
+      return html(res, body);
     }
     if (path === "/categorisation" && req.method === "GET") {
       if (!can(user, "voir_categorisation")) return html(res, "Accès refusé.", 403);

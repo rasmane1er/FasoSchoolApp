@@ -54,6 +54,11 @@ async function connecter(page, phone) {
                                source_note = 'DÉFAUT NON VÉRIFIÉ — convention régionale.'`);
     await client.query(`update coefficient_sets
                            set source_note = 'DÉFAUT NON VÉRIFIÉ — réforme 2026.'`);
+    // Les encaissements du parcours s'accumuleraient jusqu'à solder la facture.
+    await client.query(`delete from receipts where payment_id in
+                          (select id from payments where idempotency_key like 'guichet:%')`);
+    await client.query(`delete from payments where idempotency_key like 'guichet:%'`);
+    await client.query(`update invoices set status = 'ouverte' where status <> 'annulee'`);
   }
   // Le limiteur de connexions est volontairement strict (6 par quart d'heure).
   // Sans purge, le parcours n'est jouable qu'une fois par fenêtre.
@@ -217,6 +222,38 @@ try {
   await p2.goto(`${BASE}/scolarite`);
   check("l'économe accède à la scolarité", (await p2.content()).includes("Scolarité"));
   await p2.screenshot({ path: "out/captures/05-scolarite.png", fullPage: true });
+
+  // Encaissement d'un paiement en espèces au guichet.
+  const resteAvant = await p2.textContent("tbody tr:nth-child(1) td:nth-child(5)");
+  await p2.click("tbody tr:nth-child(1) a:has-text('Encaisser')");
+  await p2.waitForSelector("#montant");
+  const du = await p2.inputValue("#montant");
+  check("le formulaire propose le reste à payer", Number(du) > 0, du);
+
+  await p2.fill("#montant", "999999999");
+  await Promise.all([p2.waitForNavigation({ waitUntil: "load" }), p2.click("button[type=submit]")]);
+  check("un montant supérieur au reste est refusé",
+    (await p2.content()).includes("dépasse le reste"));
+
+  await p2.fill("#montant", "10000");
+  await Promise.all([p2.waitForNavigation({ waitUntil: "load" }), p2.click("button[type=submit]")]);
+  await p2.waitForSelector(".ok");
+  const conf = await p2.textContent(".ok");
+  check("le paiement est enregistré", conf.includes("Paiement enregistré"), conf);
+  check("un numéro de reçu est attribué", /R-\d{4}-\d{4}/.test(conf), conf);
+
+  const resteApres = await p2.textContent("tbody tr:nth-child(1) td:nth-child(5)");
+  check("le reste à payer diminue", resteAvant !== resteApres, `${resteAvant} -> ${resteApres}`);
+
+  const numero = conf.match(/R-\d{4}-\d{4}/)[0];
+  const recu = await eco.newPage();   // l échéance : le censeur n a pas accès à la scolarité
+  await recu.goto(`${BASE}/recus/${numero}`);
+  const rc = await recu.content();
+  check("le reçu s'ouvre et porte le numéro", rc.includes(numero));
+  check("le reçu montre le montant reçu", rc.includes("10 000"));
+  check("le reçu porte l'en-tête officiel", rc.includes("Unité — Progrès — Justice"));
+  await recu.screenshot({ path: "out/captures/08-recu.png", fullPage: true });
+  await recu.close();
   const r1 = await p2.goto(`${BASE}/categorisation`);
   check("l'économe est refusé sur la catégorisation", r1.status() === 403, `HTTP ${r1.status()}`);
   const r2 = await p2.goto(`${BASE}/parametres`);

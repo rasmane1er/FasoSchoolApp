@@ -53,7 +53,10 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
 - `src/server/session.ts` — connexion par téléphone et code à usage unique.
 - `src/server/html.ts` — mise en page et composants.
 - `src/server/app.ts` — tableau de bord, saisie des notes, bulletins, appel
-  et SMS, scolarité, catégorisation.
+  et SMS, catégorisation.
+- `src/server/settings.ts` — règles de notation, corrigeables par le censeur
+  avec aperçu immédiat sur une classe réelle.
+- `src/server/finance.ts` — encaissement au guichet et reçus numérotés.
 
 **Démonstration** — `npm run demo` crée un établissement, une 6<sup>e</sup> de
 douze élèves, huit disciplines notées, la scolarité et un dossier de
@@ -61,8 +64,8 @@ catégorisation entamé, puis écrit les bulletins dans `out/`.
 
 ### Ce qui n'existe pas encore
 
-La saisie hors-ligne, l'encaissement (les écrans scolarité et catégorisation
-sont en lecture seule), Orange Money et Moov Money — bloqués sur le RCCM.
+La saisie hors-ligne, la saisie du dossier de catégorisation (l'écran est en
+lecture seule), Orange Money et Moov Money — bloqués sur le RCCM.
 
 Volontairement : le reste attend un vrai bulletin burkinabè.
 

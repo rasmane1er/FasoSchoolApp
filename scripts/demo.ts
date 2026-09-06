@@ -193,6 +193,11 @@ async function main() {
       }
     }
 
+    // Le compteur de reçus de l'établissement doit refléter les reçus semés,
+    // sinon le premier encaissement au guichet réémet un numéro déjà pris.
+    await c.query(
+      `update schools set receipt_sequence = coalesce((select max(sequence) from receipts), 0)`);
+
     // Crédit SMS de départ : un forfait Silver de 1 000 messages à 8 000 FCFA.
     await c.query(
       `insert into sms_credit_ledger (school_id, direction, messages, amount_fcfa, note)
