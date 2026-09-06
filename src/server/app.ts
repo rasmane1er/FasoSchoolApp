@@ -29,6 +29,7 @@ import {
 } from "./roster.ts";
 import { isMultipart, readMultipart } from "./multipart.ts";
 import { rentreePage, saveYear, openYear, addClass } from "./rentree.ts";
+import { conseilPage, saveDeliberation } from "./conseil.ts";
 import { readFile } from "node:fs/promises";
 
 const PORT = Number(process.env.PORT ?? 4180);
@@ -927,6 +928,24 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     if (path === "/categorisation" && req.method === "GET") {
       if (!can(user, "voir_categorisation")) return html(res, "Accès refusé.", 403);
       return html(res, await simplePage(user, "categorisation"));
+    }
+
+    // --- Conseil de classe -------------------------------------------------
+    if (path === "/conseil" && req.method === "GET") {
+      if (!can(user, "publier_bulletins")) return html(res, "Accès refusé.", 403);
+      const chrome = await chromeFor(user, "conseil");
+      return html(res, await conseilPage(user, chrome, url));
+    }
+    if (path === "/conseil" && req.method === "POST") {
+      if (!can(user, "publier_bulletins")) return html(res, "Accès refusé.", 403);
+      const classe = url.searchParams.get("classe") ?? "";
+      const out = await saveDeliberation(user, classe, await formBody(req));
+      const flash = [
+        out.saved ? `${plural(out.saved, "décision enregistrée", "décisions enregistrées")}.` : "",
+        ...out.refused.map(esc),
+      ].filter(Boolean).join(" ");
+      const chrome = await chromeFor(user, "conseil");
+      return html(res, await conseilPage(user, chrome, url, flash));
     }
 
     // --- Rentrée : année, trimestres, classes ------------------------------

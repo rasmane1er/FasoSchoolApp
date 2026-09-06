@@ -61,6 +61,8 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
   établissement s'installe seul, sans qu'on touche à sa base.
 - `src/server/roster.ts` — import de la liste des élèves : aperçu, correction
   sur place, réinscription sans doublon.
+- `src/server/conseil.ts` — conseil de classe : proposition motivée, décision
+  humaine, livret scolaire cumulatif.
 - `src/lib/roster.ts` — lecture d'un fichier de liste (encodage, séparateur,
   intitulés, dates, numéros). 22 tests.
 - `src/server/multipart.ts` — envoi de fichier, écrit à la main pour ne pas
@@ -124,6 +126,27 @@ Et trois règles de conduite :
    rattachée au hasard : rattacher un enfant à la fiche d'un homonyme est pire
    qu'un import incomplet.
 
+### Le conseil de classe
+
+L'écran propose, le conseil dispose — et la distinction n'est pas décorative :
+la composition du conseil et ses seuils de compensation n'ont pas pu être
+établis depuis un texte burkinabè public. Le logiciel avance une proposition
+**motivée**, et enregistre la décision que des humains ont prise.
+
+Une règle est appliquée sans discussion, parce qu'elle est écrite : le
+**redoublement est interdit en CP1, CE1 et CM1**. Dans ces classes l'option
+n'est pas offerte, et un redoublement forcé par une requête directe est refusé
+avec son motif — pas corrigé en silence. La mesure étant contestée par le
+SYNAPEC, elle vit dans `promotion_rules` avec sa date d'effet.
+
+Chaque décision alimente le **livret scolaire**, dossier cumulatif qui suit
+l'élève d'un établissement à l'autre. Revenir sur une délibération corrige la
+ligne ; elle n'est jamais dupliquée.
+
+Deux garde-fous d'affichage : la moyenne annuelle est présentée comme une
+moyenne simple dont la pondération n'est pas vérifiée, et une année dont tous
+les trimestres ne portent pas de notes est signalée avant toute décision.
+
 ### La saisie hors ligne
 
 C'est le point où un logiciel scolaire se perd au Burkina : l'enseignant
@@ -184,11 +207,12 @@ et trois parcours dans un vrai navigateur :
 | `test:rentree` (19) | un établissement ouvre son année, pose ses trimestres et crée ses classes sans intervention en base |
 | `test:e2e` (42) | connexion, notes, bulletins, appel et SMS, encaissement, droits |
 | `test:offline` (18) | le réseau est réellement coupé, l'onglet fermé puis rouvert ; rien n'est perdu, rien n'est écrasé |
+| `test:conseil` (19) | la proposition est motivée, la décision humaine prime, un redoublement interdit est refusé et le livret n'est pas dupliqué |
 | `test:import` (30) | un vrai fichier Windows-1252 est importé, corrigé dans l'aperçu, puis réimporté sans créer de doublon |
 
 ---
 
-## Les quatre règles à confirmer
+## Les cinq règles à confirmer
 
 Ces règles n'ont pas pu être établies depuis une source burkinabè publique.
 Elles sont livrées comme **données**, avec leur provenance dans `source_note`,
@@ -200,8 +224,9 @@ et il faut les faire confirmer par un censeur avant tout usage réel.
 | table des coefficients | maths 3, français 3, autres 2 | réforme des **examens** 2026 ; usage sur bulletin interne non vérifié |
 | seuils de mention | 10 / 12 / 14 / 16 | toutes les sources trouvées étaient françaises, sénégalaises, marocaines ou ivoiriennes |
 | gabarit du bulletin | générique | aucun modèle officiel MENAPLN publié, aucun bulletin scanné trouvé |
+| pondération des trimestres | moyenne simple des trois | le T3 est plus court ; aucune règle nationale trouvée |
 
-Une matinée avec un censeur coopératif et une photocopieuse ferme les quatre.
+Une matinée avec un censeur coopératif et une photocopieuse ferme les cinq.
 
 ---
 
