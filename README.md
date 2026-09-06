@@ -390,9 +390,19 @@ ces utilisateurs sont à un bureau.
 
 ## Prochaine étape
 
-Elle n'est pas dans ce dépôt. Entre le **15 septembre** (rentrée
-administrative) et le **1er octobre** (rentrée pédagogique), les censeurs sont
-à leur bureau et n'enseignent pas encore. C'est la quinzaine la plus
-accessible de l'année scolaire.
+Elle n'est pas dans ce dépôt.
 
-Rapporter un vrai bulletin. Le reste du moteur s'écrit ensuite en une semaine.
+Tout ce qui pouvait être construit sans un établissement l'a été : un chef
+d'établissement peut désormais ouvrir son année, créer ses classes, importer
+sa liste d'élèves, répartir les services, saisir les notes — y compris hors
+ligne —, faire l'appel, encaisser, délibérer, monter son dossier de
+catégorisation, et ouvrir l'espace famille. Ce qui reste bloqué l'est sur des
+choses qui ne s'écrivent pas : cinq règles à faire confirmer, un vrai bulletin
+à photocopier, un RCCM à obtenir, et les tables de l'arrêté à se procurer.
+
+Entre le **15 septembre** (rentrée administrative) et le **1er octobre**
+(rentrée pédagogique), les censeurs sont à leur bureau et n'enseignent pas
+encore. C'est la quinzaine la plus accessible de l'année scolaire, et c'est
+maintenant.
+
+Rapporter un vrai bulletin, et faire confirmer les cinq règles. Une matinée.
