@@ -34,6 +34,7 @@ import { categorisationPage, saveDossier, addCriterion } from "./categorisation.
 import {
   fraisPage, addSchedule, addLine, removeLine, issueInvoices,
 } from "./frais.ts";
+import { boursesPage, grantBourse, revokeBourse } from "./bourses.ts";
 import { communiquesPage, envoyer as envoyerCommunique } from "./communiques.ts";
 import {
   transfertsPage, recordTransfer, addLivretEntry, certificatePage,
@@ -1120,6 +1121,24 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
         out.error));
     }
 
+    // --- Bourses et remises ---------------------------------------------------
+    if (path === "/bourses" && req.method === "GET") {
+      if (!can(user, "voir_scolarite")) return html(res, "Accès refusé.", 403);
+      return html(res, await boursesPage(user, await chromeFor(user, "bourses")));
+    }
+    if (path === "/bourses" && req.method === "POST") {
+      if (!can(user, "voir_scolarite")) return html(res, "Accès refusé.", 403);
+      const r = await grantBourse(user, await formBody(req));
+      return html(res, await boursesPage(
+        user, await chromeFor(user, "bourses"), r.flash, r.error));
+    }
+    if (path === "/bourses/retirer" && req.method === "POST") {
+      if (!can(user, "voir_scolarite")) return html(res, "Accès refusé.", 403);
+      const r = await revokeBourse(user, (await formBody(req)).get("id") ?? "");
+      return html(res, await boursesPage(
+        user, await chromeFor(user, "bourses"), r.flash, r.error));
+    }
+
     // --- Grille des frais et émission des factures --------------------------
     if (path === "/frais" && req.method === "GET") {
       if (!can(user, "voir_scolarite")) return html(res, "Accès refusé.", 403);
@@ -1145,7 +1164,8 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       const out = await issueInvoices(user, (await formBody(req)).get("classe") ?? "");
       const flash = out.error ? undefined
         : `${plural(out.emises, "facture émise", "factures émises")}`
-          + `${out.deja ? `, ${out.deja} élève(s) déjà facturé(s)` : ""}.`;
+          + `${out.deja ? `, ${out.deja} élève(s) déjà facturé(s)` : ""}`
+          + `${out.remisesFcfa ? `, ${fcfa(out.remisesFcfa)} FCFA de remises déduits` : ""}.`;
       return html(res, await fraisPage(
         user, await chromeFor(user, "frais"), flash, out.error));
     }

@@ -80,6 +80,8 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
 - `src/server/communiques.ts` — SMS aux familles, coût annoncé avant l'envoi.
 - `src/server/transferts.ts` — transferts, livret scolaire cumulatif et
   certificat de transfert imprimable.
+- `src/server/bourses.ts` — bourses et remises, nominatives et cumulées
+  correctement.
 - `src/lib/roster.ts` — lecture d'un fichier de liste (encodage, séparateur,
   intitulés, dates, numéros). 22 tests.
 - `src/server/multipart.ts` — envoi de fichier, écrit à la main pour ne pas
@@ -138,6 +140,25 @@ trésorerie ou la parole de l'établissement :
   perdu pour autant.
 - **Un tuteur de trois enfants reçoit un message**, pas trois. C'est de
   l'argent, et c'est aussi du respect.
+
+### Les bourses et les remises
+
+Un établissement privé burkinabè scolarise presque toujours des enfants qui ne
+paient pas le plein tarif : orphelins, enfants du personnel, familles
+déplacées, fratries, boursiers d'une association. Jusqu'ici rien ne
+l'enregistrait — l'économe accordait la remise de tête, et personne ne savait
+en fin d'année ce que l'établissement avait donné ni à qui.
+
+- Une remise est **nominative, motivée et datée**. Le jour où un bailleur ou un
+  conseil demande « combien, et pour qui », la réponse existe.
+- **Deux remises de 50 % font 75 %, pas la gratuité.** Elles s'appliquent l'une
+  après l'autre sur ce qui reste. C'est la faute qui coûte le plus cher, dans
+  les deux sens : dix tests unitaires la surveillent.
+- Le **total accordé est affiché en permanence**. Un établissement qui donne
+  plus qu'il ne peut ferme ; celui qui n'ose plus rien donner trahit sa raison
+  d'être. Les deux erreurs viennent de ne pas voir le total.
+- Une facture déjà émise n'est **jamais rabotée en silence** : le décalage est
+  signalé, et c'est un humain qui réémet.
 
 ### Les frais et les factures
 
@@ -376,13 +397,14 @@ Comptes de démonstration — le code s'affiche à l'écran, aucun SMS n'est env
 | `70000004` | Économe |
 | `70000005` | Directeur |
 
-Vérifications : `npm run check:all` — typecheck strict, 50 tests unitaires,
+Vérifications : `npm run check:all` — typecheck strict, 60 tests unitaires,
 et trois parcours dans un vrai navigateur :
 
 | suite | ce qu'elle prouve |
 |---|---|
 | `test:transferts` (23) | un parcours déclaré est accepté et étiqueté, une moyenne inventée est refusée, le certificat porte sa réserve |
 | `test:communiques` (17) | le coût est annoncé avant l'envoi, les tuteurs sont dédoublonnés, un crédit court refuse l'envoi en bloc |
+| `test:bourses` (19) | les remises se cumulent sans atteindre la gratuité, une facture émise n'est pas rabotée |
 | `test:frais` (21) | un supplément sans autorisation est refusé, un dépassement de plafond est chiffré, une facture émise n'est pas recalculée |
 | `test:cloture` (25) | le bulletin remis ne bouge pas, l'écart est montré, le trimestre clos refuse les notes en ligne comme hors ligne |
 | `test:services` (14) | un enseignant ne voit et ne touche que ses classes — y compris en postant à la main |

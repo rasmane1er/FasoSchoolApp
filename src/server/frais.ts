@@ -27,6 +27,7 @@
 
 import { withSchool } from "../lib/db.ts";
 import { page, esc, fcfa, plural, type PageChrome } from "./html.ts";
+import { remisePour } from "./bourses.ts";
 import type { SessionUser } from "./session.ts";
 
 export const TRAITEMENTS = [
@@ -213,7 +214,11 @@ export async function removeLine(
 // Émission
 // ---------------------------------------------------------------------------
 
-export interface IssueOutcome { emises: number; deja: number; sansGrille: number }
+export interface IssueOutcome {
+  emises: number; deja: number; sansGrille: number;
+  /** Total des bourses et remises déduites au moment de l'émission. */
+  remisesFcfa: number;
+}
 
 /**
  * Émet une facture par élève inscrit dans la classe, à partir de la grille de
@@ -231,13 +236,17 @@ export async function issueInvoices(
 ): Promise<IssueOutcome & { error?: string }> {
   const schoolId = user.schoolId!;
   const v = await loadFrais(schoolId);
-  if (!v) return { emises: 0, deja: 0, sansGrille: 0, error: "Aucune année scolaire ouverte." };
+  if (!v) {
+    return { emises: 0, deja: 0, sansGrille: 0, remisesFcfa: 0,
+      error: "Aucune année scolaire ouverte." };
+  }
 
   return withSchool(schoolId, async (c) => {
     const k = await c.query(
       `select level_code, label from classes where id = $1`, [classId]);
     if (k.rowCount === 0) {
-      return { emises: 0, deja: 0, sansGrille: 0, error: "Classe introuvable." };
+      return { emises: 0, deja: 0, sansGrille: 0, remisesFcfa: 0,
+        error: "Classe introuvable." };
     }
     const level = k.rows[0].level_code as string;
 
@@ -245,7 +254,7 @@ export async function issueInvoices(
     const grille = v.schedules.find((s) => s.levelCode === level)
       ?? v.schedules.find((s) => s.levelCode === null);
     if (!grille || grille.lines.length === 0) {
-      return { emises: 0, deja: 0, sansGrille: 1,
+      return { emises: 0, deja: 0, sansGrille: 1, remisesFcfa: 0,
         error: `Aucune grille de frais renseignée pour ${k.rows[0].label}. `
           + `Créez-la avant d'émettre les factures.` };
     }
@@ -261,7 +270,7 @@ export async function issueInvoices(
       `select sequence, starts_on from terms
         where academic_year_id = $1 order by sequence`, [v.yearId]);
 
-    const out: IssueOutcome = { emises: 0, deja: 0, sansGrille: 0 };
+    const out: IssueOutcome = { emises: 0, deja: 0, sansGrille: 0, remisesFcfa: 0 };
 
     for (const el of eleves.rows) {
       const existe = await c.query(
@@ -269,6 +278,14 @@ export async function issueInvoices(
           where student_id = $1 and academic_year_id = $2 and status <> 'annulee'`,
         [el.student_id, v.yearId]);
       if (existe.rowCount! > 0) { out.deja += 1; continue; }
+
+      /* Les bourses et remises de l'élève sont déduites À L'ÉMISSION et
+         figées dans la facture. Une remise accordée plus tard ne rabote pas
+         une facture existante : l'écran des bourses signale le décalage, et
+         c'est un humain qui décide de réémettre. */
+      const remise = await remisePour(schoolId, el.student_id, v.yearId, total);
+      const aPayer = total - remise;
+      out.remisesFcfa += remise;
 
       const reference = `F-${v.yearLabel}-${el.matricule}`;
       const inv = await c.query(
@@ -278,13 +295,13 @@ export async function issueInvoices(
          on conflict (school_id, reference) do update
            set status = 'ouverte', total_fcfa = excluded.total_fcfa
          returning id`,
-        [el.student_id, v.yearId, grille.id, reference, total]);
+        [el.student_id, v.yearId, grille.id, reference, aPayer]);
 
       // Échéancier aligné sur les trimestres. Le reste de la division va sur
       // la première tranche : c'est l'usage, et cela évite un centime perdu.
       const n = Math.max(1, echeances.rowCount ?? 1);
-      const part = Math.floor(total / n);
-      const reste = total - part * n;
+      const part = Math.floor(aPayer / n);
+      const reste = aPayer - part * n;
       await c.query(`delete from invoice_instalments where invoice_id = $1`, [inv.rows[0].id]);
       for (const [i, t] of echeances.rows.entries()) {
         await c.query(

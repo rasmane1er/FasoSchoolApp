@@ -195,6 +195,8 @@ const NAV: Array<{ titre: string | null; liens: NavEntry[] }> = [
       droit: "parametrer" },
     { href: "/frais", label: "Frais", key: "frais", droit: "voir_scolarite" },
     { href: "/scolarite", label: "Scolarité", key: "scolarite", droit: "voir_scolarite" },
+    { href: "/bourses", label: "Bourses et remises", key: "bourses",
+      droit: "voir_scolarite" },
     { href: "/categorisation", label: "Catégorisation", key: "categorisation",
       droit: "voir_categorisation" },
   ] },
