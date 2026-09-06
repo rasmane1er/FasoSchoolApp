@@ -20,6 +20,7 @@ import {
   type SessionUser,
 } from "./session.ts";
 import { page, loginPage, esc, fr, fcfa, ordinal, plural, type PageChrome } from "./html.ts";
+import { settingsPage, saveSettings, type Period } from "./settings.ts";
 
 const PORT = Number(process.env.PORT ?? 4180);
 
@@ -816,6 +817,22 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       const r = await saveAbsences(user, url, await formBody(req));
       return html(res, await absencesPage(user, url,
         `Appel enregistré : ${plural(r.absents, "absence")}, ${plural(r.queued, "SMS envoyé", "SMS envoyés")} pour ${r.cost} F.`));
+    }
+
+    if (path === "/parametres" && req.method === "GET") {
+      if (!can(user, "parametrer")) return html(res, "Accès refusé.", 403);
+      const period = await currentPeriod(user.schoolId);
+      if (!period) return redirect(res, "/");
+      const chrome = await chromeFor(user, "parametres", `Année ${period.year_label}`);
+      return html(res, await settingsPage(user, chrome, period as Period));
+    }
+    if (path === "/parametres" && req.method === "POST") {
+      if (!can(user, "parametrer")) return html(res, "Accès refusé.", 403);
+      const period = await currentPeriod(user.schoolId);
+      if (!period) return redirect(res, "/");
+      const flash = await saveSettings(user, period as Period, await formBody(req));
+      const chrome = await chromeFor(user, "parametres", `Année ${period.year_label}`);
+      return html(res, await settingsPage(user, chrome, period as Period, flash));
     }
 
     if (path === "/scolarite" && req.method === "GET") {

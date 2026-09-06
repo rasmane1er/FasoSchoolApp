@@ -138,6 +138,7 @@ const NAV: Array<[string, string, string]> = [
   ["/absences", "Absences", "absences"],
   ["/scolarite", "Scolarité", "scolarite"],
   ["/categorisation", "Catégorisation", "categorisation"],
+  ["/parametres", "Règles de notation", "parametres"],
 ];
 
 export interface PageChrome {

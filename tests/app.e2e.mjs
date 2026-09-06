@@ -46,6 +46,14 @@ async function connecter(page, phone) {
     await client.query(`select set_config('fasoschool.school_id', $1, false)`, [rows[0].school_id]);
     await client.query(`delete from attendance_sessions where session_date = current_date`);
     await client.query(`delete from sms_messages where queued_at::date = current_date`);
+    // Le parcours confirme les règles et modifie la pondération : on remet
+    // l'établissement dans l'état où seed_school_defaults() le laisse.
+    await client.query(`update grading_policies
+                           set devoir_weight = 1, composition_weight = 2,
+                               interrogation_weight = 0,
+                               source_note = 'DÉFAUT NON VÉRIFIÉ — convention régionale.'`);
+    await client.query(`update coefficient_sets
+                           set source_note = 'DÉFAUT NON VÉRIFIÉ — réforme 2026.'`);
   }
   // Le limiteur de connexions est volontairement strict (6 par quart d'heure).
   // Sans purge, le parcours n'est jouable qu'une fois par fenêtre.
@@ -171,6 +179,37 @@ try {
   check("un second envoi ne redouble pas le SMS",
     /0 SMS/.test(await page.textContent(".ok")), await page.textContent(".ok"));
 
+  console.log("\nRègles de notation");
+  await page.goto(`${BASE}/parametres`);
+  await page.waitForSelector("h1");
+  const par = await page.content();
+  check("les règles non confirmées sont signalées", par.includes("non confirmée"));
+  check("la formule courante est affichée", par.includes("composition × 2"));
+  check("l'effet sur une classe réelle est montré", par.includes("Effet sur la"));
+  await page.screenshot({ path: "out/captures/07-parametres.png", fullPage: true });
+
+  // Le censeur corrige la pondération : devoirs et composition à parts égales.
+  const avant = await page.textContent("#apercu tbody tr:nth-child(1) td:nth-child(3)");
+  await page.fill("input[name=w_compo]", "1");
+  await page.check("input[name=confirme]");
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: "load" }),
+    page.click("button[type=submit]"),
+  ]);
+  await page.waitForSelector(".ok");
+  const apres = await page.textContent("#apercu tbody tr:nth-child(1) td:nth-child(3)");
+  check("la correction est confirmée", (await page.textContent(".ok")).includes("confirmées"));
+  check("les moyennes changent immédiatement", avant !== apres, `${avant} -> ${apres}`);
+  check("l'avertissement disparaît une fois confirmé",
+    (await page.content()).includes("Règles confirmées par l'établissement"));
+
+  // Remise en état pour que le parcours reste rejouable.
+  await page.fill("input[name=w_compo]", "2");
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: "load" }),
+    page.click("button[type=submit]"),
+  ]);
+
   console.log("\nCloisonnement des rôles");
   const eco = await ctx.browser().newContext({ locale: "fr-FR" });
   const p2 = await eco.newPage();
@@ -180,6 +219,8 @@ try {
   await p2.screenshot({ path: "out/captures/05-scolarite.png", fullPage: true });
   const r1 = await p2.goto(`${BASE}/categorisation`);
   check("l'économe est refusé sur la catégorisation", r1.status() === 403, `HTTP ${r1.status()}`);
+  const r2 = await p2.goto(`${BASE}/parametres`);
+  check("l'économe est refusé sur les règles de notation", r2.status() === 403, `HTTP ${r2.status()}`);
   await eco.close();
 
   const dir = await ctx.browser().newContext({ locale: "fr-FR" });
