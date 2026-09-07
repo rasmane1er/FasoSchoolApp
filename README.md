@@ -51,6 +51,8 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
   retrait d'un incident sans effacement.
 - `db/migrations/0008_justifications.sql` — justifier une absence, et la règle
   « une absence non justifiée compte zéro » sortie du code.
+- `db/migrations/0009_auth_sessions_rls.sql` — le row-level security qui
+  manquait sur les sessions du personnel.
 - `db/tests/rls_isolation.sql` — le test d'isolation contradictoire.
 
 **Métier**
@@ -114,6 +116,8 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
 - `public/sw.js` — cache de l'écran de saisie.
 
 **Exploitation**
+- `scripts/preparer-base.sh` — préparer la base d'un serveur, et refuser de la
+  déclarer prête tant que le cloisonnement n'est pas vérifié.
 - `scripts/installer.ts` — installer un établissement et son premier compte.
 - `scripts/sauvegarde.sh` — sauvegarde chiffrée, jamais écrite en clair.
 - `scripts/restauration-verifiee.sh` — l'épreuve de restauration.
@@ -744,16 +748,38 @@ Volontairement : le reste attend un vrai bulletin burkinabè.
 ## Démarrer
 
 ```bash
-createdb fasoschool
-createuser fasoschool_app --pwprompt        # PAS superutilisateur
-export DATABASE_URL=postgres://fasoschool_app:...@localhost:5432/fasoschool
-
 npm install
-npm run db:migrate
+
+# La base : migrations avec le rôle d'ADMINISTRATION, droits accordés au rôle
+# applicatif, puis vérification du cloisonnement avant de déclarer la base prête.
+ADMIN_DATABASE_URL='postgres://postgres@localhost/postgres' \
+APP_ROLE=fasoschool_app APP_PASSWORD='...' \
+./scripts/preparer-base.sh fasoschool
+
+export DATABASE_URL=postgres://fasoschool_app:...@localhost:5432/fasoschool
 npm run db:test:rls        # doit passer avant tout développement
 npm run demo               # établissement de démonstration + bulletins
 npm start                  # http://localhost:4180
 ```
+
+**`preparer-base.sh`, et non `db:migrate` à la main.** Le chemin d'installation
+donné ici jusqu'à récemment ne fonctionnait pas, et personne ne l'avait exécuté
+en entier. Il échouait de trois façons :
+
+- `npm run db:migrate` lancé avec le rôle applicatif s'arrête à la première
+  ligne : « permission denied to create extension "uuid-ossp" » ;
+- si on lui accordait ce droit pour débloquer, il deviendrait **propriétaire des
+  tables** — et un propriétaire peut supprimer les politiques de row-level
+  security qui sont l'unique frontière entre deux établissements ;
+- et rien n'accordait au rôle applicatif le moindre droit sur les tables : la
+  première requête de l'application aurait échoué.
+
+Le script fait les trois choses dans le bon ordre, refuse un rôle applicatif
+superutilisateur, et **vérifie avant de rendre la main** qu'aucune table portant
+`school_id` n'échappe au RLS, qu'aucune table n'appartient au rôle applicatif,
+et que les politiques sont toutes là. C'est cette vérification qui a révélé que
+`auth_sessions` — les sessions de tout le personnel, tous établissements
+confondus — n'avait aucune politique (migration 0009).
 
 Comptes de démonstration — le code s'affiche à l'écran, aucun SMS n'est envoyé :
 
@@ -766,10 +792,11 @@ Comptes de démonstration — le code s'affiche à l'écran, aucun SMS n'est env
 | `70000005` | Directeur |
 
 Vérifications : `npm run check:all` — typecheck strict, 60 tests unitaires,
-et vingt-trois parcours, dont vingt-deux dans un vrai navigateur :
+et vingt-quatre parcours, dont vingt-trois dans un vrai navigateur :
 
 | suite | ce qu'elle prouve |
 |---|---|
+| `test:installation` (17) | le chemin du premier jour marche du disque nu à la première connexion, et aucune table portant `school_id` n'échappe au RLS |
 | `test:sauvegarde` (15) | la sauvegarde refuse de tourner avec le rôle applicatif, ne laisse aucun fichier quand elle échoue, et son archive se restaure vraiment |
 | `test:bareme` (21) | une note sur 10 compte pour 20/20 dans la moyenne, et aucun des trois chemins de saisie ne rejette plus en silence |
 | `test:justifications` (24) | justifier une absence à une composition fait monter la moyenne du bulletin, et renverser la règle change le calcul |

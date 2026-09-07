@@ -8,7 +8,7 @@
     "node": ">=22.6"
   },
   "scripts": {
-    "db:migrate": "psql \"$DATABASE_URL\" -v ON_ERROR_STOP=1 -f db/migrations/0001_initial.sql -f db/migrations/0002_reference_data.sql -f db/migrations/0003_guardian_access.sql -f db/migrations/0004_message_suivi.sql -f db/migrations/0005_personnel.sql -f db/migrations/0006_annulation_paiement.sql -f db/migrations/0007_discipline.sql -f db/migrations/0008_justifications.sql",
+    "db:migrate": "psql \"$DATABASE_URL\" -v ON_ERROR_STOP=1 -f db/migrations/0001_initial.sql -f db/migrations/0002_reference_data.sql -f db/migrations/0003_guardian_access.sql -f db/migrations/0004_message_suivi.sql -f db/migrations/0005_personnel.sql -f db/migrations/0006_annulation_paiement.sql -f db/migrations/0007_discipline.sql -f db/migrations/0008_justifications.sql -f db/migrations/0009_auth_sessions_rls.sql",
     "db:test:rls": "psql \"$DATABASE_URL\" -v ON_ERROR_STOP=1 -f db/tests/rls_isolation.sql",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
     "test:bulletin": "node --experimental-strip-types --test tests/bulletin.test.ts",
@@ -18,7 +18,7 @@
     "start": "node --experimental-strip-types src/server/app.ts",
     "test:e2e": "node tests/app.e2e.mjs",
     "test:offline": "node tests/offline.e2e.mjs",
-    "check:all": "npm run typecheck && npm test && npm run test:rentree && npm run test:e2e && npm run test:offline && npm run test:evaluations && npm run test:messages && npm run test:personnel && npm run test:eleve && npm run test:annulation && npm run test:installer && npm run test:discipline && npm run test:justifications && npm run test:bareme && npm run test:sauvegarde && npm run test:import && npm run test:conseil && npm run test:famille && npm run test:categorisation && npm run test:services && npm run test:cloture && npm run test:frais && npm run test:communiques && npm run test:transferts && npm run test:bourses",
+    "check:all": "npm run typecheck && npm test && npm run test:rentree && npm run test:e2e && npm run test:offline && npm run test:evaluations && npm run test:messages && npm run test:personnel && npm run test:eleve && npm run test:annulation && npm run test:installer && npm run test:discipline && npm run test:justifications && npm run test:bareme && npm run test:sauvegarde && npm run test:installation && npm run test:import && npm run test:conseil && npm run test:famille && npm run test:categorisation && npm run test:services && npm run test:cloture && npm run test:frais && npm run test:communiques && npm run test:transferts && npm run test:bourses",
     "test:import": "node tests/import.e2e.mjs",
     "test:rentree": "node tests/rentree.e2e.mjs",
     "test:conseil": "node tests/conseil.e2e.mjs",
@@ -41,7 +41,8 @@
     "test:discipline": "node tests/discipline.e2e.mjs",
     "test:justifications": "node tests/justifications.e2e.mjs",
     "test:bareme": "node tests/bareme.e2e.mjs",
-    "test:sauvegarde": "node tests/sauvegarde.e2e.mjs"
+    "test:sauvegarde": "node tests/sauvegarde.e2e.mjs",
+    "test:installation": "node tests/installation.e2e.mjs"
   },
   "dependencies": {
     "pg": "^8.23.0"
