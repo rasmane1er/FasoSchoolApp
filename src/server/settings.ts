@@ -76,7 +76,7 @@ async function load(c: PoolClient, period: Period): Promise<Loaded> {
       decimals: Number(row.decimals),
       rounding: row.rounding,
       rankTiePolicy: row.rank_tie_policy,
-      unjustifiedAbsenceCountsAsZero: true,
+      unjustifiedAbsenceCountsAsZero: row.unjustified_absence_counts_as_zero,
     },
     policySource: row.source_note ?? null,
     bands: b.rows.map((r) => ({
@@ -232,6 +232,27 @@ export async function settingsPage(
       </div>
 
       <div class="card" style="margin-top:18px">
+        <header><h2>Absence à une évaluation</h2></header>
+        <div class="body">
+          <label style="display:flex;align-items:flex-start;gap:10px;text-transform:none;
+                        letter-spacing:0;font-size:14px;color:var(--ink);margin:0">
+            <input type="checkbox" name="zero_si_non_justifiee" value="1"${
+              d.policy.unjustifiedAbsenceCountsAsZero ? " checked" : ""}
+              style="width:auto;height:auto;margin-top:4px">
+            <span>Une absence <b>non justifiée</b> à une évaluation compte
+            <b>zéro</b> dans la moyenne.<br>
+            <span style="color:var(--muted);font-size:13px">Décochez et
+            l'évaluation manquée est simplement écartée du calcul. Une absence
+            <b>justifiée</b> est toujours neutralisée, quel que soit ce
+            réglage. Cette règle décide de moyennes réelles : une composition
+            vaut coefficient 2, et un élève malade ce jour-là perd des points
+            que seule une justification peut lui rendre — écran « Justifier les
+            absences ».</span></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:18px">
         <header><h2>Coefficients</h2>
           <span style="margin-left:auto;font-size:12.5px;color:var(--muted)">
             ${plural(utilisees.length, "discipline enseignée", "disciplines enseignées")} cette année —
@@ -284,16 +305,20 @@ export async function saveSettings(
     const pol = await c.query(
       `insert into grading_policies (school_id, effective_from, interrogation_weight,
               devoir_weight, composition_weight, scale_max, pass_mark, decimals,
-              rounding, rank_tie_policy, source_note)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+              rounding, rank_tie_policy, source_note,
+              unjustified_absence_counts_as_zero)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
        on conflict (school_id, effective_from) do update
          set interrogation_weight = excluded.interrogation_weight,
              devoir_weight = excluded.devoir_weight,
              composition_weight = excluded.composition_weight,
+             unjustified_absence_counts_as_zero =
+               excluded.unjustified_absence_counts_as_zero,
              source_note = excluded.source_note
        returning id`,
       [schoolId, d.yearStart, wi, wd, wc, d.policy.scaleMax, d.policy.passMark,
-       d.policy.decimals, d.policy.rounding, d.policy.rankTiePolicy, note]);
+       d.policy.decimals, d.policy.rounding, d.policy.rankTiePolicy, note,
+       form.get("zero_si_non_justifiee") === "1"]);
     const policyId = pol.rows[0].id;
 
     // Mentions : on réécrit la table complète, c'est une liste courte.

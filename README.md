@@ -49,6 +49,8 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
   paiement, et `montant_regle()` : la seule définition du net encaissé.
 - `db/migrations/0007_discipline.sql` — le vocabulaire des sanctions, et le
   retrait d'un incident sans effacement.
+- `db/migrations/0008_justifications.sql` — justifier une absence, et la règle
+  « une absence non justifiée compte zéro » sortie du code.
 - `db/tests/rls_isolation.sql` — le test d'isolation contradictoire.
 
 **Métier**
@@ -100,6 +102,8 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
   tenir les tuteurs et leurs numéros.
 - `src/server/discipline.ts` — le registre de discipline du surveillant
   général, et la limite du pouvoir de sanctionner.
+- `src/server/justifications.ts` — justifier une absence, de la journée ou
+  d'une évaluation, avec son motif écrit.
 - `src/lib/roster.ts` — lecture d'un fichier de liste (encodage, séparateur,
   intitulés, dates, numéros). 22 tests.
 - `src/server/multipart.ts` — envoi de fichier, écrit à la main pour ne pas
@@ -117,6 +121,45 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
 **Démonstration** — `npm run demo` crée un établissement, une 6<sup>e</sup> de
 douze élèves, huit disciplines notées, la scolarité et un dossier de
 catégorisation entamé, puis écrit les bulletins dans `out/`.
+
+### Justifier une absence
+
+`is_justified` existait sur `attendance_records` **et** sur `grade_entries`
+depuis le premier schéma. Aucune ligne de l'application ne l'avait jamais mise
+à `true` — seul le jeu de démonstration en semait quelques-unes, ce qui rendait
+le défaut invisible en démonstration et certain en production. Pourtant :
+
+- le bulletin imprime « Absences justifiées » et « Absences non justifiées ».
+  Dans une vraie école la première ligne valait zéro pour tout le monde, et la
+  seconde portait toutes les absences — y compris celles pour lesquelles la
+  famille avait apporté un certificat. C'est une **accusation imprimée sur un
+  document officiel remis aux parents** ;
+- l'espace des familles et le conseil de classe affichaient le même compte,
+  toujours faux ;
+- et surtout, le moteur de calcul compte **zéro** une absence non justifiée à
+  une évaluation. Un élève malade le jour de la composition — coefficient 2 —
+  voyait sa moyenne effondrée par un zéro que rien, dans le logiciel, ne
+  pouvait lever. Avec certificat médical ou sans.
+
+C'est le défaut le plus lourd trouvé jusqu'ici : il change des notes sur un
+bulletin.
+
+**La règle n'est plus un `if`.** `unjustifiedAbsenceCountsAsZero` était écrite
+`true` en dur dans `repository.ts`, en contradiction avec le principe tenu
+partout ailleurs. Elle vit maintenant dans `grading_policies`, avec sa date
+d'effet, corrigeable par le censeur — et marquée non vérifiée comme les cinq
+autres. La suite renverse la règle et mesure que la moyenne du bulletin change :
+c'est la preuve qu'elle n'est plus dans le code.
+
+**L'écran dit l'effet avant de faire cliquer.** Il affiche, en toutes lettres,
+ce que justifier changera compte tenu de la règle en vigueur — on ne fait pas
+signer un geste dont on cache la portée. Un motif écrit est exigé dans les deux
+sens : « certificat médical du 12/11 » se vérifie trois mois plus tard,
+« justifié » ne se vérifie pas, et retirer une justification rétablit une
+absence non justifiée au dossier d'un élève.
+
+La suite ne se contente pas de vérifier une case cochée : elle lit la **moyenne
+affichée sur l'écran des bulletins** avant et après, et vérifie qu'elle a monté.
 
 ### Le registre de discipline
 
@@ -667,10 +710,11 @@ Comptes de démonstration — le code s'affiche à l'écran, aucun SMS n'est env
 | `70000005` | Directeur |
 
 Vérifications : `npm run check:all` — typecheck strict, 60 tests unitaires,
-et vingt parcours dans un vrai navigateur :
+et vingt et un parcours dans un vrai navigateur :
 
 | suite | ce qu'elle prouve |
 |---|---|
+| `test:justifications` (24) | justifier une absence à une composition fait monter la moyenne du bulletin, et renverser la règle change le calcul |
 | `test:discipline` (29) | l'exclusion définitive est refusée au surveillant même en postant à la main, et un incident retiré reste écrit et barré |
 | `test:installer` (24) | un second établissement s'installe, son chef se connecte, et aucune des deux écoles ne voit les données de l'autre |
 | `test:annulation` (28) | le reçu d'origine reste intact, l'annulation est un second reçu numéroté, et tous les écrans lisent le même solde |

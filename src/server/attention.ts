@@ -85,6 +85,26 @@ export async function pointsDAttention(
       }
     }
 
+    /* Une absence à une évaluation qui attend une explication : tant que
+       personne ne tranche, la règle en vigueur peut la compter zéro dans une
+       moyenne, et c'est un bulletin faux qui part chez la famille. */
+    const aJustifier = await un(
+      `select count(*)::int as n from grade_entries ge
+         join evaluations ev on ev.id = ge.evaluation_id
+        where ge.is_absent and not ge.is_justified
+          and exists (select 1 from grading_policies gp
+                       where gp.unjustified_absence_counts_as_zero)`);
+    if (aJustifier > 0) {
+      points.push({
+        gravite: "bloquant",
+        texte: `${plural(aJustifier, "absence à une évaluation attend",
+          "absences à une évaluation attendent")} une explication. `
+          + `Sans elle, ${accord(aJustifier, "elle compte", "elles comptent")} `
+          + `zéro dans la moyenne.`,
+        action: "Justifier", lien: "/justifications", droit: "faire_appel",
+      });
+    }
+
     // Un message refusé par l'opérateur n'est pas un incident technique : c'est
     // une famille qui n'a pas été prévenue et qui l'ignore. Tant que personne
     // ne s'en occupe, il remonte ici.

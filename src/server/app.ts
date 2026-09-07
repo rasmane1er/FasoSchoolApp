@@ -47,6 +47,7 @@ import { personnelPage, ajouterMembre, changerFonction,
 import { elevePage, elevesPage, corrigerIdentite, enregistrerTuteur,
          retirerTuteur, enregistrerUrgence, retirerUrgence } from "./eleve.ts";
 import { disciplinePage, consigner, retirer as retirerIncident } from "./discipline.ts";
+import { justificationsPage, decider as deciderJustification } from "./justifications.ts";
 import {
   transfertsPage, recordTransfer, addLivretEntry, certificatePage,
 } from "./transferts.ts";
@@ -1191,6 +1192,25 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
                   + `des messages pour joindre ces familles autrement.`
                 : ""),
         out.error));
+    }
+
+    // --- Justifications ------------------------------------------------------
+    if (path === "/justifications") {
+      // Qui fait l'appel justifie : c'est la vie scolaire qui reçoit le mot
+      // des parents, pas l'enseignant de mathématiques.
+      if (!can(user, "faire_appel")) return html(res, "Accès refusé.", 403);
+      const chrome = await chromeFor(user, "justifications");
+      if (req.method === "GET") {
+        return html(res, await justificationsPage(user, chrome, url));
+      }
+      if (req.method === "POST") {
+        const form = await formBody(req);
+        const out = await deciderJustification(user, form);
+        const retour = new URL(url.toString());
+        if (out.classId) retour.searchParams.set("classe", out.classId);
+        return html(res, await justificationsPage(user, chrome, retour,
+          out.flash, out.error));
+      }
     }
 
     // --- Discipline ----------------------------------------------------------

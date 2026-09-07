@@ -135,7 +135,8 @@ export async function loadBulletinInputs(
 
     const pol = await c.query(
       `select id, interrogation_weight, devoir_weight, composition_weight,
-              scale_max, pass_mark, decimals, rounding, rank_tie_policy, source_note
+              scale_max, pass_mark, decimals, rounding, rank_tie_policy,
+              unjustified_absence_counts_as_zero, source_note
          from grading_policies
         where effective_from <= $1
         order by effective_from desc
@@ -156,7 +157,10 @@ export async function loadBulletinInputs(
       decimals: Number(p.decimals),
       rounding: p.rounding,
       rankTiePolicy: p.rank_tie_policy,
-      unjustifiedAbsenceCountsAsZero: true,
+      // Écrite `true` en dur jusqu'ici, en contradiction avec le principe tenu
+      // partout ailleurs : une règle qui décide d'une moyenne vit dans une
+      // table, avec sa date d'effet et sa provenance.
+      unjustifiedAbsenceCountsAsZero: p.unjustified_absence_counts_as_zero,
     };
 
     const bands = await c.query(
