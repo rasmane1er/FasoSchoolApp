@@ -29,6 +29,9 @@ import { esc, plural } from "./html.ts";
 import { perimetreDe, peutMatiere, voitTout } from "./services.ts";
 import type { SessionUser } from "./session.ts";
 
+const UUID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export const TYPES: Array<[string, string]> = [
   ["interrogation", "Interrogation"],
   ["devoir", "Devoir surveillé"],
@@ -102,6 +105,19 @@ export async function createEvaluation(
   const heldOn = dateRaw ? toIso(dateRaw) : null;
   if (dateRaw && !heldOn) return { error: "Date illisible. Écrivez-la 12/11/2026." };
 
+  /* Le barème. `evaluations.bareme` existait depuis le premier schéma sans que
+     rien ne l'écrive NI ne le lise : une interrogation sur 10 était donc
+     impossible à saisir, et l'aurait été de travers. Il est borné pour la même
+     raison que tout le reste — un barème de 3 000 ne se corrige pas après coup,
+     les notes déjà saisies deviendraient absurdes. */
+  const baremeRaw = (form.get("bareme") ?? "20").trim().replace(",", ".");
+  const bareme = Number(baremeRaw);
+  if (!Number.isFinite(bareme) || bareme < 5 || bareme > 100) {
+    return { error: "Le barème doit être un nombre entre 5 et 100. La plupart "
+      + "des évaluations sont sur 20 ; une interrogation courte est souvent "
+      + "sur 10." };
+  }
+
   // La saisie des notes est déjà bornée par la répartition des services ; la
   // création l'est de la même façon, et pour la même raison.
   const perimetre = await perimetreDe(user);
@@ -116,12 +132,21 @@ export async function createEvaluation(
       + "toutes les classes du niveau." };
   }
 
+  /* Les identifiants sont contrôlés AVANT d'atteindre la base : un `trimestre`
+     vide arrivait jusqu'au `::uuid` et remontait une erreur PostgreSQL brute
+     au lieu d'un refus lisible. L'écran envoie toujours le champ ; un POST
+     fabriqué à la main, non. */
+  const termId = (form.get("trimestre") ?? "").trim();
+  if (!UUID.test(classId) || !UUID.test(subjectId) || !UUID.test(termId)) {
+    return { error: "Classe, matière ou trimestre manquant." };
+  }
+
   return withSchool(schoolId, async (c) => {
     const ctx = await c.query(
       `select cl.level_code, cl.academic_year_id, t.id as term_id, t.status
          from classes cl
          join terms t on t.academic_year_id = cl.academic_year_id
-        where cl.id = $1 and t.id = $2`, [classId, form.get("trimestre") ?? ""]);
+        where cl.id = $1 and t.id = $2`, [classId, termId]);
     if (ctx.rowCount === 0) return { error: "Trimestre introuvable pour cette classe." };
     if (ctx.rows[0].status !== "ouvert") {
       return { error: "Trimestre clôturé : aucune évaluation ne peut y être ajoutée." };
@@ -151,11 +176,12 @@ export async function createEvaluation(
 
       await c.query(
         `insert into evaluations (school_id, term_id, class_id, subject_id,
-                                  eval_type, scope, label, held_on, created_by)
-         values (current_school_id(), $1, $2, $3, $4, $5, $6, $7::date, $8)`,
+                                  eval_type, scope, label, held_on, bareme,
+                                  created_by)
+         values (current_school_id(), $1, $2, $3, $4, $5, $6, $7::date, $8, $9)`,
         [ctx.rows[0].term_id, cible, subjectId, type,
          type === "composition" ? "etablissement" : "classe",
-         label, heldOn, staffId]);
+         label, heldOn, bareme, staffId]);
       creees += 1;
     }
 
@@ -275,6 +301,11 @@ export function evaluationsCard(
       <div><label for="date">Date</label>
         <input type="text" id="date" name="date" inputmode="numeric"
                placeholder="jj/mm/aaaa"></div>
+      <div><label for="bareme">Barème</label>
+        <input type="text" id="bareme" name="bareme" inputmode="decimal"
+               value="20" class="num">
+        <p class="hint">Sur 20 par défaut. Une interrogation courte est souvent
+        sur 10 : la note sera ramenée sur 20 dans la moyenne.</p></div>
     </div>
     ${voitTout(user) ? `<p class="hint">Une <b>composition</b> est harmonisée :
       la créer l'ouvre pour toutes les classes du niveau d'un seul coup.</p>` : ""}

@@ -205,14 +205,24 @@ try {
     `lu « ${after} », saisi « ${saisie} », avant « ${before} »`);
   await page.screenshot({ path: "out/captures/03-notes.png", fullPage: true });
 
+  /* Hors barème. Autrefois la valeur disparaissait sans un mot — le code
+     disait lui-même « saisie rejetée en silence ». Le refus est maintenant
+     annoncé, et sur ce chemin il l'est SANS aller-retour serveur : la page ne
+     navigue plus, elle explique. */
   await page.fill("input.note-cell >> nth=0", "99");
-  await Promise.all([
-    page.waitForNavigation({ waitUntil: "load" }),
-    page.click("button[type=submit]"),
-  ]);
+  await page.click("button[type=submit]");
+  await page.waitForFunction(
+    () => (document.getElementById("etat-file")?.textContent ?? "").includes("refusée"),
+    null, { timeout: 5000 });
+  const refus = await page.textContent("#etat-file");
+  check("une note hors barème est refusée ET DITE", refus.includes("refusée"), refus);
+  check("le refus rappelle le barème", refus.includes("sur 20"), refus);
+  check("et la valeur refusée est citée", refus.includes("99"), refus);
+
+  await page.reload();
   await page.waitForSelector("input.note-cell");
   const rejected = await page.inputValue("input.note-cell >> nth=0");
-  check("une note hors barème est rejetée", !rejected.startsWith("99"), `lu « ${rejected} »`);
+  check("elle n'est pas enregistrée", !rejected.startsWith("99"), `lu « ${rejected} »`);
 
   console.log("\nAppel et SMS");
   await page.goto(`${BASE}/absences?classe=${classe}`);

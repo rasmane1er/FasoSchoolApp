@@ -340,7 +340,8 @@ async function notesPage(user: SessionUser, url: URL, flash?: string): Promise<s
     }
 
     const evals = await c.query(
-      `select id, eval_type, label, held_on from evaluations
+      `select id, eval_type, label, held_on, coalesce(bareme, 20) as bareme
+         from evaluations
         where class_id = $1 and term_id = $2 and subject_id = $3
         order by held_on nulls last, eval_type`,
       [classId, period.term_id, chosen],
@@ -407,6 +408,7 @@ async function notesPage(user: SessionUser, url: URL, flash?: string): Promise<s
     `<th class="r" style="${e.eval_type === "composition" ? "color:var(--indigo)" : ""}">
        ${esc(e.eval_type === "composition" ? "Composition" : e.label ?? "Devoir")}
        ${e.held_on ? `<div style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--faint)">${new Date(e.held_on).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" })}</div>` : ""}
+       ${Number(e.bareme ?? 20) !== 20 ? `<div style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--ochre)">sur ${fr(Number(e.bareme), 0)}</div>` : ""}
      </th>`).join("");
 
   const body = d.students.map((st: any, i: number) => {
@@ -416,6 +418,7 @@ async function notesPage(user: SessionUser, url: URL, flash?: string): Promise<s
       return `<td class="r"><input class="note-cell" name="n_${esc(e.id)}_${esc(st.id)}"
         value="${esc(val)}" inputmode="decimal" autocomplete="off"
         data-eval="${esc(e.id)}" data-student="${esc(st.id)}"
+        data-bareme="${Number(e.bareme ?? 20)}"
         data-original="${esc(val)}"
         data-updated="${g?.updated_at ? new Date(g.updated_at).toISOString() : ""}"
         aria-label="${esc(st.last_name)} — ${esc(e.label ?? e.eval_type)}"></td>`;
@@ -433,7 +436,7 @@ async function notesPage(user: SessionUser, url: URL, flash?: string): Promise<s
 
   return page(chrome, "Notes", `
     <div class="row"><div><h1>Saisie des notes</h1>
-      <p style="margin:0;color:var(--muted)">${plural(d.students.length, "élève")} — saisir une note sur 20, ou <code>abs</code> pour une absence.</p>
+      <p style="margin:0;color:var(--muted)">${plural(d.students.length, "élève")} — saisir la note, ou <code>abs</code> pour une absence. Une colonne notée sur autre chose que 20 le dit dans son en-tête.</p>
       </div>${selector}</div>
     ${flash ? `<div class="ok">${esc(flash)}</div>` : ""}
     <div class="note">La moyenne suit la règle de l'établissement : les devoirs et la composition
@@ -454,9 +457,14 @@ async function notesPage(user: SessionUser, url: URL, flash?: string): Promise<s
     <script src="/offline.js" defer></script>`);
 }
 
-async function saveNotes(user: SessionUser, url: URL, form: URLSearchParams): Promise<number> {
+interface SaisieRefusee { studentId: string; valeur: string; bareme: number }
+
+async function saveNotes(
+  user: SessionUser, url: URL, form: URLSearchParams,
+): Promise<{ saved: number; refuses: SaisieRefusee[] }> {
   const schoolId = user.schoolId!;
   let saved = 0;
+  const refuses: SaisieRefusee[] = [];
   /* Le contrôle porte sur l'ÉCRITURE, pas seulement sur ce qui a été affiché.
      Chaque évaluation est confrontée à la répartition de services : un
      identifiant envoyé à la main ne passe pas plus qu'une option masquée.
@@ -483,6 +491,20 @@ async function saveNotes(user: SessionUser, url: URL, form: URLSearchParams): Pr
       return ok;
     };
 
+    /* Le barème d'une évaluation, mis en cache : la boucle passe sur toutes les
+       cases d'une classe et il n'y a que quelques évaluations. */
+    const baremes = new Map<string, number>();
+    const baremeDe = async (evaluationId: string): Promise<number> => {
+      const connu = baremes.get(evaluationId);
+      if (connu !== undefined) return connu;
+      const r = await c.query(
+        `select coalesce(bareme, 20) as b from evaluations where id = $1`,
+        [evaluationId]);
+      const b = Number(r.rows[0]?.b ?? 20);
+      baremes.set(evaluationId, b > 0 ? b : 20);
+      return baremes.get(evaluationId) as number;
+    };
+
     for (const [name, raw] of form) {
       if (!name.startsWith("n_")) continue;
       const parts = name.slice(2).split("_");
@@ -504,8 +526,17 @@ async function saveNotes(user: SessionUser, url: URL, form: URLSearchParams): Pr
       if (v === "abs" || v === "a") {
         absent = true;
       } else {
+        /* Le barème de CETTE évaluation, pas 20 en dur : `evaluations.bareme`
+           existait depuis le premier schéma sans être lu nulle part. */
+        const bareme = await baremeDe(evaluationId);
         const n = Number(v);
-        if (!Number.isFinite(n) || n < 0 || n > 20) continue; // saisie rejetée en silence
+        if (!Number.isFinite(n) || n < 0 || n > bareme) {
+          /* Et surtout : PLUS DE REJET EN SILENCE. Une case qui s'efface sans
+             un mot fait croire à l'enseignant qu'il a mal cliqué, et il
+             recommence — ou pire, il ne s'en aperçoit pas. */
+          refuses.push({ studentId, valeur: raw.trim(), bareme });
+          continue;
+        }
         score = Math.round(n * 100) / 100;
       }
 
@@ -527,7 +558,7 @@ async function saveNotes(user: SessionUser, url: URL, form: URLSearchParams): Pr
       [schoolId, user.userId, JSON.stringify({ classe: url.searchParams.get("classe"), saisies: saved })],
     );
   });
-  return saved;
+  return { saved, refuses };
 }
 
 async function bulletinsPage(user: SessionUser, url: URL, flash?: string): Promise<string> {
@@ -980,8 +1011,24 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     }
     if (path === "/notes" && req.method === "POST") {
       if (!can(user, "saisir_notes")) return html(res, "Accès refusé.", 403);
-      const n = await saveNotes(user, url, await formBody(req));
-      return html(res, await notesPage(user, url, `${plural(n, "note enregistrée", "notes enregistrées")}.`));
+      const r = await saveNotes(user, url, await formBody(req));
+      let message = `${plural(r.saved, "note enregistrée", "notes enregistrées")}.`;
+      if (r.refuses.length) {
+        // Nommer l'élève et la valeur tapée : « une saisie refusée » sans dire
+        // laquelle oblige l'enseignant à relire trente lignes.
+        const noms = await withSchool(user.schoolId!, async (c) =>
+          new Map((await c.query(
+            `select id, last_name || ' ' || first_names as nom from students
+              where id = any($1::uuid[])`,
+            [r.refuses.map((x) => x.studentId)])).rows.map(
+              (x: any) => [x.id as string, x.nom as string])));
+        message += ` ${plural(r.refuses.length, "saisie refusée", "saisies refusées")} : `
+          + r.refuses.map((x) => `${noms.get(x.studentId) ?? "?"} « ${x.valeur} »`)
+              .join(", ")
+          + ` — la note doit être un nombre entre 0 et ${
+              r.refuses[0]!.bareme}, ou « abs ».`;
+      }
+      return html(res, await notesPage(user, url, message));
     }
 
     if (path === "/bulletins" && req.method === "GET") {

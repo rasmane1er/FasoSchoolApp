@@ -122,6 +122,37 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
 douze élèves, huit disciplines notées, la scolarité et un dossier de
 catégorisation entamé, puis écrit les bulletins dans `out/`.
 
+### Le barème d'une évaluation
+
+`evaluations.bareme` existait depuis le premier schéma. **Rien ne l'écrivait,
+rien ne le lisait.** Trois conséquences, toutes silencieuses :
+
+- une interrogation sur 10 était impossible à créer — et si elle l'avait été,
+  le moteur aurait pris 8/10 pour 8/20, **divisant la note par deux** ;
+- la saisie était bornée à 20 en dur, dans **trois fichiers différents** : le
+  serveur, le validateur de synchronisation, et le script hors ligne ;
+- et une valeur hors barème était rejetée **en silence**, dans les trois. Le
+  commentaire du code le disait lui-même : « saisie rejetée en silence ». Une
+  case qui s'efface sans un mot fait croire à l'enseignant qu'il a mal cliqué —
+  ou pire, il ne s'en aperçoit pas et la note manque au bulletin. Hors ligne,
+  le bandeau annonçait même « synchronisée » pendant que la valeur s'était
+  volatilisée.
+
+Une évaluation porte désormais son barème (entre 5 et 100, 20 par défaut). La
+note est **stockée telle que l'enseignant l'a saisie** — son 10 sur 10 reste un
+10 — et ramenée sur le barème de la règle de notation au moment du calcul, à un
+seul endroit. La colonne annonce son barème quand il n'est pas 20, et la case le
+porte pour que le navigateur valide exactement ce que le serveur valide.
+
+**Plus aucun rejet muet.** Le serveur nomme l'élève et la valeur tapée ; le
+chemin hors ligne marque la case en rouge et l'explique sans même aller au
+serveur ; la synchronisation refuse avec son motif. La suite éprouve les trois
+chemins et vérifie qu'un 10/10 compte bien 20/20 dans la moyenne.
+
+Défaut trouvé en chemin : un `trimestre` vide dans un POST fabriqué remontait
+une erreur PostgreSQL brute jusqu'à l'écran. Les identifiants sont maintenant
+contrôlés avant d'atteindre la base.
+
 ### Dire aux familles que leur espace existe
 
 L'espace des familles était construit, testé, et **muet** : rien, dans le
@@ -735,10 +766,11 @@ Comptes de démonstration — le code s'affiche à l'écran, aucun SMS n'est env
 | `70000005` | Directeur |
 
 Vérifications : `npm run check:all` — typecheck strict, 60 tests unitaires,
-et vingt et un parcours dans un vrai navigateur :
+et vingt-deux parcours dans un vrai navigateur :
 
 | suite | ce qu'elle prouve |
 |---|---|
+| `test:bareme` (21) | une note sur 10 compte pour 20/20 dans la moyenne, et aucun des trois chemins de saisie ne rejette plus en silence |
 | `test:justifications` (24) | justifier une absence à une composition fait monter la moyenne du bulletin, et renverser la règle change le calcul |
 | `test:discipline` (29) | l'exclusion définitive est refusée au surveillant même en postant à la main, et un incident retiré reste écrit et barré |
 | `test:installer` (24) | un second établissement s'installe, son chef se connecte, et aucune des deux écoles ne voit les données de l'autre |
@@ -754,7 +786,7 @@ et vingt et un parcours dans un vrai navigateur :
 | `test:cloture` (32) | le bulletin remis ne bouge pas, l'écart est montré, le trimestre clos refuse les notes, et les familles apprennent que leur espace existe |
 | `test:services` (14) | un enseignant ne voit et ne touche que ses classes — y compris en postant à la main |
 | `test:rentree` (19) | un établissement ouvre son année, pose ses trimestres et crée ses classes sans intervention en base |
-| `test:e2e` (50) | connexion, notes, bulletins, appel et SMS, encaissement, droits |
+| `test:e2e` (53) | connexion, notes, bulletins, appel et SMS, encaissement, droits |
 | `test:offline` (18) | le réseau est réellement coupé, l'onglet fermé puis rouvert ; rien n'est perdu, rien n'est écrasé |
 | `test:categorisation` (20) | le dossier se saisit, les points hors barème sont refusés, et l'écran ne devine ni la catégorie ni le plafond |
 | `test:famille` (22) | un parent voit ses enfants et personne d'autre ; les deux sessions ne communiquent pas ; la page tient sous 60 Ko sans JavaScript |

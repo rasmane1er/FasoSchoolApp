@@ -57,7 +57,12 @@ export function parseMutations(payload: unknown): Mutation[] {
     if (!absent) {
       const n = Number(m.score);
       if (m.score === null || m.score === undefined || m.score === "") score = null;
-      else if (!Number.isFinite(n) || n < 0 || n > 20) continue; // hors barème : rejeté
+      /* Borne haute large à ce stade : le barème réel de l'évaluation n'est
+         connu qu'en base, et `applyMutations` la contrôle une fois la ligne
+         retrouvée — avec un MOTIF qui remonte à l'enseignant. Rejeter ici sans
+         rien dire ferait disparaître sa saisie en silence, ce qui est
+         exactement le défaut qu'on corrige. */
+      else if (!Number.isFinite(n) || n < 0 || n > 100) continue;
       else score = Math.round(n * 100) / 100;
     }
     out.push({
@@ -97,11 +102,15 @@ export async function applyMutations(
          trimestre entre-temps clôturé. Les accepter ferait bouger des bulletins
          déjà remis aux familles, sans que personne ne l'ait décidé. */
       const ev = await c.query(
-        `select ev.id, t.status from evaluations ev
+        `select ev.id, t.status, coalesce(ev.bareme, 20) as bareme
+           from evaluations ev
            join terms t on t.id = ev.term_id where ev.id = $1`, [m.evaluationId]);
       const inconnue = ev.rowCount === 0;
       const close = !inconnue && ev.rows[0].status !== "ouvert";
-      if (inconnue || close) {
+      // Hors barème : refusé AVEC son motif, jamais avalé en silence.
+      const horsBareme = !inconnue && m.score !== null
+        && Number(m.score) > Number(ev.rows[0].bareme);
+      if (inconnue || close || horsBareme) {
         await c.query(
           `insert into sync_mutations (school_id, mutation_id, device_id, actor_id,
                                        entity_type, entity_id, operation, payload, outcome)
@@ -111,7 +120,10 @@ export async function applyMutations(
           mutationId: m.mutationId, outcome: "rejete",
           reason: inconnue
             ? "Évaluation inconnue."
-            : "Trimestre clôturé : cette note arrive trop tard. Voyez le censeur.",
+            : close
+              ? "Trimestre clôturé : cette note arrive trop tard. Voyez le censeur."
+              : `Cette évaluation est notée sur ${ev.rows[0].bareme} : `
+                + `${m.score} n'est pas une note possible.`,
         });
         continue;
       }

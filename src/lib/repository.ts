@@ -171,13 +171,22 @@ export async function loadBulletinInputs(
       [p.id],
     );
 
+    /* `ev.bareme` existait depuis le premier schéma et n'était lu nulle part :
+       une note sur 10 était traitée comme une note sur 20, donc DIVISÉE PAR
+       DEUX dans la moyenne. On ramène ici chaque note au barème de la règle de
+       notation — c'est ce que le moteur attend (« note ramenée sur
+       scaleMax »), et c'est le seul endroit où cette conversion doit vivre. */
     const grades = await c.query(
       `select ge.student_id, ev.subject_id, ev.eval_type,
-              ge.score, ge.is_absent, ge.is_justified
+              case when ge.score is null or coalesce(ev.bareme, 0) <= 0
+                   then ge.score
+                   else round(ge.score * $3::numeric / ev.bareme, 4)
+              end as score,
+              ge.is_absent, ge.is_justified
          from grade_entries ge
          join evaluations ev on ev.id = ge.evaluation_id
         where ev.term_id = $1 and (ev.class_id = $2 or ev.class_id is null)`,
-      [termId, classId],
+      [termId, classId, policy.scaleMax],
     );
 
     const abs = await c.query(

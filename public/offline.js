@@ -90,6 +90,7 @@
   /* Les cellules modifiées, comparées à ce que le serveur a rendu. */
   function changed() {
     var out = [];
+    var rejets = [];
     var cells = form.querySelectorAll("input.note-cell[data-eval]");
     for (var i = 0; i < cells.length; i++) {
       var el = cells[i];
@@ -98,9 +99,16 @@
 
       var absent = v.toLowerCase() === "abs" || v.toLowerCase() === "a";
       var score = null;
+      var bareme = Number(el.getAttribute("data-bareme") || 20) || 20;
       if (!absent && v !== "") {
         var n = Number(v.replace(",", "."));
-        if (!isFinite(n) || n < 0 || n > 20) continue;   // hors barème : ignoré
+        if (!isFinite(n) || n < 0 || n > bareme) {
+          /* Autrefois : `continue`, et la saisie disparaissait sans un mot
+             pendant que le bandeau annonçait « synchronisée ». On la signale
+             sur la case elle-meme, et on la compte comme refusee. */
+          rejets.push({ el: el, valeur: v, bareme: bareme });
+          continue;
+        }
         score = n;
       }
       if (!absent && v === "") continue;                  // effacement : voie normale
@@ -117,6 +125,7 @@
         _el: el
       });
     }
+    out.rejets = rejets;
     return out;
   }
 
@@ -169,7 +178,23 @@
 
   form.addEventListener("submit", function (e) {
     var mutations = changed();
-    if (mutations.length === 0) return;          // rien à faire : voie normale
+    var rejets = mutations.rejets || [];
+
+    /* Une saisie hors barème ne part pas — mais elle ne disparaît PAS en
+       silence non plus : la case est marquée et l'enseignant lit pourquoi.
+       Autrefois le bandeau annonçait « synchronisée » pendant que la valeur
+       s'était volatilisée. */
+    if (rejets.length) {
+      rejets.forEach(function (r) { r.el.style.borderColor = "var(--laterite)"; });
+      render(rejets.length + (rejets.length > 1 ? " saisies refusées : " : " saisie refusée : ")
+        + rejets.map(function (r) {
+            return "\u00ab " + r.valeur + " \u00bb (note sur " + r.bareme + ")";
+          }).join(", "), "note bad");
+    }
+    if (mutations.length === 0) {
+      if (rejets.length) e.preventDefault();     // ne pas recharger le message
+      return;                                    // rien à faire : voie normale
+    }
 
     e.preventDefault();
     // On met en file D'ABORD, puis on tente l'envoi. Si le réseau tombe entre
@@ -182,7 +207,9 @@
         m._el.setAttribute("data-original", m._el.value.trim());
         m._el.style.borderColor = "var(--ochre)";
       });
-      return refresh();
+      // On ne remplace pas un message de refus par « en attente d'envoi » :
+      // l'enseignant doit lire ce qui n'est pas passé.
+      return rejets.length ? Promise.resolve() : refresh();
     }).then(flush);
   });
 
