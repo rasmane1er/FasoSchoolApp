@@ -50,6 +50,7 @@ const { rows: cible } = await client.query(
     where ev.class_id = $1 and ge.score is not null
     order by st.last_name limit 1`, [classe.id]);
 const noteInitiale = Number(cible[0].score);
+const cibleEleve = cible[0].last_name;
 
 const remettreEnEtat = async () => {
   await client.query(`update grade_entries set score = $2 where id = $1`,
@@ -60,11 +61,23 @@ const remettreEnEtat = async () => {
   // Les conflits référencent les mutations : l'ordre compte.
   await client.query(`delete from sync_conflicts`);
   await client.query(`delete from sync_mutations`);
+  // Les SMS d'avis de disponibilité posés par cette suite.
+  await client.query(
+    `delete from sms_messages where body like '%espace des familles%'
+        or body like '%bulletins du%trimestre sont disponibles%'`);
+  await client.query(
+    `delete from sms_credit_ledger where note = 'Avis de disponibilité des bulletins'`);
+  await client.query(`delete from audit_log where action = 'bulletin.notify'`);
 };
 await remettreEnEtat();
 
+/* L'adresse publique : sans elle, prévenir les familles est refusé — et c'est
+   précisément l'un des deux cas que cette suite éprouve. On lance donc le
+   serveur AVEC, et on relancera un second serveur SANS pour vérifier le refus. */
+const ADRESSE = "https://wend-panga.example.bf";
 const server = spawn(process.execPath, ["--experimental-strip-types", "src/server/app.ts"], {
-  env: { ...process.env, PORT: String(PORT) }, stdio: ["ignore", "pipe", "pipe"],
+  env: { ...process.env, PORT: String(PORT), FASOSCHOOL_PUBLIC_URL: ADRESSE },
+  stdio: ["ignore", "pipe", "pipe"],
 });
 let stderr = ""; server.stderr.on("data", (d) => { stderr += d.toString(); });
 for (let i = 0; i < 50; i += 1) {
@@ -87,6 +100,17 @@ const connecter = async (p, tel) => {
 };
 const envoyer = async (p, sel) =>
   Promise.all([p.waitForNavigation({ waitUntil: "load" }), p.click(sel)]);
+/* Connexion sur un autre port : le second serveur, lancé sans adresse
+   publique, sert à vérifier le refus. */
+const connecter2 = async (p, tel, port) => {
+  await p.goto(`http://127.0.0.1:${port}/connexion`);
+  await p.fill("#phone", tel);
+  await p.click("button[type=submit]");
+  await p.waitForSelector("#code");
+  await p.fill("#code", (await p.textContent(".note.warn b")).trim());
+  await p.click("button[type=submit]");
+  await p.waitForLoadState("networkidle");
+};
 
 try {
   await connecter(page, "70000001");                      // censeur
@@ -254,6 +278,67 @@ try {
       'bulletins.publish') order by occurred_at`);
   check("clôture, réouverture et publication sont journalisées",
     journal.length >= 4, journal.map((j) => j.action).join(", "));
+
+  console.log("\nPrévenir les familles que le bulletin est disponible");
+  /* L'espace des familles existait depuis des semaines et RIEN ne disait à une
+     famille qu'il existait : un parent aurait dû l'apprendre de bouche à
+     oreille puis taper une adresse sur un téléphone bon marché. */
+  await page.goto(`${BASE}/bulletins?classe=${classe.id}`);
+  const avantAvis = await page.content();
+  check("le geste n'est offert qu'une fois les bulletins publiés",
+    avantAvis.includes("Prévenir les familles"),
+    "sinon on annonce un document qui n'existe pas");
+
+  const { rows: creditAvant } = await client.query(
+    `select coalesce(sum(case when direction='achat' then messages
+                              else -messages end),0)::int as n
+       from sms_credit_ledger`);
+  await envoyer(page,
+    `form[action="/bulletins/prevenir?classe=${classe.id}"] button[type=submit]`);
+  const apresAvis = await page.content();
+  check("les familles sont prévenues", apresAvis.includes("prévenue"),
+    apresAvis.includes("Crédit insuffisant") ? "crédit insuffisant" : "");
+
+  const { rows: envoyes } = await client.query(
+    `select to_phone, body from sms_messages
+      where body like '%bulletins du%trimestre sont disponibles%'`);
+  check("LE MESSAGE PORTE L'ADRESSE DE L'ESPACE DES FAMILLES",
+    envoyes.every((m) => m.body.includes(ADRESSE + "/famille")),
+    "un avis sans adresse ne sert à rien");
+  check("il ne nomme pas l'enfant",
+    envoyes.every((m) => !m.body.includes(cibleEleve)),
+    "les destinataires sont dédoublonnés par numéro : nommer l'enfant "
+      + "obligerait à envoyer trois messages, ou à mentir");
+  const numeros = new Set(envoyes.map((m) => m.to_phone));
+  check("un numéro ne reçoit qu'un message", numeros.size === envoyes.length,
+    `${envoyes.length} messages pour ${numeros.size} numéros`);
+  const { rows: creditApres } = await client.query(
+    `select coalesce(sum(case when direction='achat' then messages
+                              else -messages end),0)::int as n
+       from sms_credit_ledger`);
+  check("le crédit est débité de ce qui est parti",
+    creditApres[0].n < creditAvant[0].n);
+
+  console.log("\nSans adresse publique, on refuse d'envoyer");
+  const PORT2 = PORT + 40;
+  const muet = spawn(process.execPath,
+    ["--experimental-strip-types", "src/server/app.ts"],
+    { env: { ...process.env, PORT: String(PORT2), FASOSCHOOL_PUBLIC_URL: "" },
+      stdio: ["ignore", "pipe", "pipe"] });
+  for (let i = 0; i < 50; i += 1) {
+    try { if ((await fetch(`http://127.0.0.1:${PORT2}/sante`)).ok) break; } catch {}
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  const p3 = await (await browser.newContext({ locale: "fr-FR" })).newPage();
+  await connecter2(p3, "70000001", PORT2);
+  const refusAdresse = await p3.evaluate(async (classe) => {
+    const res = await fetch(`/bulletins/prevenir?classe=${classe}`, { method: "POST" });
+    return await res.text();
+  }, classe.id);
+  check("UN SMS PAYÉ NE PART PAS VERS UNE ADRESSE INEXISTANTE",
+    refusAdresse.includes("Aucune adresse publique"),
+    "cela coûterait de l'argent et de la crédibilité");
+  muet.kill();
 
   console.log("\nDroits");
   const ens = await browser.newContext({ locale: "fr-FR" });

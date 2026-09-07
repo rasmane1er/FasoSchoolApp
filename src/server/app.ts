@@ -58,7 +58,7 @@ import {
 } from "./services.ts";
 import {
   termIsClosed, setTermStatus, publishClass, publishedBulletins,
-  ecarts, resumeEcarts, decrireEcart, frozenClassResult,
+  ecarts, resumeEcarts, decrireEcart, frozenClassResult, previenirFamilles,
 } from "./cloture.ts";
 import {
   guardianExists, createGuardianSession, resolveGuardian, revokeGuardian,
@@ -625,6 +625,13 @@ async function bulletinsPage(user: SessionUser, url: URL, flash?: string): Promi
       </form>
       <span style="color:var(--muted);font-size:13px">Fige les moyennes, les
         rangs et les mentions. C'est ce document que la famille reçoit.</span>
+      ${fige.size === 0 ? "" : `
+      <form method="post" action="/bulletins/prevenir?classe=${esc(classId)}" style="margin:0">
+        <button type="submit" class="btn ghost">Prévenir les familles</button>
+      </form>
+      <span style="color:var(--muted);font-size:13px">Un SMS par famille —
+        dédoublonné par numéro — avec l'adresse de l'espace des familles. Sans
+        cela, personne ne sait qu'il existe.</span>`}
       <div class="grow"></div>
       <form method="post" action="/bulletins/trimestre?classe=${esc(classId)}" style="margin:0">
         <input type="hidden" name="ouvert" value="${clos ? "1" : "0"}">
@@ -1385,6 +1392,22 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       return html(res, await bulletinsPage(user, url,
         `${plural(out.publies + out.republies, "bulletin figé", "bulletins figés")}`
         + `${out.republies ? ` (dont ${out.republies} remplacés)` : ""}.`));
+    }
+    if (path === "/bulletins/prevenir" && req.method === "POST") {
+      if (!can(user, "publier_bulletins")) return html(res, "Accès refusé.", 403);
+      const period = await currentPeriod(user.schoolId);
+      const classe = url.searchParams.get("classe") ?? "";
+      if (!period || !classe) return redirect(res, "/bulletins");
+      const a = await previenirFamilles(user, classe, period.term_id);
+      return html(res, await bulletinsPage(user, url, a.error
+        ? a.error
+        : `${plural(a.envoyes, "famille prévenue", "familles prévenues")} `
+          + `pour ${a.cout} FCFA.`
+          + (a.refuses
+              ? ` ${plural(a.refuses, "message n'est pas parti",
+                           "messages ne sont pas partis")} : voyez le suivi `
+                + `des messages.`
+              : "")));
     }
     if (path === "/bulletins/trimestre" && req.method === "POST") {
       if (!can(user, "publier_bulletins")) return html(res, "Accès refusé.", 403);

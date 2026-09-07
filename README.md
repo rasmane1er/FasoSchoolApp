@@ -122,6 +122,31 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
 douze élèves, huit disciplines notées, la scolarité et un dossier de
 catégorisation entamé, puis écrit les bulletins dans `out/`.
 
+### Dire aux familles que leur espace existe
+
+L'espace des familles était construit, testé, et **muet** : rien, dans le
+logiciel, n'avait jamais dit à une famille qu'il existait. Un parent aurait dû
+l'apprendre de bouche à oreille puis taper une adresse sur un téléphone bon
+marché. Autant dire que la fonction était morte.
+
+Une fois les bulletins d'une classe publiés, le censeur peut prévenir les
+familles d'un geste : un SMS par famille, **dédoublonné par numéro**, portant
+l'adresse de l'espace. Le message ne nomme pas l'enfant, à dessein — un parent
+de trois élèves reçoit un message, et le nommer obligerait à en envoyer trois
+ou à mentir.
+
+Deux refus, pour les mêmes raisons qu'ailleurs :
+
+- **sans adresse publique configurée** (`FASOSCHOOL_PUBLIC_URL`), on n'envoie
+  rien. Un SMS payé qui renvoie vers une adresse inexistante coûte de l'argent
+  et de la crédibilité ;
+- **crédit insuffisant : rien ne part.** La moitié des familles prévenue et
+  l'autre qui attend est pire que le silence — c'est la règle déjà tenue par
+  les communiqués.
+
+Le bouton n'apparaît qu'une fois les bulletins figés : on n'annonce pas un
+document qui n'existe pas.
+
 ### Justifier une absence
 
 `is_justified` existait sur `attendance_records` **et** sur `grade_entries`
@@ -726,7 +751,7 @@ et vingt et un parcours dans un vrai navigateur :
 | `test:communiques` (17) | le coût est annoncé avant l'envoi, les tuteurs sont dédoublonnés, un crédit court refuse l'envoi en bloc |
 | `test:bourses` (19) | les remises se cumulent sans atteindre la gratuité, une facture émise n'est pas rabotée |
 | `test:frais` (21) | un supplément sans autorisation est refusé, un dépassement de plafond est chiffré, une facture émise n'est pas recalculée |
-| `test:cloture` (25) | le bulletin remis ne bouge pas, l'écart est montré, le trimestre clos refuse les notes en ligne comme hors ligne |
+| `test:cloture` (32) | le bulletin remis ne bouge pas, l'écart est montré, le trimestre clos refuse les notes, et les familles apprennent que leur espace existe |
 | `test:services` (14) | un enseignant ne voit et ne touche que ses classes — y compris en postant à la main |
 | `test:rentree` (19) | un établissement ouvre son année, pose ses trimestres et crée ses classes sans intervention en base |
 | `test:e2e` (50) | connexion, notes, bulletins, appel et SMS, encaissement, droits |

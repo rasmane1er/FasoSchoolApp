@@ -28,6 +28,8 @@
 import { withSchool } from "../lib/db.ts";
 import { computeClassBulletins } from "../lib/bulletin.ts";
 import { loadBulletinInputs } from "../lib/repository.ts";
+import { createSmsChannel, countSegments,
+         COST_PER_SEGMENT_FCFA } from "../lib/sms.ts";
 import { plural } from "./html.ts";
 import type { SessionUser } from "./session.ts";
 
@@ -137,6 +139,120 @@ export async function publishedFor(schoolId: string, studentId: string, termId: 
 }
 
 export interface PublishOutcome { publies: number; republies: number }
+
+/**
+ * Prévenir les familles qu'un bulletin est disponible.
+ *
+ * L'espace des familles existe depuis des semaines et RIEN, dans le logiciel,
+ * n'avait jamais dit à une famille qu'il existait. Un parent aurait dû
+ * l'apprendre de bouche à oreille puis taper une adresse sur un téléphone bon
+ * marché : autant dire que la fonction était morte.
+ *
+ * Le message ne nomme pas l'enfant, à dessein : les destinataires sont
+ * dédoublonnés par numéro, et un parent de trois élèves reçoit UN message. Le
+ * nommer obligerait à en envoyer trois, ou à mentir.
+ *
+ * Sans adresse publique configurée, on REFUSE d'envoyer. Un SMS payé qui
+ * renvoie vers une adresse inexistante coûte de l'argent et de la crédibilité.
+ */
+export interface AvisOutcome {
+  envoyes: number; refuses: number; cout: number; error?: string;
+}
+
+export async function previenirFamilles(
+  user: SessionUser, classId: string, termId: string,
+): Promise<AvisOutcome> {
+  const schoolId = user.schoolId!;
+  const adresse = (process.env.FASOSCHOOL_PUBLIC_URL ?? "").trim()
+    .replace(/\/+$/, "");
+  if (!adresse) {
+    return { envoyes: 0, refuses: 0, cout: 0,
+      error: "Aucune adresse publique n'est configurée (FASOSCHOOL_PUBLIC_URL). "
+        + "Un SMS payé qui renvoie vers une adresse inexistante coûte de "
+        + "l'argent et de la crédibilité : rien n'a été envoyé." };
+  }
+
+  return withSchool(schoolId, async (c) => {
+    const publies = await c.query(
+      `select count(*)::int as n from bulletins
+        where term_id = $1 and class_id = $2 and status = 'publie'`,
+      [termId, classId]);
+    if (publies.rows[0].n === 0) {
+      return { envoyes: 0, refuses: 0, cout: 0,
+        error: "Aucun bulletin n'est publié pour cette classe : il n'y a rien "
+          + "à annoncer." };
+    }
+
+    // Dédoublonnés par numéro : un parent de trois élèves reçoit UN message.
+    const gens = await c.query(
+      `select distinct on (g.phone) g.id, g.phone
+         from bulletins b
+         join student_guardians sg on sg.student_id = b.student_id
+         join guardians g on g.id = sg.guardian_id
+        where b.term_id = $1 and b.class_id = $2 and b.status = 'publie'
+          and sg.receives_sms and g.phone is not null and g.phone <> ''
+        order by g.phone`, [termId, classId]);
+    if (gens.rows.length === 0) {
+      return { envoyes: 0, refuses: 0, cout: 0,
+        error: "Aucune famille joignable dans cette classe. Les numéros se "
+          + "corrigent dans la fiche de chaque élève." };
+    }
+
+    const ecole = await c.query(`select name from schools limit 1`);
+    const tr = await c.query(`select sequence from terms where id = $1`, [termId]);
+    const corps = `${ecole.rows[0]?.name ?? ""}: les bulletins du `
+      + `${tr.rows[0]?.sequence ?? 1}e trimestre sont disponibles. `
+      + `Consultez celui de votre enfant sur ${adresse}/famille avec ce numero.`;
+    const segments = countSegments(corps);
+
+    // Même règle que les communiqués : un envoi partiel est pire que pas
+    // d'envoi. La moitié des familles prévenue, l'autre qui attend.
+    const credit = Number((await c.query(
+      `select coalesce(sum(case when direction = 'achat' then messages
+                                else -messages end), 0)::int as n
+         from sms_credit_ledger`)).rows[0].n);
+    const besoin = gens.rows.length * segments;
+    if (credit < besoin) {
+      return { envoyes: 0, refuses: 0, cout: 0,
+        error: `Crédit insuffisant : ${besoin} messages nécessaires, ${credit} `
+          + `disponibles. Rien n'a été envoyé.` };
+    }
+
+    const sms = createSmsChannel();
+    let envoyes = 0, refuses = 0;
+    for (const g of gens.rows) {
+      const r = await sms.send({ to: g.phone, body: corps, schoolId });
+      await c.query(
+        `insert into sms_messages (school_id, guardian_id, to_phone, body,
+                                   segments, cost_fcfa, status, provider,
+                                   provider_ref, error_detail, sent_at)
+         values (current_school_id(), $1,$2,$3,$4,$5,$6,$7,$8,$9,
+                 case when $6 = 'envoye' then now() end)`,
+        [g.id, g.phone, corps, segments,
+         r.ok ? segments * COST_PER_SEGMENT_FCFA : 0,
+         r.ok ? "envoye" : "echoue", sms.name, r.providerRef ?? null,
+         r.ok ? null : (r.error ?? "Refus de l'opérateur, sans détail")]);
+      if (r.ok) envoyes += 1; else refuses += 1;
+    }
+
+    if (envoyes > 0) {
+      await c.query(
+        `insert into sms_credit_ledger (school_id, direction, messages,
+                                        amount_fcfa, note)
+         values (current_school_id(), 'consommation', $1, $2,
+                 'Avis de disponibilité des bulletins')`,
+        [envoyes * segments, envoyes * segments * COST_PER_SEGMENT_FCFA]);
+    }
+    await c.query(
+      `insert into audit_log (school_id, actor_id, action, target_type, target_id, detail)
+       values (current_school_id(), $1, 'bulletin.notify', 'class', $2, $3)`,
+      [user.userId, classId, JSON.stringify({ envoyes, refuses, segments })]);
+
+    return { envoyes, refuses,
+             cout: envoyes * segments * COST_PER_SEGMENT_FCFA };
+  });
+}
+
 
 /**
  * Fige les bulletins d'une classe. Republier écrase la copie précédente — et
