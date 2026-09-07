@@ -766,10 +766,11 @@ Comptes de démonstration — le code s'affiche à l'écran, aucun SMS n'est env
 | `70000005` | Directeur |
 
 Vérifications : `npm run check:all` — typecheck strict, 60 tests unitaires,
-et vingt-deux parcours dans un vrai navigateur :
+et vingt-trois parcours, dont vingt-deux dans un vrai navigateur :
 
 | suite | ce qu'elle prouve |
 |---|---|
+| `test:sauvegarde` (15) | la sauvegarde refuse de tourner avec le rôle applicatif, ne laisse aucun fichier quand elle échoue, et son archive se restaure vraiment |
 | `test:bareme` (21) | une note sur 10 compte pour 20/20 dans la moyenne, et aucun des trois chemins de saisie ne rejette plus en silence |
 | `test:justifications` (24) | justifier une absence à une composition fait monter la moyenne du bulletin, et renverser la règle change le calcul |
 | `test:discipline` (29) | l'exclusion définitive est refusée au surveillant même en postant à la main, et un incident retiré reste écrit et barré |
@@ -837,12 +838,27 @@ Une matinée avec un censeur coopératif et une photocopieuse ferme les cinq.
 ## Sauvegarde
 
 ```bash
+ADMIN_DATABASE_URL='postgres://postgres@localhost/fasoschool' \
 FASOSCHOOL_PASSPHRASE='...' ./scripts/sauvegarde.sh /media/usb
 
 ADMIN_DATABASE_URL='postgres://postgres@localhost/postgres' \
 FASOSCHOOL_PASSPHRASE='...' \
 ./scripts/restauration-verifiee.sh /media/usb/fasoschool-20260906-1400.dump.gpg
 ```
+
+`ADMIN_DATABASE_URL`, et **non** `DATABASE_URL` : le rôle applicatif est soumis
+au row-level security, et `pg_dump` lancé avec lui échoue table par table
+(« query would be affected by row-level security policy ») sans rien
+sauvegarder. La sauvegarde se fait avec le propriétaire des tables, qui porte
+`BYPASSRLS` et n'est jamais le rôle de l'application.
+
+Ce n'est pas une précision de style : le script demandait `DATABASE_URL`
+jusqu'à ce qu'on le lance pour de vrai. Un établissement suivant la
+documentation à la lettre n'avait donc **aucune sauvegarde** — et un fichier de
+soixante-dix octets, portant un nom parfaitement crédible, posé au milieu des
+bonnes archives, pour le lui faire croire. Une sauvegarde ratée n'en laisse
+désormais aucune trace, et une archive plus petite qu'un schéma vide est
+refusée avant d'être nommée.
 
 Le fichier produit contient les noms, les dates de naissance et les numéros des
 familles de tout un établissement. Il est donc **chiffré au vol** : `pg_dump`
@@ -868,6 +884,10 @@ row-level security serait ouverte à tous les établissements à la fois.
 
 À lancer une fois par mois. Les trois cas ci-dessus ont été éprouvés en
 fabriquant volontairement chacune des trois sauvegardes défectueuses.
+`test:sauvegarde` refait le parcours complet à chaque `check:all` : refus sans
+phrase de passe, refus sans URL d'administration, aucun fichier laissé quand
+`pg_dump` échoue, archive chiffrée en 0600, puis restauration d'épreuve
+réussie avec comptage des lignes.
 
 ---
 
