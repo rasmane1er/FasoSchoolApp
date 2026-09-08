@@ -118,6 +118,8 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
 **Exploitation**
 - `scripts/preparer-base.sh` — préparer la base d'un serveur, et refuser de la
   déclarer prête tant que le cloisonnement n'est pas vérifié.
+- `scripts/epreuve-cloisonnement.sh` — l'épreuve d'isolation, sur une base
+  jetable qu'elle fabrique et supprime.
 - `scripts/installer.ts` — installer un établissement et son premier compte.
 - `scripts/sauvegarde.sh` — sauvegarde chiffrée, jamais écrite en clair.
 - `scripts/restauration-verifiee.sh` — l'épreuve de restauration.
@@ -125,6 +127,36 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
 **Démonstration** — `npm run demo` crée un établissement, une 6<sup>e</sup> de
 douze élèves, huit disciplines notées, la scolarité et un dossier de
 catégorisation entamé, puis écrit les bulletins dans `out/`.
+
+### L'épreuve de cloisonnement
+
+Le cloisonnement multi-locataire est la promesse la plus lourde du produit :
+une fuite, c'est le dossier d'un enfant dans les mains d'une autre école. Le
+dépôt avait un test d'isolation depuis le premier jour. Deux choses n'allaient
+pas, et une troisième s'est révélée en les corrigeant.
+
+**On ne pouvait pas le lancer.** Le fichier SQL commençait par
+`drop role if exists fasoschool_app` — le compte de l'application. Sur une
+machine où le produit est installé, ce rôle porte des droits et PostgreSQL
+refuse de le supprimer : la commande prescrite « avant tout développement »
+échouait précisément là où elle aurait servi.
+
+**Et s'il avait réussi, c'eût été pire.** Il aurait supprimé le compte de
+l'application en service pour le recréer avec le mot de passe `test`. Le test
+de sûreté du dépôt en était le geste le plus dangereux.
+
+`epreuve-cloisonnement.sh` fabrique sa propre base, y applique les migrations,
+fait passer l'épreuve avec un rôle jetable au nom sans ambiguïté, puis supprime
+tout. Il ne touche à aucune base réelle et n'a besoin d'aucun rôle existant.
+
+**L'épreuve avait aussi un angle mort** : elle regardait les sessions des
+familles et pas celles du personnel — la table qui, précisément, n'avait aucune
+politique. Une assertion n'existe que pour ce qu'on a pensé à regarder. Elle
+vérifie désormais les deux.
+
+Et parce qu'un test de sûreté qui n'échoue jamais ne prouve rien,
+`test:cloisonnement` rejoue l'épreuve sur un schéma auquel il manque exactement
+la migration 0009 et **exige qu'elle échoue**, en nommant la fuite.
 
 ### Le barème d'une évaluation
 
@@ -757,6 +789,7 @@ APP_ROLE=fasoschool_app APP_PASSWORD='...' \
 ./scripts/preparer-base.sh fasoschool
 
 export DATABASE_URL=postgres://fasoschool_app:...@localhost:5432/fasoschool
+ADMIN_DATABASE_URL='postgres://postgres@localhost/postgres' \
 npm run db:test:rls        # doit passer avant tout développement
 npm run demo               # établissement de démonstration + bulletins
 npm start                  # http://localhost:4180
@@ -792,10 +825,11 @@ Comptes de démonstration — le code s'affiche à l'écran, aucun SMS n'est env
 | `70000005` | Directeur |
 
 Vérifications : `npm run check:all` — typecheck strict, 60 tests unitaires,
-et vingt-quatre parcours, dont vingt-trois dans un vrai navigateur :
+et vingt-cinq parcours, dont vingt-trois dans un vrai navigateur :
 
 | suite | ce qu'elle prouve |
 |---|---|
+| `test:cloisonnement` (16) | l'épreuve d'isolation passe sur un schéma complet, **échoue** sur un schéma auquel il manque la migration 0009, et ne touche à aucune base réelle |
 | `test:installation` (17) | le chemin du premier jour marche du disque nu à la première connexion, et aucune table portant `school_id` n'échappe au RLS |
 | `test:sauvegarde` (15) | la sauvegarde refuse de tourner avec le rôle applicatif, ne laisse aucun fichier quand elle échoue, et son archive se restaure vraiment |
 | `test:bareme` (21) | une note sur 10 compte pour 20/20 dans la moyenne, et aucun des trois chemins de saisie ne rejette plus en silence |

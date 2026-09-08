@@ -2,18 +2,29 @@
 -- Exécute chaque lecture dans le contexte de l'établissement A pendant que les
 -- données de l'établissement B existent, et exige zéro ligne.
 --
--- À lancer en CI dès la première semaine, pas avant le lancement.
+-- À LANCER PAR `scripts/epreuve-cloisonnement.sh`, JAMAIS À LA MAIN SUR UNE
+-- BASE RÉELLE. Ce fichier écrit deux établissements de contrôle et prend le
+-- rôle d'un compte jetable ; le script lui fabrique une base à usage unique et
+-- la supprime après.
+--
+-- Il utilisait auparavant le nom du rôle applicatif de production,
+-- `fasoschool_app`, et commençait par `drop role`. Sur une machine où le
+-- produit est installé, cela échouait — le rôle porte des droits — et, s'il
+-- avait réussi, il aurait supprimé le compte de l'application en service pour
+-- le recréer avec le mot de passe « test ». Le test de sûreté du projet était
+-- lui-même le geste le plus dangereux du dépôt.
+--
 -- IMPORTANT : la connexion applicative NE DOIT PAS être superutilisateur.
 -- Un superutilisateur contourne entièrement le row-level security.
 
 \set ON_ERROR_STOP on
 
--- Rôle applicatif non privilégié.
-drop role if exists fasoschool_app;
-create role fasoschool_app login password 'test';
-grant usage on schema public to fasoschool_app;
-grant select, insert, update, delete on all tables in schema public to fasoschool_app;
-grant execute on function current_school_id() to fasoschool_app;
+-- Rôle jetable, nommé pour qu'on ne le confonde avec aucun compte réel.
+drop role if exists fasoschool_rls_probe;
+create role fasoschool_rls_probe login password 'epreuve';
+grant usage on schema public to fasoschool_rls_probe;
+grant select, insert, update, delete on all tables in schema public to fasoschool_rls_probe;
+grant execute on function current_school_id() to fasoschool_rls_probe;
 
 -- Deux établissements concurrents.
 insert into schools (id, name, sector, fee_zone) values
@@ -41,8 +52,21 @@ insert into guardian_sessions (school_id, guardian_id, access_token_hash, expire
   ('22222222-2222-2222-2222-222222222222','bbbbbbbb-0000-0000-0000-000000000003',
    'jeton-b', now() + interval '1 hour');
 
+-- Un agent et une session ouverte de chaque côté. Sans ces lignes, l'assertion
+-- sur `auth_sessions` plus bas ne prouverait rien : compter zéro dans une table
+-- vide n'est pas du cloisonnement.
+insert into users (id, school_id, full_name, phone) values
+  ('aaaaaaaa-0000-0000-0000-000000000004','11111111-1111-1111-1111-111111111111','Agent A','70000011'),
+  ('bbbbbbbb-0000-0000-0000-000000000004','22222222-2222-2222-2222-222222222222','Agent B','70000012');
+
+insert into auth_sessions (user_id, school_id, access_token_hash, refresh_token_hash, expires_at) values
+  ('aaaaaaaa-0000-0000-0000-000000000004','11111111-1111-1111-1111-111111111111',
+   'acces-a','refresh-a', now() + interval '1 hour'),
+  ('bbbbbbbb-0000-0000-0000-000000000004','22222222-2222-2222-2222-222222222222',
+   'acces-b','refresh-b', now() + interval '1 hour');
+
 \echo '--- contexte : établissement A ---'
-set role fasoschool_app;
+set role fasoschool_rls_probe;
 select set_config('fasoschool.school_id', '11111111-1111-1111-1111-111111111111', false);
 
 -- Chaque assertion doit passer.
@@ -114,6 +138,22 @@ begin
   raise notice 'OK  delete croisé sans effet';
 end $$;
 
+-- Les sessions du PERSONNEL. Elles n'avaient aucune politique jusqu'à la
+-- migration 0009, et rien ici ne l'avait vu : l'épreuve regardait les sessions
+-- des familles et pas celles des agents. Une assertion n'existe que pour ce
+-- qu'on a pensé à regarder.
+set role fasoschool_rls_probe;
+select set_config('fasoschool.school_id', '11111111-1111-1111-1111-111111111111', false);
+do $$
+declare n int;
+begin
+  select count(*) into n from auth_sessions;
+  if n <> 1 then
+    raise exception 'FUITE auth_sessions: % sessions visibles depuis A, attendu 1', n;
+  end if;
+  raise notice 'OK  sessions du personnel isolées';
+end $$;
+
 -- Sans contexte posé : on ne doit rien voir du tout.
 select set_config('fasoschool.school_id', '', false);
 do $$
@@ -125,4 +165,8 @@ begin
 end $$;
 
 reset role;
+-- Le rôle jetable est supprimé par `epreuve-cloisonnement.sh`, APRÈS la base :
+-- tant qu'elle existe il y porte des droits, et PostgreSQL refuse de le
+-- supprimer. Le faire ici échouait à la dernière ligne d'une épreuve par
+-- ailleurs entièrement réussie.
 \echo '--- toutes les assertions ont passé ---'
