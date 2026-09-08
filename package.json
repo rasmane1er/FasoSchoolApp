@@ -18,7 +18,7 @@
     "start": "node --experimental-strip-types src/server/app.ts",
     "test:e2e": "node tests/app.e2e.mjs",
     "test:offline": "node tests/offline.e2e.mjs",
-    "check:all": "npm run typecheck && npm test && npm run test:rentree && npm run test:e2e && npm run test:offline && npm run test:evaluations && npm run test:messages && npm run test:personnel && npm run test:eleve && npm run test:annulation && npm run test:installer && npm run test:discipline && npm run test:justifications && npm run test:bareme && npm run test:sauvegarde && npm run test:installation && npm run test:cloisonnement && npm run test:cookies && npm run test:import && npm run test:conseil && npm run test:famille && npm run test:categorisation && npm run test:services && npm run test:cloture && npm run test:frais && npm run test:communiques && npm run test:transferts && npm run test:bourses",
+    "check:all": "npm run typecheck && npm test && npm run test:rentree && npm run test:e2e && npm run test:offline && npm run test:evaluations && npm run test:messages && npm run test:personnel && npm run test:eleve && npm run test:annulation && npm run test:installer && npm run test:discipline && npm run test:justifications && npm run test:bareme && npm run test:sauvegarde && npm run test:installation && npm run test:cloisonnement && npm run test:cookies && npm run test:pwa && npm run test:import && npm run test:conseil && npm run test:famille && npm run test:categorisation && npm run test:services && npm run test:cloture && npm run test:frais && npm run test:communiques && npm run test:transferts && npm run test:bourses",
     "test:import": "node tests/import.e2e.mjs",
     "test:rentree": "node tests/rentree.e2e.mjs",
     "test:conseil": "node tests/conseil.e2e.mjs",
@@ -44,7 +44,8 @@
     "test:sauvegarde": "node tests/sauvegarde.e2e.mjs",
     "test:installation": "node tests/installation.e2e.mjs",
     "test:cloisonnement": "node tests/cloisonnement.e2e.mjs",
-    "test:cookies": "node tests/cookies.e2e.mjs"
+    "test:cookies": "node tests/cookies.e2e.mjs",
+    "test:pwa": "node tests/pwa.e2e.mjs"
   },
   "dependencies": {
     "pg": "^8.23.0"

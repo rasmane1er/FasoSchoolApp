@@ -936,17 +936,50 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
   const token = cookies(req).fs_session ?? null;
   const user = await resolveSession(token);
 
-  // Fichiers statiques : liste blanche explicite, aucune traversée possible.
-  const STATIC: Record<string, string> = {
-    "/offline.js": "application/javascript; charset=utf-8",
-    "/sw.js": "application/javascript; charset=utf-8",
+  /* Fichiers statiques : liste blanche explicite, aucune traversée possible.
+   *
+   * La clé est l'URL demandée, la valeur dit quel fichier servir et comment.
+   * `/hors-ligne` n'a pas d'extension parce que c'est une PAGE, pas une
+   * ressource : c'est elle que le service worker ouvre quand une navigation
+   * échoue, et elle doit s'afficher dans la barre d'adresse comme une page.
+   *
+   * Les icônes sont binaires. Elles étaient impossibles à servir par l'ancien
+   * chemin, qui lisait tout en utf-8 : un PNG relu en utf-8 revient corrompu,
+   * sans erreur, et le navigateur affiche une image cassée. D'où `binaire`.
+   */
+  const STATIC: Record<string, { fichier: string; type: string; binaire?: true }> = {
+    "/offline.js": { fichier: "offline.js", type: "application/javascript; charset=utf-8" },
+    "/app.js": { fichier: "app.js", type: "application/javascript; charset=utf-8" },
+    "/sw.js": { fichier: "sw.js", type: "application/javascript; charset=utf-8" },
+    "/hors-ligne": { fichier: "hors-ligne.html", type: "text/html; charset=utf-8" },
+    "/manifest.webmanifest": {
+      fichier: "manifest.webmanifest", type: "application/manifest+json; charset=utf-8" },
+    "/icones/fasoschool-32.png": {
+      fichier: "icones/fasoschool-32.png", type: "image/png", binaire: true },
+    "/icones/fasoschool-192.png": {
+      fichier: "icones/fasoschool-192.png", type: "image/png", binaire: true },
+    "/icones/fasoschool-512.png": {
+      fichier: "icones/fasoschool-512.png", type: "image/png", binaire: true },
+    "/icones/fasoschool-512-masquable.png": {
+      fichier: "icones/fasoschool-512-masquable.png", type: "image/png", binaire: true },
+    "/icones/fasoschool-apple-180.png": {
+      fichier: "icones/fasoschool-apple-180.png", type: "image/png", binaire: true },
   };
-  if (req.method === "GET" && STATIC[path]) {
+  const statique = STATIC[path];
+  if (req.method === "GET" && statique) {
     try {
-      const body = await readFile(new URL(`../../public${path}`, import.meta.url), "utf-8");
+      const cible = new URL(`../../public/${statique.fichier}`, import.meta.url);
+      const body = statique.binaire
+        ? await readFile(cible)
+        : await readFile(cible, "utf-8");
       res.writeHead(200, {
-        "content-type": STATIC[path]!,
-        "cache-control": "no-cache",
+        "content-type": statique.type,
+        /* Les icônes ne changent jamais sans changer de nom ; le reste doit
+           pouvoir être corrigé sans attendre l'expiration d'un cache. */
+        "cache-control": statique.binaire
+          ? "public, max-age=604800"
+          : "no-cache",
+        "x-content-type-options": "nosniff",
         // Le service worker doit pouvoir contrôler toute l'origine.
         ...(path === "/sw.js" ? { "service-worker-allowed": "/" } : {}),
       });

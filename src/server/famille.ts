@@ -261,12 +261,28 @@ button{font:inherit;font-weight:500;width:100%;height:50px;border:0;border-radiu
 .foot{text-align:center;font-size:12.5px;color:#7A7F90;margin-top:22px}
 `;
 
+/* PAS DE MANIFESTE ICI, ET C'EST VOLONTAIRE.
+ *
+ * Les pages du personnel déclarent un manifeste : un enseignant ou un
+ * directeur pose l'application sur son écran d'accueil. L'espace famille, non.
+ *
+ * Un tuteur arrive ici par un lien reçu en SMS, sur le téléphone qu'il a. La
+ * décision arrêtée est « SMS d'abord, application des parents reportée » : ce
+ * n'est pas un oubli, c'est le produit. Proposer « installer l'application »
+ * à un parent, ce serait lui promettre quelque chose que rien ne maintient —
+ * et l'installation le ferait atterrir sur `/`, c'est-à-dire sur l'écran de
+ * connexion du PERSONNEL, où il n'a rien à faire.
+ *
+ * Une icône d'onglet, en revanche, ne coûte rien et évite la page anonyme.
+ */
 const shell = (title: string, body: string): string => `<!doctype html>
 <html lang="fr">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)} — FasoSchool</title>
+<meta name="theme-color" content="#2C3F7C">
+<link rel="icon" href="/icones/fasoschool-32.png" sizes="32x32">
 <style>${CSS}</style>
 </head>
 <body>

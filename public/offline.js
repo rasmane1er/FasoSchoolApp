@@ -217,7 +217,8 @@
   window.addEventListener("offline", refresh);
   refresh().then(flush);
 
-  if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("/sw.js").catch(function () { /* sans effet */ });
-  }
+  /* L'enregistrement du service worker vivait ici. Il est parti dans
+     `app.js`, chargé par TOUTES les pages du personnel : tant qu'il était
+     ici, seul un enseignant ouvrant un cahier de notes obtenait une
+     application installable. Un seul endroit l'enregistre désormais. */
 })();

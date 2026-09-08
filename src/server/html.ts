@@ -242,6 +242,38 @@ export interface PageChrome {
 const initials = (name: string) =>
   name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
 
+/* L'en-tête qui rend l'application installable sur un écran d'accueil.
+ *
+ * POUR QUI. Pour un enseignant qui fait l'appel dans une cour sans réseau, et
+ * pour un directeur à qui on veut laisser une icône plutôt qu'une adresse à
+ * retaper. Pas pour les parents : eux reçoivent des SMS, et l'espace famille
+ * n'a délibérément rien de tout ceci — voir `famille.ts`.
+ *
+ * POURQUOI CHAQUE LIGNE.
+ *
+ *   - `manifest` : sans lui, aucun navigateur ne propose l'installation.
+ *   - `theme-color` : la barre d'état d'Android prend ce bleu. C'est
+ *     exactement `--navy`, celui de la barre latérale. Deux bleus presque
+ *     identiques se remarquent tout de suite.
+ *   - `apple-touch-icon` : iOS ignore les icônes du manifeste et ne lit que
+ *     celle-ci. Sans elle, l'écran d'accueil affiche une capture de la page.
+ *   - `apple-mobile-web-app-capable` : ce qui retire la barre d'adresse sur
+ *     iPhone. Officiellement remplacé par `mobile-web-app-capable` ; Safari ne
+ *     lit toujours que l'ancien, on met donc les deux.
+ *   - `status-bar-style: default` et non `black-translucent` : le second fait
+ *     passer la page SOUS l'horloge de l'iPhone, et le haut de l'écran devient
+ *     illisible tant qu'on n'a pas ajouté la marge correspondante.
+ */
+const ENTETE_APPLICATION = `<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#22305C">
+<link rel="icon" href="/icones/fasoschool-32.png" sizes="32x32">
+<link rel="icon" href="/icones/fasoschool-192.png" sizes="192x192">
+<link rel="apple-touch-icon" href="/icones/fasoschool-apple-180.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="FasoSchool">`;
+
 export function page(chrome: PageChrome, title: string, body: string): string {
   return `<!doctype html>
 <html lang="fr">
@@ -249,9 +281,11 @@ export function page(chrome: PageChrome, title: string, body: string): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)} — FasoSchool</title>
+${ENTETE_APPLICATION}
 <style>${CSS}</style>
 </head>
 <body>
+<script src="/app.js" defer></script>
 <div class="shell">
   <aside class="side">
     <div class="brand"><b>FasoSchool</b><span>${esc(chrome.schoolName)}</span></div>
@@ -303,6 +337,7 @@ export function loginPage(opts: {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Connexion — FasoSchool</title>
+${ENTETE_APPLICATION}
 <style>${CSS}
 .split{display:flex;min-height:100vh}
 .left{width:44%;max-width:460px;background:var(--navy);color:#fff;padding:44px 42px;display:flex;flex-direction:column}
@@ -312,6 +347,7 @@ export function loginPage(opts: {
 </style>
 </head>
 <body>
+<script src="/app.js" defer></script>
 <div class="split">
   <div class="left">
     <div>

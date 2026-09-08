@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#22305C">
+<title>Sans réseau — FasoSchool</title>
+<link rel="icon" href="/icones/fasoschool-32.png" sizes="32x32">
+<style>
+:root{--ground:#F4F2ED;--surface:#FFFFFF;--ink:#1A1C2B;--muted:#5A5F72;
+      --faint:#868B9C;--rule:#DCD8CF;--navy:#22305C;--laterite:#A8402A}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);
+     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+     font-size:15px;line-height:1.55;min-height:100vh;
+     display:flex;flex-direction:column}
+.bar{background:var(--navy);color:#fff;padding:13px 18px;font-weight:600;
+     letter-spacing:.01em}
+.wrap{flex-grow:1;display:flex;align-items:flex-start;justify-content:center;
+      padding:34px 18px 48px}
+.card{width:100%;max-width:520px;background:var(--surface);
+      border:1px solid var(--rule);border-radius:5px;padding:26px 26px 22px}
+h1{font-family:Georgia,"Times New Roman",serif;font-size:25px;line-height:1.2;
+   margin:0 0 6px;letter-spacing:-.01em}
+.sub{color:var(--muted);margin:0 0 22px;font-size:14.5px}
+h2{font-size:12px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;
+   color:var(--faint);margin:22px 0 9px}
+ul{list-style:none;margin:0;padding:0}
+li{padding:9px 0 9px 20px;border-bottom:1px solid var(--rule);position:relative;
+   color:var(--muted);font-size:14.5px}
+li:last-child{border-bottom:none}
+li:before{content:"";position:absolute;left:2px;top:18px;width:8px;height:1px;
+          background:var(--faint)}
+li b{color:var(--ink);font-weight:600}
+.row{display:flex;flex-wrap:wrap;gap:9px;margin-top:24px}
+.btn{display:inline-block;background:var(--navy);color:#fff;text-decoration:none;
+     border:1px solid var(--navy);padding:9px 15px;border-radius:4px;
+     font-size:14px;font-weight:500;cursor:pointer;font-family:inherit}
+.btn.ghost{background:transparent;color:var(--navy)}
+.pourquoi{margin-top:26px;padding-top:18px;border-top:1px solid var(--rule);
+          font-size:13.5px;color:var(--faint);line-height:1.6}
+.pourquoi b{color:var(--muted);font-weight:600}
+</style>
+</head>
+<body>
+<div class="bar">FasoSchool</div>
+<div class="wrap">
+  <div class="card">
+    <h1>Pas de réseau</h1>
+    <p class="sub">L'application est bien installée sur ce téléphone. C'est la
+       connexion qui manque.</p>
+
+    <h2>Ce qui marche quand même</h2>
+    <ul>
+      <li><b>La saisie des notes</b>, si vous avez déjà ouvert la classe une
+          fois avec du réseau. Ce que vous tapez est conservé sur l'appareil.</li>
+      <li><b>L'appel</b>, de la même façon.</li>
+      <li><b>Le renvoi automatique.</b> Dès que le réseau revient, tout ce qui
+          a été saisi repart tout seul. Vous n'avez rien à refaire.</li>
+    </ul>
+
+    <h2>Ce qui ne marche pas</h2>
+    <ul>
+      <li>Les bulletins, la scolarité, le personnel, les communiqués — tout ce
+          qui lit des chiffres à jour.</li>
+    </ul>
+
+    <div class="row">
+      <a class="btn" href="/notes">Aller à la saisie des notes</a>
+      <button class="btn ghost" type="button"
+              onclick="location.reload()">Réessayer</button>
+    </div>
+
+    <p class="pourquoi"><b>Pourquoi si peu ?</b> Parce qu'un chiffre périmé est
+       pire qu'un chiffre absent. Un bulletin gardé en mémoire depuis avant-hier
+       s'affiche comme s'il était juste, et personne ne voit qu'il ne l'est plus.
+       Seuls les écrans où l'on <em>écrit</em> fonctionnent hors ligne ; ceux où
+       l'on <em>lit</em> attendent le réseau.</p>
+  </div>
+</div>
+</body>
+</html>

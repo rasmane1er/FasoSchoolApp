@@ -793,6 +793,54 @@ saisit quarante notes, le réseau tombe, tout est perdu. Ici :
 4. Sans JavaScript, le formulaire se poste normalement. Le hors-ligne est une
    amélioration, jamais une dépendance.
 
+### Sur l'écran d'accueil
+
+Web, et rien d'autre — c'est la décision arrêtée : *PWA d'abord, les trois
+applications Expo gelées, pas supprimées.* Une seule ligne de publication.
+On rouvrira la question des applications natives le jour où un établissement
+dira que le web ne suffit pas. Aucun ne l'a dit ; aucun n'a encore essayé.
+
+Mais « PWA » n'était pas vrai non plus. Il y avait un service worker et une
+file hors ligne, et **aucun manifeste** : sans manifeste, aucun navigateur ne
+propose « Ajouter à l'écran d'accueil ». Un enseignant devait retaper une
+adresse, dans une cour, sur un téléphone. Et le service worker n'était
+enregistré que par `offline.js`, chargé par le seul écran de saisie des notes
+— le directeur, celui à qui on veut justement laisser une icône, n'en avait
+donc jamais.
+
+Ce qui existe maintenant :
+
+- un manifeste, des icônes 192, 512 et **masquable** (Android découpe en
+  cercle, en goutte ou en écusson selon le constructeur : ce qui sort du
+  cercle des 80 % est perdu), et l'icône séparée que réclame iOS, qui ignore
+  le manifeste ;
+- le service worker enregistré par **toutes** les pages du personnel ;
+- un raccourci « Saisir les notes » et un « Faire l'appel » au appui long ;
+- les icônes sont **du code** — `scripts/dessiner-icones.py` les redessine à
+  l'identique. Un binaire versionné sans sa source est un fichier que plus
+  personne ne sait refaire.
+
+**Ce que l'application montre quand on la lance sans réseau.** Une fois
+installée, on touche l'icône : plus d'onglet, plus de barre d'adresse, rien
+pour expliquer une page blanche. Il fallait donc une page — mais servir le
+tableau de bord depuis le cache aurait affiché des effectifs et des impayés
+d'avant-hier avec l'aplomb de chiffres justes. `/hors-ligne` est donc une page
+**sans données** : elle dit ce qui marche encore, ce qui ne marche pas, et
+pourquoi. Elle ne peut pas mentir, puisqu'elle n'affirme rien sur l'école.
+
+L'espace des familles est délibérément tenu à l'écart de tout ceci : les
+parents reçoivent des SMS, et une icône « FasoSchool » les ferait atterrir sur
+l'écran de connexion du personnel.
+
+`npm run test:pwa` — 51 assertions. Elle ouvre les PNG et vérifie qu'ils font
+vraiment la taille annoncée, mesure le débordement hors de la zone sûre
+d'Android, et **arrête le serveur** pour éprouver le lancement sans réseau
+(l'émulation de coupure de Chromium ne survit pas au redémarrage du service
+worker : le résultat changeait d'une navigation à l'autre). Deux témoins :
+une image volontairement débordante, pour prouver que la mesure n'est pas
+aveugle ; et `/famille`, exclu du repli, qui doit échouer *autrement* — sans
+quoi rien ne dirait que la page hors-ligne vient bien de notre worker.
+
 ### Ce qui n'existe pas encore
 
 Orange Money et Moov Money, bloqués sur le RCCM. Les seuils de catégorisation
