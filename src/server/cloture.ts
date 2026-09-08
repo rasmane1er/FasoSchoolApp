@@ -171,6 +171,20 @@ export async function previenirFamilles(
         + "Un SMS payé qui renvoie vers une adresse inexistante coûte de "
         + "l'argent et de la crédibilité : rien n'a été envoyé." };
   }
+  /* Et pas en http. La page que ce SMS invite à ouvrir est protégée par un
+     cookie de session qui donne accès au dossier d'un enfant — notes,
+     absences, discipline, numéros de la famille. En clair sur le réseau, ce
+     jeton se lit. On ne demande pas à un parent d'ouvrir cela sur le wifi d'un
+     cybercafé. `localhost` reste accepté : c'est le développement, pas une
+     famille. */
+  const local = /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(adresse);
+  if (!adresse.toLowerCase().startsWith("https://") && !local) {
+    return { envoyes: 0, refuses: 0, cout: 0,
+      error: `L'adresse publique est en http (${adresse}). La page invite le `
+        + `parent à ouvrir le dossier de son enfant : son cookie de session `
+        + `voyagerait en clair. Mettez le site en https avant d'envoyer ce `
+        + `message — rien n'a été envoyé.` };
+  }
 
   return withSchool(schoolId, async (c) => {
     const publies = await c.query(

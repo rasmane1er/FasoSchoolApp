@@ -128,6 +128,32 @@ tant que ce n'est pas fait, tout tient sur un seul disque.
 douze élèves, huit disciplines notées, la scolarité et un dossier de
 catégorisation entamé, puis écrit les bulletins dans `out/`.
 
+### Les cookies de session
+
+Défaut trouvé le lendemain d'avoir construit l'envoi du lien aux familles :
+**ni l'un ni l'autre des deux cookies de session ne portait `Secure`.**
+
+`fs_session` ouvre l'application du personnel. `fs_famille` ouvre le dossier
+d'un enfant — notes, absences, discipline, numéros de la famille. Sans
+`Secure`, ces jetons partent en clair dès qu'une requête passe en http : une
+adresse tapée sans « s », un lien mal formé, le portail captif d'un cybercafé.
+Et le logiciel venait précisément de se mettre à **envoyer cette adresse par
+SMS** à des parents qui l'ouvriront sur un téléphone, sur un réseau partagé.
+Construire la fonctionnalité a rendu le défaut urgent avant qu'il ne soit
+trouvé.
+
+`Secure` est posé dès que la connexion est en https — directement, derrière un
+reverse proxy qui l'annonce par `x-forwarded-proto`, ou parce que l'adresse
+publique déclarée est en https. Il n'est **pas** posé en dur : cela
+interdirait toute connexion en développement local, où l'on sert en http sur
+127.0.0.1, et un développeur qui ne peut plus se connecter finit par retirer la
+ligne.
+
+Et prévenir les familles est désormais **refusé tant que l'adresse publique est
+en http**. On ne demande pas à un parent d'ouvrir le dossier de son enfant en
+clair sur le réseau. `localhost` reste accepté : c'est du développement, pas
+une famille.
+
 ### L'épreuve de cloisonnement
 
 Le cloisonnement multi-locataire est la promesse la plus lourde du produit :
@@ -825,10 +851,11 @@ Comptes de démonstration — le code s'affiche à l'écran, aucun SMS n'est env
 | `70000005` | Directeur |
 
 Vérifications : `npm run check:all` — typecheck strict, 60 tests unitaires,
-et vingt-cinq parcours, dont vingt-trois dans un vrai navigateur :
+et vingt-six parcours, dont vingt-trois dans un vrai navigateur :
 
 | suite | ce qu'elle prouve |
 |---|---|
+| `test:cookies` (13) | les deux cookies de session portent `Secure` derrière https et pas en local, et on refuse d'inviter une famille sur une adresse en http |
 | `test:cloisonnement` (16) | l'épreuve d'isolation passe sur un schéma complet, **échoue** sur un schéma auquel il manque la migration 0009, et ne touche à aucune base réelle |
 | `test:installation` (17) | le chemin du premier jour marche du disque nu à la première connexion, et aucune table portant `school_id` n'échappe au RLS |
 | `test:sauvegarde` (15) | la sauvegarde refuse de tourner avec le rôle applicatif, ne laisse aucun fichier quand elle échoue, et son archive se restaure vraiment |

@@ -111,6 +111,36 @@ const redirect = (res: ServerResponse, to: string, setCookie?: string) => {
   res.end();
 };
 
+/**
+ * Le drapeau `Secure` d'un cookie de session.
+ *
+ * Il manquait sur les DEUX cookies — celui du personnel et celui des familles.
+ * Un jeton de session sans `Secure` voyage en clair dès qu'une requête part en
+ * http : un lien mal formé, un portail captif, une adresse tapée sans « s », et
+ * le cookie est lisible sur le réseau. Celui des familles ouvre le dossier d'un
+ * enfant — notes, absences, discipline, numéros de la famille — et depuis peu
+ * le logiciel envoie lui-même son adresse par SMS. Il fallait le corriger avant
+ * qu'un parent ne clique.
+ *
+ * On ne le pose pas en dur : `Secure` empêcherait toute connexion en
+ * développement local, où l'on sert en http sur 127.0.0.1. On le déduit donc de
+ * la requête — un reverse proxy pose `x-forwarded-proto` — et de l'adresse
+ * publique déclarée, qui est déjà la source de vérité pour les SMS.
+ */
+export function estSecurise(req: IncomingMessage): boolean {
+  const transmis = String(req.headers["x-forwarded-proto"] ?? "")
+    .split(",")[0]!.trim().toLowerCase();
+  if (transmis === "https") return true;
+  if ((req.socket as any)?.encrypted === true) return true;
+  return (process.env.FASOSCHOOL_PUBLIC_URL ?? "").trim()
+    .toLowerCase().startsWith("https://");
+}
+
+const cookieSession = (req: IncomingMessage, nom: string, valeur: string,
+                       chemin: string, maxAge: number): string =>
+  `${nom}=${valeur}; Path=${chemin}; HttpOnly; SameSite=Lax; Max-Age=${maxAge}`
+  + (estSecurise(req) ? "; Secure" : "");
+
 // ---------------------------------------------------------------------------
 // Contexte de page
 // ---------------------------------------------------------------------------
@@ -964,11 +994,12 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
         error: "Ce numéro n'est rattaché à aucun élève. Voyez le secrétariat." }));
     }
     return redirect(res, "/famille",
-      `fs_famille=${tok}; Path=/famille; HttpOnly; SameSite=Lax; Max-Age=43200`);
+      cookieSession(req, "fs_famille", tok, "/famille", 43200));
   }
   if (path === "/famille/sortie") {
     if (familyToken) await revokeGuardian(familyToken);
-    return redirect(res, "/famille", "fs_famille=; Path=/famille; HttpOnly; Max-Age=0");
+    return redirect(res, "/famille",
+      cookieSession(req, "fs_famille", "", "/famille", 0));
   }
 
   // Connexion
@@ -989,11 +1020,12 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     const r = await verifyLogin(phone, form.get("code") ?? "");
     if (!r.ok) return html(res, loginPage({ step: "code", phone, error: r.error }));
     return redirect(res, "/",
-      `fs_session=${r.token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=43200`);
+      cookieSession(req, "fs_session", r.token ?? "", "/", 43200));
   }
   if (path === "/deconnexion") {
     if (token) await revokeSession(token);
-    return redirect(res, "/connexion", "fs_session=; Path=/; HttpOnly; Max-Age=0");
+    return redirect(res, "/connexion",
+      cookieSession(req, "fs_session", "", "/", 0));
   }
 
   if (!user) return redirect(res, "/connexion");
