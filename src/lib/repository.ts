@@ -54,6 +54,10 @@ export interface BulletinInputs {
   policyId: string;
   coefficientSetId: string;
   sourceNotes: { policy: string | null; coefficients: string | null };
+  /* Ce que le conseil de classe a décidé pour chaque élève, et qui doit
+     figurer sur le bulletin. Voir `loadConseil` pour la règle de priorité. */
+  conseil: Map<string, { appreciation: string | null; decision: string | null }>;
+  professeurPrincipal: string | null;
 }
 
 /**
@@ -211,6 +215,55 @@ export async function loadBulletinInputs(
       });
     }
 
+    /* CE QUE LE CONSEIL DE CLASSE A DÉCIDÉ.
+     *
+     * Le censeur saisit une appréciation et une décision par élève pendant la
+     * séance. Le bulletin imprimait un cadre vide à la place : quarante
+     * appréciations recopiées à la main.
+     *
+     * RÈGLE DE PRIORITÉ, la même que pour les moyennes : si le bulletin est
+     * PUBLIÉ, on réimprime sa copie figée ; sinon on montre ce que le conseil
+     * dit aujourd'hui. Un double ressorti en juin doit être la feuille remise
+     * en décembre, mot pour mot — sans quoi les deux exemplaires diffèrent et
+     * c'est celui du parent qui fait foi. */
+    const conseil = new Map<string,
+      { appreciation: string | null; decision: string | null }>();
+    {
+      const { rows } = await c.query(
+        `select st.id as student_id,
+                coalesce(b.appreciation_generale, cd.appreciation) as appreciation,
+                coalesce(b.decision_conseil, cd.decision) as decision
+           from enrolments e
+           join students st on st.id = e.student_id
+           left join bulletins b
+             on b.student_id = st.id and b.term_id = $2 and b.status = 'publie'
+           left join conseil_decisions cd
+             on cd.student_id = st.id
+            and cd.academic_year_id = (select academic_year_id from terms where id = $2)
+          where e.class_id = $1`, [classId, termId]);
+      for (const r of rows) {
+        if (r.appreciation || r.decision) {
+          conseil.set(r.student_id,
+            { appreciation: r.appreciation, decision: r.decision });
+        }
+      }
+    }
+
+    /* Le professeur principal, dont la ligne de signature figurait sur le
+       bulletin sans nom depuis le premier jour. Le bulletin publié porte le
+       nom FIGÉ à la publication ; sinon on prend celui de la classe. */
+    const professeurPrincipal: string | null = (await c.query(
+      `select coalesce(
+                (select b.professeur_principal from bulletins b
+                   join enrolments e2 on e2.student_id = b.student_id
+                  where b.class_id = $1 and b.term_id = $2 and b.status = 'publie'
+                    and b.professeur_principal is not null limit 1),
+                (select u.full_name from classes cl
+                   join staff stf on stf.id = cl.professeur_principal_id
+                   join users u on u.id = stf.user_id
+                  where cl.id = $1)) as nom`,
+      [classId, termId])).rows[0]?.nom ?? null;
+
     return {
       context: {
         schoolName: k.school_name,
@@ -257,6 +310,8 @@ export async function loadBulletinInputs(
         policy: p.source_note ?? null,
         coefficients: coefSet.rows[0].source_note ?? null,
       },
+      conseil,
+      professeurPrincipal,
     };
   });
 }

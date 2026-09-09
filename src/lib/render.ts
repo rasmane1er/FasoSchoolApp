@@ -13,6 +13,16 @@
 import type { StudentResult, ClassResult } from "./bulletin.ts";
 import type { BulletinInputs, StudentRow, SubjectRow } from "./repository.ts";
 
+/** Les décisions du conseil, en toutes lettres. Le code brut (`admis_par_
+ *  compensation`) n'a rien à faire sur un document remis à une famille. */
+const DECISIONS: Record<string, string> = {
+  admis: "Admis(e) en classe supérieure",
+  admis_par_compensation: "Admis(e) par compensation",
+  redouble: "Redouble la classe",
+  exclu: "Exclu(e) de l'établissement",
+  reoriente: "Réorienté(e)",
+};
+
 const esc = (s: unknown): string =>
   String(s ?? "").replace(/[&<>"']/g, (c) => (
     { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string
@@ -58,6 +68,7 @@ function sheet(
 ): string {
   const ctx = inputs.context;
   const a = inputs.absences.get(student.id) ?? { justified: 0, unjustified: 0, late: 0 };
+  const conseil = inputs.conseil.get(student.id);
 
   const rows = result.subjects.map((s) => {
     const sub = subjectById.get(s.subjectId);
@@ -173,13 +184,23 @@ function sheet(
       </div>
       <div class="box">
         <div style="font-size:7pt;letter-spacing:.06em;text-transform:uppercase;color:#6B6F80;margin-bottom:6px">Appréciation du conseil de classe</div>
-        <div style="height:34px;border-bottom:1px dotted #C9C4B9"></div>
-        <div style="height:22px;border-bottom:1px dotted #C9C4B9;margin-top:6px"></div>
+        ${conseil?.appreciation
+          ? `<div style="font-size:9pt;line-height:1.45;min-height:34px">${esc(conseil.appreciation)}</div>`
+          : `<div style="height:34px;border-bottom:1px dotted #C9C4B9"></div>
+             <div style="height:22px;border-bottom:1px dotted #C9C4B9;margin-top:6px"></div>`}
+        ${conseil?.decision
+          ? `<div style="margin-top:7px;padding-top:6px;border-top:1px solid #DCD8CF;font-size:8.5pt">
+               <span style="color:#6B6F80">Décision du conseil : </span>
+               <b>${esc(DECISIONS[conseil.decision] ?? conseil.decision)}</b></div>`
+          : ""}
       </div>
     </div>
 
     <div style="margin-top:auto;padding-top:16px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px">
-      <div style="border-top:1px solid #14161F;padding-top:5px;font-size:8pt;color:#4E5265">Le professeur principal</div>
+      <div style="border-top:1px solid #14161F;padding-top:5px;font-size:8pt;color:#4E5265">Le professeur principal${
+        inputs.professeurPrincipal
+          ? `<div style="color:#14161F;font-weight:600;margin-top:2px">${esc(inputs.professeurPrincipal)}</div>`
+          : ""}</div>
       <div style="border-top:1px solid #14161F;padding-top:5px;font-size:8pt;color:#4E5265">Le parent ou tuteur</div>
       <div style="border-top:1px solid #14161F;padding-top:5px;font-size:8pt;color:#4E5265">Le Directeur</div>
     </div>

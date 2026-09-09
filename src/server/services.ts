@@ -101,8 +101,17 @@ export async function loadServices(schoolId: string) {
       `select s.id, u.full_name, s.fonction from staff s
          join users u on u.id = s.user_id
         where u.is_active order by u.full_name`)).rows;
+    /* Le professeur principal de chaque classe. La colonne
+       `classes.professeur_principal_id` existait depuis le premier schéma et
+       AUCUN écran ne permettait de la renseigner — pendant que le bulletin
+       imprimait une ligne de signature « Le professeur principal » sans nom. */
     const classes = (await c.query(
-      `select cl.id, cl.label from classes cl join levels lv on lv.code = cl.level_code
+      `select cl.id, cl.label, cl.professeur_principal_id as pp_id,
+              u.full_name as pp
+         from classes cl
+         join levels lv on lv.code = cl.level_code
+         left join staff stf on stf.id = cl.professeur_principal_id
+         left join users u on u.id = stf.user_id
         where cl.academic_year_id = $1 order by lv.ordinal, cl.label`, [yearId])).rows;
     // Les matières nationales et celles propres à l'établissement.
     const subjects = (await c.query(
@@ -165,6 +174,65 @@ export async function removeService(
   });
 }
 
+/**
+ * Nommer le professeur principal d'une classe.
+ *
+ * C'est lui qui signe le bulletin et qui préside le conseil de classe. La
+ * colonne existait depuis le premier schéma, sans clé étrangère et sans écran
+ * pour la remplir : le bulletin portait donc une ligne de signature anonyme.
+ *
+ * Il doit être ENSEIGNANT dans l'établissement, et rien ne l'oblige à
+ * enseigner dans cette classe — dans un petit établissement, le professeur
+ * principal d'une 6e peut n'y faire aucune heure.
+ */
+export async function nommerProfesseurPrincipal(
+  user: SessionUser, form: URLSearchParams,
+): Promise<{ flash?: string; error?: string }> {
+  /* `classe_pp` et non `classe` : l'écran porte déjà un champ `classe` pour
+     l'attribution des services, et deux sens différents sous un même nom sur
+     la même page finissent toujours par se croiser. */
+  const classId = form.get("classe_pp") ?? "";
+  const staffId = (form.get("staff") ?? "").trim();
+  const uuid = /^[0-9a-f-]{36}$/i;
+  if (!uuid.test(classId)) return { error: "Classe inconnue." };
+  if (staffId !== "" && !uuid.test(staffId)) return { error: "Personne inconnue." };
+
+  return withSchool(user.schoolId!, async (c) => {
+    const cl = (await c.query(
+      `select label from classes where id = $1`, [classId])).rows[0];
+    if (!cl) return { error: "Cette classe n'existe pas." };
+
+    if (staffId === "") {
+      await c.query(
+        `update classes set professeur_principal_id = null where id = $1`, [classId]);
+      return { flash: `${cl.label} n'a plus de professeur principal. `
+        + `Les bulletins publiés gardent le nom qu'ils portaient.` };
+    }
+
+    /* Le RLS empêche déjà de désigner quelqu'un d'un autre établissement — la
+       ligne ne serait pas visible — mais l'écrire ici donne un refus en
+       français plutôt qu'une erreur de clé étrangère. */
+    const st = (await c.query(
+      `select u.full_name, u.is_active from staff s
+         join users u on u.id = s.user_id where s.id = $1`, [staffId])).rows[0];
+    if (!st) return { error: "Cette personne n'est pas au personnel de l'établissement." };
+    if (!st.is_active) {
+      return { error: `${st.full_name} n'est plus en activité.` };
+    }
+
+    await c.query(
+      `update classes set professeur_principal_id = $2 where id = $1`,
+      [classId, staffId]);
+    await c.query(
+      `insert into audit_log (school_id, actor_id, action, target_type, target_id, detail)
+       values (current_school_id(), $1, 'classe.professeur_principal', 'class', $2, $3)`,
+      [user.userId, classId, JSON.stringify({ classe: cl.label, staff: staffId })]);
+
+    return { flash: `${st.full_name} est professeur principal de ${cl.label}. `
+      + `Son nom figurera sur les bulletins publiés à partir de maintenant.` };
+  });
+}
+
 export async function servicesPage(
   user: SessionUser, chrome: PageChrome, flash?: string, error?: string,
 ): Promise<string> {
@@ -197,6 +265,34 @@ ${orphelins.length ? `<div class="note warn">
   ${orphelins.map((s: any) => esc(s.full_name)).join(", ")}.
   ${plural(orphelins.length, "Il ne pourra", "Ils ne pourront")} rien saisir.
 </div>` : ""}
+
+<div class="card" style="margin-bottom:18px">
+  <header><b>Professeurs principaux</b>
+    <span style="color:var(--muted);font-size:13px">celui qui signe le bulletin
+      et préside le conseil de classe</span></header>
+  ${d.classes.length ? `<div class="scroll"><table>
+    <thead><tr><th>Classe</th><th>Professeur principal</th><th class="r"></th></tr></thead>
+    <tbody>${d.classes.map((cl: any) => `<tr${cl.pp ? "" : ' class="warn"'}>
+      <td><b>${esc(cl.label)}</b></td>
+      <td>${cl.pp ? esc(cl.pp)
+        : `<span class="pill p-warn">non désigné</span>`}</td>
+      <td class="r">
+        <form method="post" action="/services/principal" class="row"
+              style="margin:0;gap:6px;justify-content:flex-end">
+          <input type="hidden" name="classe_pp" value="${esc(cl.id)}">
+          <select name="staff" style="width:auto;height:34px;font-size:13px">
+            <option value="">— personne —</option>
+            ${d.staff.filter((s: any) => s.fonction === "enseignant"
+                 || s.id === cl.pp_id)
+              .map((s: any) => `<option value="${esc(s.id)}"${
+                s.id === cl.pp_id ? " selected" : ""}>${esc(s.full_name)}</option>`).join("")}
+          </select>
+          <button type="submit" class="btn ghost petit">Désigner</button>
+        </form></td>
+    </tr>`).join("")}</tbody>
+  </table></div>` : `<div class="body"><p class="hint" style="margin:0">
+    Aucune classe cette année.</p></div>`}
+</div>
 
 <div class="card">
   <header><b>Année ${esc(d.yearLabel)}</b>

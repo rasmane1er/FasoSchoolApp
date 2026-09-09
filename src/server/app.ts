@@ -58,7 +58,7 @@ import {
 } from "./transferts.ts";
 import { pointsDAttention, attentionCard } from "./attention.ts";
 import {
-  servicesPage, addService, removeService,
+  servicesPage, addService, removeService, nommerProfesseurPrincipal,
   perimetreDe, peutClasse, peutMatiere,
 } from "./services.ts";
 import {
@@ -1667,6 +1667,12 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     if (path === "/services" && req.method === "GET") {
       if (!can(user, "parametrer")) return html(res, "Accès refusé.", 403);
       return html(res, await servicesPage(user, await chromeFor(user, "services")));
+    }
+    if (path === "/services/principal" && req.method === "POST") {
+      if (!can(user, "parametrer")) return html(res, "Accès refusé.", 403);
+      const r = await nommerProfesseurPrincipal(user, await formBody(req));
+      return html(res, await servicesPage(
+        user, await chromeFor(user, "services"), r.flash, r.error));
     }
     if (path === "/services" && req.method === "POST") {
       if (!can(user, "parametrer")) return html(res, "Accès refusé.", 403);

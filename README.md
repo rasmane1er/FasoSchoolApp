@@ -793,6 +793,43 @@ saisit quarante notes, le réseau tombe, tout est perdu. Ici :
 4. Sans JavaScript, le formulaire se poste normalement. Le hors-ligne est une
    amélioration, jamais une dépendance.
 
+### Ce que le conseil de classe décide, et que le bulletin n'imprimait pas
+
+L'écran du conseil fait saisir, élève par élève, une **décision** et une
+**appréciation** ; le censeur y passe la séance entière. Les deux partaient
+dans `conseil_decisions` et s'y arrêtaient.
+
+Le bulletin, lui, imprimait un cadre « Appréciation du conseil de classe »
+contenant **deux lignes pointillées vides**. Le logiciel recueillait quarante
+appréciations, puis imprimait quarante cadres vides que quelqu'un devait
+recopier à la main — exactement le travail que ce produit prétend supprimer,
+sur le document par lequel il sera jugé.
+
+Le bulletin porte maintenant l'appréciation et la décision, celle-ci **en
+toutes lettres** : `admis_par_compensation` n'a rien à faire sur un papier
+remis à une famille. Un élève que le conseil n'a pas délibéré garde ses lignes
+pointillées — on n'invente pas une appréciation que personne n'a écrite.
+
+**Le professeur principal.** Le bulletin portait une ligne de signature « Le
+professeur principal » sans nom. `classes.professeur_principal_id` existait
+depuis le premier schéma, avec en commentaire « FK ajoutée plus bas » — elle ne
+l'a jamais été, et aucun écran ne permettait de renseigner la colonne. La clé
+étrangère existe désormais (sans elle, on pouvait y écrire l'identifiant du
+personnel d'une AUTRE école, que le RLS rendait ensuite invisible), et la
+répartition des services porte l'écran qui manquait.
+
+**La publication fige, y compris ces trois valeurs.** Elles sont **copiées**
+dans `bulletins`, pas jointes : un bulletin remis aux familles ne doit pas
+changer parce qu'on a corrigé la source trois mois plus tard. Le double
+ressorti en juin pour un dossier de transfert doit être la feuille de décembre,
+mot pour mot — sinon les deux exemplaires diffèrent et c'est celui du parent
+qui fait foi. Le nom du professeur principal est figé lui aussi : s'il quitte
+l'établissement, le bulletin déjà signé continue de le porter.
+
+`npm run test:conseil-bulletin` — 21 assertions, dont la corruption après coup :
+on publie, on corrige l'appréciation et on retire le professeur principal, puis
+on réimprime et on exige le texte d'origine.
+
 ### Les pièces du dossier de catégorisation
 
 `category_criteria.evidence_key` était un champ de **texte libre**. L'écran

@@ -294,6 +294,39 @@ export async function publishClass(
 
     const ordre = new Map(inputs.subjects.map((s, i) => [s.id, i]));
 
+    /* CE QUE LE CONSEIL A DÉCIDÉ, FIGÉ DANS LE BULLETIN.
+     *
+     * Le censeur passe la séance du conseil à saisir une appréciation et une
+     * décision par élève. Elles partaient dans `conseil_decisions` et s'y
+     * arrêtaient : le bulletin imprimait un cadre « Appréciation du conseil de
+     * classe » avec deux lignes pointillées VIDES, que quelqu'un devait
+     * recopier à la main, quarante fois. C'est le travail que ce produit
+     * prétend supprimer.
+     *
+     * On les COPIE au lieu de les joindre : un bulletin remis aux familles ne
+     * doit pas changer parce qu'on a corrigé la source trois mois plus tard.
+     * C'est la règle déjà appliquée aux moyennes et au rang. */
+    const conseil = new Map<string, { appreciation: string | null; decision: string }>();
+    {
+      const { rows } = await c.query(
+        `select cd.student_id, cd.appreciation, cd.decision
+           from conseil_decisions cd
+           join terms t on t.academic_year_id = cd.academic_year_id
+          where t.id = $1`, [termId]);
+      for (const r of rows) {
+        conseil.set(r.student_id, { appreciation: r.appreciation, decision: r.decision });
+      }
+    }
+
+    /* Le NOM, pas l'identifiant : si le professeur principal quitte
+       l'établissement, le bulletin déjà remis doit continuer de porter celui
+       qui l'a signé. */
+    const pp = (await c.query(
+      `select s.full_name from classes cl
+         join staff st on st.id = cl.professeur_principal_id
+         join users s on s.id = st.user_id
+        where cl.id = $1`, [classId])).rows[0]?.full_name ?? null;
+
     for (const st of klass.students) {
       const abs = inputs.absences.get(st.studentId)
         ?? { justified: 0, unjustified: 0, late: 0 };
@@ -303,9 +336,10 @@ export async function publishClass(
            (school_id, student_id, term_id, class_id, grading_policy_id,
             coefficient_set_id, moyenne_generale, total_points, total_coefficients,
             rang, effectif, moyenne_de_classe, mention, absences_count,
-            retards_count, status, published_at, published_by, computed_at)
+            retards_count, appreciation_generale, decision_conseil,
+            professeur_principal, status, published_at, published_by, computed_at)
          values (current_school_id(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-                 $11, $12, $13, $14, 'publie', now(), $15, now())
+                 $11, $12, $13, $14, $16, $17, $18, 'publie', now(), $15, now())
          on conflict (student_id, term_id) do update set
            class_id = excluded.class_id,
            grading_policy_id = excluded.grading_policy_id,
@@ -318,13 +352,19 @@ export async function publishClass(
            mention = excluded.mention,
            absences_count = excluded.absences_count,
            retards_count = excluded.retards_count,
+           appreciation_generale = excluded.appreciation_generale,
+           decision_conseil = excluded.decision_conseil,
+           professeur_principal = excluded.professeur_principal,
            status = 'publie', published_at = now(),
            published_by = excluded.published_by, computed_at = now()
          returning id, (xmax = 0) as cree`,
         [st.studentId, termId, classId, inputs.policyId, inputs.coefficientSetId,
          st.moyenneGenerale, st.totalPoints, st.totalCoefficients,
          st.rang, st.effectif, klass.moyenneDeClasse, st.mention,
-         abs.justified + abs.unjustified, abs.late, staffId]);
+         abs.justified + abs.unjustified, abs.late, staffId,
+         conseil.get(st.studentId)?.appreciation ?? null,
+         conseil.get(st.studentId)?.decision ?? null,
+         pp]);
 
       const bulletinId = b.rows[0].id as string;
       if (b.rows[0].cree) out.publies += 1; else out.republies += 1;
