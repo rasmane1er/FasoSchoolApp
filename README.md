@@ -841,6 +841,54 @@ une image volontairement débordante, pour prouver que la mesure n'est pas
 aveugle ; et `/famille`, exclu du repli, qui doit échouer *autrement* — sans
 quoi rien ne dirait que la page hors-ligne vient bien de notre worker.
 
+### Le calendrier scolaire
+
+`calendar_events` existait depuis la migration 0001. **Aucune ligne du logiciel
+ne l'avait jamais ouverte.** Pendant ce temps, l'appel acceptait n'importe quelle
+date :
+
+| ce qu'on tapait | ce qui se passait |
+|---|---|
+| `?date=xyz` | erreur PostgreSQL brute (22P02) à l'écran |
+| `?date=` | idem |
+| `?date=1999-01-01` | appel enregistré, sans un mot |
+| `?date=2027-12-25` | accepté, six mois après la fin de l'année scolaire |
+| `?date=2026-12-25` | accepté, le jour de Noël |
+
+Ce n'est pas un défaut d'affichage : l'appel **envoie un SMS** à chaque famille
+d'élève absent, à 8 FCFA. « Votre enfant est absent aujourd'hui » un dimanche ou
+pendant les congés est le message le plus destructeur que ce produit puisse
+émettre — le parent, lui, sait qu'il n'y avait pas école. Une fois suffit pour
+que plus personne ne croie les suivants, et c'est tout le canal SMS qui meurt.
+
+Trois sources décident maintenant, dans cet ordre : les bornes de l'**année
+scolaire**, la **semaine de l'établissement** (`schools.school_days` — une
+donnée, parce que certains travaillent le samedi), puis le **calendrier**.
+`closes_school` sépare ce qui ferme l'école de ce qui l'occupe : une
+composition est au calendrier et n'empêche pas l'appel.
+
+**Les fêtes légales sont celles de la loi du 9 janvier 2026**, qui a ramené les
+jours chômés et payés de 15 à 11 et séparé les fêtes légales des journées
+commémoratives. Le 3 janvier, les 4 et 5 août, le 15 octobre, le 31 octobre et
+le 1<sup>er</sup> novembre **ne ferment plus** l'école ; la Journée des coutumes
+et traditions du 15 mai, oui. Toute liste antérieure à 2026 — y compris celle
+qu'on croit connaître — est fausse aujourd'hui. Les commémorations restent
+inscrites au calendrier, marquées « l'école travaille » : une date absente se
+lit comme un oubli du logiciel.
+
+**Les quatre fêtes mobiles ne sont pas devinées.** Ascension, Aïd el-Fitr,
+Tabaski et Maouloud sont chômées, mais les deux dernières dépendent de
+l'observation de la lune au Burkina et sont annoncées chaque année. L'écran les
+**réclame** à l'établissement et dit lesquelles manquent — avec ce qu'il en
+coûte de ne pas les saisir. Un logiciel qui ignore une date vaut mieux qu'un
+logiciel qui en invente une, parce que le premier le dit.
+
+`npm run test:calendrier` — 44 assertions. Chaque refus est forcé par un POST
+fabriqué à la main, jamais par l'écran, et l'absence de SMS est **comptée dans
+la base**, pas déduite. L'épreuve de cloisonnement couvre le cas à deux règles
+du calendrier : les congés d'une école lui appartiennent, les fêtes nationales
+(`school_id` nul) restent visibles de toutes.
+
 ### Ce qui n'existe pas encore
 
 Orange Money et Moov Money, bloqués sur le RCCM. Les seuils de catégorisation
@@ -932,7 +980,7 @@ et vingt-six parcours, dont vingt-trois dans un vrai navigateur :
 
 ---
 
-## Les cinq règles à confirmer
+## Les six règles à confirmer
 
 Ces règles n'ont pas pu être établies depuis une source burkinabè publique.
 Elles sont livrées comme **données**, avec leur provenance dans `source_note`,
@@ -945,8 +993,9 @@ et il faut les faire confirmer par un censeur avant tout usage réel.
 | seuils de mention | 10 / 12 / 14 / 16 | toutes les sources trouvées étaient françaises, sénégalaises, marocaines ou ivoiriennes |
 | gabarit du bulletin | générique | aucun modèle officiel MENAPLN publié, aucun bulletin scanné trouvé |
 | pondération des trimestres | moyenne simple des trois | le T3 est plus court ; aucune règle nationale trouvée |
+| jours travaillés dans la semaine | lundi → vendredi | beaucoup d'établissements travaillent aussi le samedi matin ; se corrige dans l'écran **Calendrier** |
 
-Une matinée avec un censeur coopératif et une photocopieuse ferme les cinq.
+Une matinée avec un censeur coopératif et une photocopieuse ferme les six.
 
 ---
 

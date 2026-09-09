@@ -154,6 +154,63 @@ begin
   raise notice 'OK  sessions du personnel isolées';
 end $$;
 
+-- Le CALENDRIER, qui est le seul cas à deux règles : les congés d'une école
+-- lui appartiennent, mais les fêtes légales sont NATIONALES et portent
+-- `school_id` à null. La politique de lecture laisse donc passer deux choses,
+-- et une politique qui laisse passer deux choses est une politique où l'on se
+-- trompe. On vérifie les deux sens.
+--
+-- Ce qui serait grave : les congés de l'école A fermant l'école B. B ne
+-- travaillerait pas, ses familles ne recevraient aucun SMS d'absence, et
+-- personne ne saurait pourquoi.
+-- Les deux lignes sont posées par le PROPRIÉTAIRE, pas par le rôle d'épreuve :
+-- la politique d'écriture exige `school_id = current_school_id()`, et une
+-- ligne nationale porte null. C'est précisément ce qu'on veut — une école ne
+-- doit pas pouvoir se fabriquer une fête nationale — mais cela signifie que le
+-- jeu d'essai s'installe hors du rôle contraint.
+reset role;
+insert into calendar_events (school_id, label, event_type, starts_on, ends_on, closes_school)
+values ('11111111-1111-1111-1111-111111111111', 'Congés propres à A', 'conges',
+        '2027-02-01', '2027-02-07', true),
+       (null, 'Fête légale nationale', 'fete',
+        '2027-02-10', '2027-02-10', true);
+
+set role fasoschool_rls_probe;
+select set_config('fasoschool.school_id', '22222222-2222-2222-2222-222222222222', false);
+do $$
+declare n int;
+begin
+  select count(*) into n from calendar_events where label = 'Congés propres à A';
+  if n <> 0 then
+    raise exception 'FUITE calendar_events: B voit les congés de A (% ligne(s))', n;
+  end if;
+  raise notice 'OK  les congés d''une école ne ferment pas celle du voisin';
+
+  select count(*) into n from calendar_events where label = 'Fête légale nationale';
+  if n <> 1 then
+    raise exception 'FÊTE NATIONALE INVISIBLE: B en voit %, attendu 1', n;
+  end if;
+  raise notice 'OK  les fêtes nationales restent visibles de tous';
+
+  -- Et B ne peut pas supprimer la période de A, même en la nommant.
+  delete from calendar_events where label = 'Congés propres à A';
+  if not found then raise notice 'OK  delete croisé sans effet sur le calendrier'; end if;
+end $$;
+reset role;
+do $$
+declare n int;
+begin
+  select count(*) into n from calendar_events where label = 'Congés propres à A';
+  if n <> 1 then raise exception 'B a supprimé les congés de A'; end if;
+end $$;
+
+-- REPRENDRE LE RÔLE CONTRAINT. Le bloc ci-dessus vérifiait depuis le
+-- propriétaire, qui contourne le RLS — c'est pour cela qu'il voit la ligne.
+-- Sans ce `set role`, l'assertion suivante interrogeait la base en
+-- superutilisateur et annonçait une fuite qui n'existe pas. Une épreuve de
+-- cloisonnement qui oublie sous quel rôle elle parle ne prouve rien.
+set role fasoschool_rls_probe;
+
 -- Sans contexte posé : on ne doit rien voir du tout.
 select set_config('fasoschool.school_id', '', false);
 do $$

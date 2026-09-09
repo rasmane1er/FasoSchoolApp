@@ -52,6 +52,7 @@ const MIGRATIONS = [
   "0001_initial", "0002_reference_data", "0003_guardian_access",
   "0004_message_suivi", "0005_personnel", "0006_annulation_paiement",
   "0007_discipline", "0008_justifications", "0009_auth_sessions_rls",
+  "0010_calendrier",
 ];
 
 const BASE_SANS_0009 = `fasoschool_sans_0009_${process.pid}`;
@@ -74,6 +75,14 @@ try {
   check("une écriture croisée est refusée", sortie.includes("écriture croisée refusée"));
   check("un update croisé ne touche rien", sortie.includes("update croisé sans effet"));
   check("un delete croisé ne touche rien", sortie.includes("delete croisé sans effet"));
+  check("LE CALENDRIER D'UNE ÉCOLE NE FERME PAS CELLE DU VOISIN",
+    sortie.includes("ne ferment pas celle du voisin"),
+    "sinon B ne travaille pas, ses familles ne reçoivent aucun SMS, "
+      + "et personne ne sait pourquoi");
+  check("mais les fêtes nationales restent visibles de tous",
+    sortie.includes("fêtes nationales restent visibles"),
+    "elles portent school_id null : c'est le seul cas où la politique de "
+      + "lecture laisse passer deux choses");
   check("LES SESSIONS DU PERSONNEL SONT ISOLÉES",
     sortie.includes("sessions du personnel isolées"),
     "c'est l'assertion qui manquait : la table qui n'avait aucune politique");

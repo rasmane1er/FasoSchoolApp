@@ -205,6 +205,8 @@ const NAV: Array<{ titre: string | null; liens: NavEntry[] }> = [
       droit: "suivre_messages" },
   ] },
   { titre: "Administration", liens: [
+    { href: "/calendrier", label: "Calendrier", key: "calendrier",
+      droit: "parametrer" },
     { href: "/personnel", label: "Personnel", key: "personnel",
       droit: "gerer_personnel" },
     { href: "/annee", label: "Année scolaire", key: "annee", droit: "parametrer" },

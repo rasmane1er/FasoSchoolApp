@@ -17,6 +17,19 @@ const PORT = 4188;
 const BASE = `http://127.0.0.1:${PORT}`;
 const CHROME = "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
 
+/* UN JOUR OÙ L'ÉCOLE EST VRAIMENT OUVERTE.
+ *
+ * Ce parcours faisait l'appel « aujourd'hui », sans date. Aujourd'hui, dans le
+ * conteneur, est le 9 septembre 2026 : AVANT le 1er octobre où commence
+ * l'année scolaire de la démonstration. Le parcours enregistrait donc des
+ * absences et envoyait des SMS un jour où l'établissement n'existait pas
+ * encore — et cela passait, parce que rien ne regardait le calendrier.
+ *
+ * Le mardi 13 octobre 2026 est dans l'année, dans la semaine de travail, hors
+ * fête légale, et ne porte aucune séance de la démonstration (elle en pose les
+ * 5, 10, 15, 20 et 25 octobre). */
+const JOUR_ECOLE = "2026-10-13";
+
 let passed = 0;
 const failures = [];
 const check = (name, cond, detail = "") => {
@@ -44,7 +57,7 @@ async function connecter(page, phone) {
   const { rows } = await client.query(`select school_id from auth_lookup_user('70000001')`);
   if (rows[0]) {
     await client.query(`select set_config('fasoschool.school_id', $1, false)`, [rows[0].school_id]);
-    await client.query(`delete from attendance_sessions where session_date = current_date`);
+    await client.query(`delete from attendance_sessions where session_date = $1`, [JOUR_ECOLE]);
     await client.query(`delete from sms_messages where queued_at::date = current_date`);
     // Le parcours confirme les règles et modifie la pondération : on remet
     // l'établissement dans l'état où seed_school_defaults() le laisse.
@@ -225,7 +238,7 @@ try {
   check("elle n'est pas enregistrée", !rejected.startsWith("99"), `lu « ${rejected} »`);
 
   console.log("\nAppel et SMS");
-  await page.goto(`${BASE}/absences?classe=${classe}`);
+  await page.goto(`${BASE}/absences?classe=${classe}&date=${JOUR_ECOLE}`);
   await page.waitForLoadState("networkidle");
   check("le cas « aucun tuteur joignable » est visible",
     (await page.content()).includes("Aucun tuteur joignable"));

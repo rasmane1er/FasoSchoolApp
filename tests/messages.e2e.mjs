@@ -59,7 +59,11 @@ const classe = kl[0].id;
 /* Cette suite fait l'appel sur SA PROPRE journée. Réutiliser celle du jour
    rendrait le second passage muet : l'élève étant déjà marqué absent, aucun
    nouveau SMS ne partirait et la suite passerait au vert sans rien éprouver. */
-const JOUR = "2026-09-04";
+/* Le 4 septembre 2026 était AVANT le 1er octobre, début de l'année scolaire de
+   la démonstration : cette suite faisait l'appel un jour où il n'y avait pas
+   école, et envoyait de vrais SMS pour l'éprouver. Le mercredi 14 octobre est
+   un jour ouvert, sans séance de démonstration. */
+const JOUR = "2026-10-14";
 const purgeAppel = async () => {
   await client.query(
     `delete from attendance_records where attendance_session_id in

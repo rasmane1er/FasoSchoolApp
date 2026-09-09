@@ -48,6 +48,9 @@ import { elevePage, elevesPage, corrigerIdentite, enregistrerTuteur,
          retirerTuteur, enregistrerUrgence, retirerUrgence } from "./eleve.ts";
 import { disciplinePage, consigner, retirer as retirerIncident } from "./discipline.ts";
 import { justificationsPage, decider as deciderJustification } from "./justifications.ts";
+import { calendrierPage, ajouter as ajouterPeriode,
+         retirer as retirerPeriode, changerSemaine,
+         jourEcole, dateValide } from "./calendrier.ts";
 import {
   transfertsPage, recordTransfer, addLivretEntry, certificatePage,
 } from "./transferts.ts";
@@ -717,14 +720,21 @@ async function bulletinsPage(user: SessionUser, url: URL, flash?: string): Promi
     </div>`);
 }
 
-async function absencesPage(user: SessionUser, url: URL, flash?: string): Promise<string> {
+async function absencesPage(user: SessionUser, url: URL, flash?: string,
+                            refus?: string): Promise<string> {
   const schoolId = user.schoolId!;
   const period = await currentPeriod(schoolId);
   const chrome = await chromeFor(user, "absences", period ? `Trimestre ${period.sequence}` : undefined);
   if (!period) return page(chrome, "Absences", `<h1>Absences</h1><div class="note warn">Aucun trimestre en cours.</div>`);
 
   const classId = url.searchParams.get("classe");
-  const date = url.searchParams.get("date") ?? new Date().toISOString().slice(0, 10);
+  const dateBrute = url.searchParams.get("date") ?? new Date().toISOString().slice(0, 10);
+  /* Une date malformée ne doit pas atteindre PostgreSQL : elle en ressortait
+     en 22P02 sous les yeux de l'utilisateur. On retombe sur aujourd'hui pour
+     que l'écran reste utilisable, et on le dit. */
+  const date = dateValide(dateBrute)
+    ? dateBrute : new Date().toISOString().slice(0, 10);
+  const dateCassee = !dateValide(dateBrute);
 
   // L'appel suit la même répartition que les notes : un enseignant fait
   // l'appel de ses classes, pas de celles des autres.
@@ -777,10 +787,36 @@ async function absencesPage(user: SessionUser, url: URL, flash?: string): Promis
       <noscript><button class="btn ghost" type="submit">Afficher</button></noscript>
     </form>`;
 
+  /* LE JOUR EST-IL UN JOUR D'ÉCOLE ?
+   *
+   * On le demande AVANT d'afficher la liste. Un écran d'appel ouvert un jour
+   * de congés est une invitation : le surveillant coche, valide, et quarante
+   * familles reçoivent « votre enfant est absent aujourd'hui » un jour où il
+   * n'y avait pas école. Le vrai verrou est à l'écriture (voir saveAbsences) ;
+   * celui-ci évite simplement de proposer le geste. */
+  const verdict = await withSchool(schoolId, (c) => jourEcole(c, date));
+  const alerte = dateCassee
+    ? `<div class="note bad">Cette date n'est pas une date. Voici aujourd'hui.</div>`
+    : "";
+
+  if (!verdict.ouvert) {
+    return page(chrome, "Absences", `
+      <div class="row"><div><h1>Appel</h1></div>${selector}</div>
+      ${alerte}
+      ${refus ? `<div class="note bad">${esc(refus)}</div>` : ""}
+      <div class="note warn"><b>Pas d'appel ce jour-là.</b> ${esc(verdict.raison)}
+        <div style="margin-top:6px;font-size:13.5px">Aucun SMS ne partirait :
+          une famille qui reçoit « votre enfant est absent » un jour sans école
+          cesse de croire les messages suivants. Choisissez une autre date, ou
+          corrigez le <a href="/calendrier">calendrier</a> si l'école a bien
+          travaillé ce jour-là.</div></div>`);
+  }
+
   if (!classId) {
     return page(chrome, "Absences",
       `<div class="row"><div><h1>Appel</h1>
-        <p style="margin:0;color:var(--muted)">Choisissez une classe.</p></div>${selector}</div>`);
+        <p style="margin:0;color:var(--muted)">Choisissez une classe.</p></div>${selector}</div>
+       ${alerte}`);
   }
 
   const rows = d.students.map((st: any) => {
@@ -808,6 +844,8 @@ async function absencesPage(user: SessionUser, url: URL, flash?: string): Promis
     <div class="row"><div><h1>Appel du matin</h1>
       <p style="margin:0;color:var(--muted)">${plural(d.students.length, "élève")} — ${new Date(date).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</p>
       </div>${selector}</div>
+    ${alerte}
+    ${refus ? `<div class="note bad">${esc(refus)}</div>` : ""}
     ${flash ? `<div class="ok">${esc(flash)}</div>` : ""}
     <form method="post" action="/absences?classe=${esc(classId)}&amp;date=${esc(date)}">
       <div class="card"><div class="scroll"><table>
@@ -822,7 +860,7 @@ async function absencesPage(user: SessionUser, url: URL, flash?: string): Promis
 }
 
 async function saveAbsences(user: SessionUser, url: URL, form: URLSearchParams):
-  Promise<{ absents: number; queued: number; cost: number } | null> {
+  Promise<{ absents: number; queued: number; cost: number } | { refus: string } | null> {
   // Comme pour les notes : le contrôle est à l'écriture, pas à l'affichage.
   const perimetreAppel = await perimetreDe(user);
   if (!peutClasse(perimetreAppel, url.searchParams.get("classe") ?? "")) return null;
@@ -833,6 +871,16 @@ async function saveAbsences(user: SessionUser, url: URL, form: URLSearchParams):
   const sms = createSmsChannel();
 
   return withSchool(schoolId, async (c) => {
+    /* LE JOUR OÙ L'ÉCOLE EST OUVERTE — contrôlé ICI, à l'écriture.
+     *
+     * L'écran refuse déjà d'afficher la liste un jour fermé, mais un écran
+     * n'est pas une protection : ce POST se fabrique à la main avec la date
+     * qu'on veut, et c'est exactement ce que fait le test. Sans ce contrôle,
+     * `?date=xyz` remontait une erreur PostgreSQL brute, et `?date=1999-01-01`
+     * enregistrait un appel — puis ENVOYAIT LES SMS. */
+    const verdict = await jourEcole(c, date);
+    if (!verdict.ouvert) return { refus: verdict.raison };
+
     const staff = await c.query(`select id from staff where user_id = $1 limit 1`, [user.userId]);
     const staffId = staff.rows[0]?.id ?? null;
 
@@ -1131,6 +1179,11 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
         return html(res, await absencesPage(user, url,
           "Cette classe ne fait pas partie de votre répartition de services."));
       }
+      if ("refus" in r) {
+        // Rien n'a été écrit, aucun SMS n'est parti, et on dit pourquoi.
+        return html(res, await absencesPage(user, url, undefined,
+          `Appel impossible. ${r.refus}`));
+      }
       return html(res, await absencesPage(user, url,
         `Appel enregistré : ${plural(r.absents, "absence")}, ${plural(r.queued, "SMS envoyé", "SMS envoyés")} pour ${r.cost} F.`));
     }
@@ -1329,6 +1382,27 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
         if (out.classId) retour.searchParams.set("classe", out.classId);
         return html(res, await justificationsPage(user, chrome, retour,
           out.flash, out.error));
+      }
+    }
+
+    // --- Calendrier ----------------------------------------------------------
+    //
+    // Le calendrier appartient au censeur, comme les règles de notation : il
+    // décide quels jours l'école travaille, donc quels jours un SMS d'absence
+    // peut partir. Ce n'est pas un écran d'agrément — c'est un verrou.
+    if (path === "/calendrier" || path === "/calendrier/retirer"
+        || path === "/calendrier/semaine") {
+      if (!can(user, "parametrer")) return html(res, "Accès refusé.", 403);
+      const chrome = await chromeFor(user, "calendrier");
+      if (path === "/calendrier" && req.method === "GET") {
+        return html(res, await calendrierPage(user, chrome));
+      }
+      if (req.method === "POST") {
+        const form = await formBody(req);
+        const out = path === "/calendrier" ? await ajouterPeriode(user, form)
+          : path === "/calendrier/retirer" ? await retirerPeriode(user, form)
+          : await changerSemaine(user, form);
+        return html(res, await calendrierPage(user, chrome, out.flash, out.error));
       }
     }
 
