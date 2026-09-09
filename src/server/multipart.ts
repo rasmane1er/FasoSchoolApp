@@ -62,15 +62,40 @@ export async function readMultipart(
   const boundary = (m[1] ?? m[2] ?? "").trim();
   if (!boundary) throw new Error("Envoi sans délimiteur : formulaire mal formé.");
 
+  /* LIRE JUSQU'AU BOUT, MÊME QUAND C'EST TROP GROS.
+   *
+   * La première version levait l'erreur au milieu du flux, dès le dépassement.
+   * Le refus s'affichait correctement — et la requête SUIVANTE du même
+   * utilisateur échouait par une erreur réseau du navigateur, sans rien à
+   * l'écran pour l'expliquer.
+   *
+   * La raison : le corps de la requête n'était pas consommé. Node répond, puis
+   * détruit la connexion parce qu'il reste des octets non lus dessus ; le
+   * navigateur, qui la garde ouverte (keep-alive), envoie sa requête suivante
+   * dedans et reçoit un ECONNRESET. Un directeur qui essaie de joindre un scan
+   * de 10 Mo obtient donc un refus poli, puis un écran cassé au clic suivant.
+   *
+   * On continue donc de LIRE, sans plus rien garder : les octets arrivent de
+   * toute façon, le client les a déjà mis sur le fil. Au-delà d'un plafond
+   * absolu on coupe pour de bon — à ce stade ce n'est plus un envoi maladroit,
+   * et il n'y a plus de politesse à préserver. */
+  const PLAFOND_ABSOLU = Math.max(maxBytes * 4, 64_000_000);
+
   const chunks: Buffer[] = [];
   let size = 0;
+  let trop = false;
   for await (const c of req) {
     size += (c as Buffer).length;
     if (size > maxBytes) {
-      throw new Error(
-        `Fichier trop volumineux : ${Math.round(maxBytes / 1e6)} Mo au maximum.`);
+      if (!trop) { trop = true; chunks.length = 0; }   // on libère ce qu'on avait
+      if (size > PLAFOND_ABSOLU) { req.destroy(); break; }
+      continue;                                        // on lit et on jette
     }
     chunks.push(c as Buffer);
+  }
+  if (trop) {
+    throw new Error(
+      `Fichier trop volumineux : ${Math.round(maxBytes / 1e6)} Mo au maximum.`);
   }
   const body = Buffer.concat(chunks);
 

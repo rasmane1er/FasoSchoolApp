@@ -28,6 +28,7 @@
 import { withSchool } from "../lib/db.ts";
 import { page, esc, fcfa, plural, type PageChrome } from "./html.ts";
 import type { SessionUser } from "./session.ts";
+import { piecesParCritere, blocPieces, TYPES_ACCEPTES } from "./pieces.ts";
 
 export const AXES = [
   ["investissement", "Investissement"],
@@ -41,7 +42,10 @@ export interface Criterion {
   label: string;
   maxPoints: number;
   awardedPoints: number | null;
+  /** Description en clair de la pièce attendue. N'EST PAS une preuve. */
   evidenceKey: string | null;
+  /** Le nombre de documents RÉELLEMENT joints. C'est cela, la preuve. */
+  pieces: number;
   note: string | null;
 }
 
@@ -72,10 +76,16 @@ export function scores(criteria: Criterion[]): {
     maxQualite: sum("qualite", (c) => c.maxPoints),
     renseignes: criteria.filter((c) => c.awardedPoints !== null).length,
     manquants: criteria.filter((c) => c.awardedPoints === null).length,
-    // Des points accordés sans pièce justificative : c'est ce que l'inspection
-    // retire en premier.
+    /* Des points accordés sans pièce justificative : c'est ce que l'inspection
+       retire en premier.
+
+       Ce compte portait sur `evidenceKey`, un champ de TEXTE LIBRE. Il
+       suffisait donc de taper quelque chose pour qu'un critère cesse d'être
+       « sans pièce » et devienne « justifié ». Il porte désormais sur le
+       nombre de documents réellement joints — ce qu'on ne peut pas obtenir en
+       tapant. */
     sansPiece: criteria.filter((c) =>
-      (c.awardedPoints ?? 0) > 0 && !c.evidenceKey).length,
+      (c.awardedPoints ?? 0) > 0 && c.pieces === 0).length,
   };
 }
 
@@ -102,7 +112,8 @@ export async function loadDossier(schoolId: string): Promise<Dossier | null> {
     }
 
     const crit = await c.query(
-      `select id, axis, code, label, max_points, awarded_points, evidence_key, note
+      `select id, axis, code, label, max_points, awarded_points, evidence_key,
+              note, pieces_du_critere(id) as pieces
          from category_criteria where category_assessment_id = $1
         order by axis, code`, [a.rows[0].id]);
 
@@ -116,7 +127,7 @@ export async function loadDossier(schoolId: string): Promise<Dossier | null> {
         id: r.id, axis: r.axis, code: r.code, label: r.label,
         maxPoints: Number(r.max_points),
         awardedPoints: r.awarded_points === null ? null : Number(r.awarded_points),
-        evidenceKey: r.evidence_key, note: r.note,
+        evidenceKey: r.evidence_key, pieces: Number(r.pieces), note: r.note,
       })),
     };
   });
@@ -145,8 +156,25 @@ export async function saveDossier(
     const refuses: string[] = [];
 
     for (const crit of dossier.criteria) {
-      const points = num(form.get(`p_${crit.id}`));
-      const piece = (form.get(`e_${crit.id}`) ?? "").trim() || null;
+      /* UN CHAMP ABSENT VEUT DIRE « NON SOUMIS », PAS « EFFACE ».
+       *
+       * Cette boucle lisait `form.get(...)`, qui renvoie null aussi bien pour
+       * une case vidée que pour une case ABSENTE de l'envoi. Un POST partiel
+       * — un formulaire rendu avant l'ajout d'un critère, une requête
+       * fabriquée, un écran rechargé à moitié — effaçait donc en silence les
+       * points de TOUS les critères qu'il ne mentionnait pas. Le dossier qui
+       * décide du plafond légal des frais se vidait sans un mot.
+       *
+       * Trouvé parce qu'une autre suite envoyait un POST ne portant qu'un
+       * critère, et que les douze autres se sont retrouvés à null. */
+      const aPoints = form.has(`p_${crit.id}`);
+      const aPiece = form.has(`e_${crit.id}`);
+      if (!aPoints && !aPiece) continue;
+
+      const points = aPoints ? num(form.get(`p_${crit.id}`)) : crit.awardedPoints;
+      const piece = aPiece
+        ? ((form.get(`e_${crit.id}`) ?? "").trim() || null)
+        : crit.evidenceKey;
 
       if (points !== null && (points < 0 || points > crit.maxPoints)) {
         refuses.push(`${crit.code} : ${points} points pour un maximum de ${crit.maxPoints}.`);
@@ -236,6 +264,7 @@ export async function categorisationPage(
       `<h1>Catégorisation</h1><div class="note warn">Aucune année scolaire ouverte.</div>`);
   }
   const s = scores(d.criteria);
+  const pieces = await piecesParCritere(user.schoolId!);
 
   const tile = (v: string, k: string, n: string) =>
     `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div>
@@ -243,22 +272,25 @@ export async function categorisationPage(
 
   const ligne = (crit: Criterion) => {
     const vide = crit.awardedPoints === null;
-    const sansPiece = (crit.awardedPoints ?? 0) > 0 && !crit.evidenceKey;
+    const sansPiece = (crit.awardedPoints ?? 0) > 0 && crit.pieces === 0;
     return `<tr${vide ? ' class="warn"' : sansPiece ? ' class="bad"' : ""}>
       <td><b>${esc(crit.code)}</b></td>
-      <td>${esc(crit.label)}</td>
+      <td>${esc(crit.label)}
+        <div style="margin-top:4px">
+          <input type="text" name="e_${crit.id}" form="dossier"
+                 value="${esc(crit.evidenceKey ?? "")}"
+                 placeholder="ce que la pièce doit montrer"
+                 style="height:32px;font-size:12.5px;min-width:220px;display:inline-block"></div></td>
       <td class="r">
-        <input type="text" name="p_${crit.id}" inputmode="decimal"
+        <input type="text" name="p_${crit.id}" form="dossier" inputmode="decimal"
                value="${crit.awardedPoints ?? ""}"
                style="width:74px;height:36px;text-align:right;display:inline-block">
         <span style="color:var(--faint)"> / ${crit.maxPoints}</span></td>
-      <td><input type="text" name="e_${crit.id}" value="${esc(crit.evidenceKey ?? "")}"
-                 placeholder="référence de la pièce"
-                 style="height:36px;min-width:200px;display:inline-block"></td>
+      <td style="min-width:260px">${blocPieces(crit.id, pieces.get(crit.id) ?? [])}</td>
       <td>${vide ? `<span class="pill p-warn">non renseigné</span>`
         : crit.awardedPoints === 0 ? `<span class="pill p-info">0 point</span>`
         : sansPiece ? `<span class="pill p-bad">sans pièce</span>`
-        : `<span class="pill p-ok">justifié</span>`}</td>
+        : `<span class="pill p-ok">${plural(crit.pieces, "pièce")}</span>`}</td>
     </tr>`;
   };
 
@@ -273,8 +305,8 @@ export async function categorisationPage(
         l'arrêté le note sur 50. Le score retenu est plafonné à 50 — vérifiez
         vos lignes sur votre exemplaire du texte.</div></div>` : ""}
       ${lignes.length ? `<div class="scroll"><table>
-        <thead><tr><th>Code</th><th>Critère</th><th class="r">Points</th>
-          <th>Pièce justificative</th><th>État</th></tr></thead>
+        <thead><tr><th>Code</th><th>Critère et pièce attendue</th><th class="r">Points</th>
+          <th>Pièces jointes</th><th>État</th></tr></thead>
         <tbody>${lignes.map(ligne).join("")}</tbody>
       </table></div>` : `<div class="body"><p class="hint" style="margin:0">
         Aucun critère saisi pour cet axe.</p></div>`}
@@ -312,7 +344,17 @@ ${s.sansPiece ? `<div class="note bad">
   c'est vous qui lisez la catégorie et le plafond dans le texte.
 </div>
 
-<form method="post" action="/categorisation">
+<!-- LE FORMULAIRE DU DOSSIER EST VIDE, ET C'EST VOULU.
+     Les champs qui lui appartiennent le désignent par form="dossier". La
+     raison : chaque critère porte son propre formulaire d'envoi de fichier,
+     dans une cellule du tableau. Un formulaire DANS un formulaire est interdit
+     en HTML — le navigateur ferme celui du dehors en rencontrant celui du
+     dedans, et tout ce qui suit se retrouve à l'extérieur. Écran de dossier
+     entier cassé : le bouton « Enregistrer » n'appartenait plus à rien et ne
+     soumettait rien. Trouvé par le parcours navigateur, jamais en relisant le
+     HTML. L'attribut form= fait ce travail, sans une ligne de script. -->
+<form method="post" action="/categorisation" id="dossier"></form>
+
   ${axe("investissement", "Investissement", s.investissement, s.maxInvestissement)}
   ${axe("qualite", "Qualité", s.qualite, s.maxQualite)}
 
@@ -323,23 +365,22 @@ ${s.sansPiece ? `<div class="note bad">
     <div class="body row" style="align-items:flex-end">
       <div style="width:180px">
         <label for="categorie">Catégorie (1, 2 ou 3)</label>
-        <input type="text" id="categorie" name="categorie" inputmode="numeric"
+        <input type="text" id="categorie" name="categorie" form="dossier" inputmode="numeric"
                value="${d.category ?? ""}">
       </div>
       <div style="width:240px">
         <label for="plafond">Plafond déclaré (FCFA)</label>
-        <input type="text" id="plafond" name="plafond" inputmode="numeric"
+        <input type="text" id="plafond" name="plafond" form="dossier" inputmode="numeric"
                value="${d.declaredCeiling ?? ""}">
       </div>
       <div class="grow"></div>
-      <button type="submit" class="btn">Enregistrer le dossier</button>
+      <button type="submit" class="btn" form="dossier">Enregistrer le dossier</button>
     </div>
     ${d.declaredCeiling ? `<div class="body" style="border-top:1px solid var(--rule)">
       <p class="hint" style="margin:0">Plafond déclaré :
       <b>${fcfa(d.declaredCeiling)} FCFA</b> — à confronter aux lignes de frais
       marquées « plafonné » dans la scolarité.</p></div>` : ""}
   </div>
-</form>
 
 <div class="card">
   <header><b>Ajouter un critère</b></header>

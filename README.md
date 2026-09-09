@@ -793,6 +793,58 @@ saisit quarante notes, le réseau tombe, tout est perdu. Ici :
 4. Sans JavaScript, le formulaire se poste normalement. Le hors-ligne est une
    amélioration, jamais une dépendance.
 
+### Les pièces du dossier de catégorisation
+
+`category_criteria.evidence_key` était un champ de **texte libre**. L'écran
+l'appelait « pièce justificative », comptait les critères « sans pièce », les
+affichait en rouge, et annonçait le reste « justifié ». Il suffisait donc de
+**taper** quelque chose dans la case pour qu'un critère devienne justifié. Rien
+n'était joint, rien n'était vérifié — et la démonstration semait elle-même des
+valeurs de la forme `evidence/bati.pdf`, qui ressemblent à des chemins de
+fichiers et n'en étaient pas.
+
+Ce dossier décide du **plafond légal des frais de scolarité** (arrêté
+n°2026-101). Un dossier justifié à l'écran et vide devant l'inspection fait
+baisser le score, donc le plafond, sur une année déjà facturée. Les points
+accordés sans pièce sont d'ailleurs la première chose qu'une inspection retire.
+
+Désormais un critère n'est justifié que s'il porte au moins un document réel.
+`evidence_key` redevient ce qu'il aurait dû être : la **description** de la
+pièce attendue, pour l'établissement lui-même.
+
+**Les octets vont dans la base, pas sur le disque.** L'alternative était un
+répertoire à côté — et alors la sauvegarde éprouvée ne couvre plus qu'une
+moitié du dossier. Ce serait la seconde chose à sauvegarder, celle dont
+personne ne se souvient le jour où le disque meurt. En `bytea`,
+`pg_dump --format=custom` les emporte sans qu'on ajoute rien, et la
+restauration déjà vérifiée les ramène. Un dossier complet, c'est une quinzaine
+de photos : quelques mégaoctets.
+
+**Trois règles sur ce qu'on accepte.** Liste blanche (PDF, JPEG, PNG, WebP), et
+non liste noire — une liste noire oublie toujours quelque chose. **Pas de SVG**,
+bien que ce soit une image : un SVG est un document XML qui peut porter du
+JavaScript, et servi depuis notre origine il s'exécuterait avec le cookie de
+session de celui qui l'ouvre — le directeur, précisément. Et le contenu est
+vérifié **par sa signature d'octets**, pas par le type annoncé : un script HTML
+nommé `rapport.pdf` est refusé. Le téléchargement est toujours une pièce jointe
+(`Content-Disposition: attachment`, `X-Content-Type-Options: nosniff`), sous un
+nom reconstruit — un nom d'origine contenant un guillemet s'échapperait de
+l'en-tête.
+
+**Défaut trouvé en écrivant le test.** `readMultipart` levait son erreur au
+milieu du flux, dès le dépassement de taille, sans consommer le reste du corps.
+Node répond, puis détruit la connexion parce qu'il reste des octets non lus
+dessus ; le navigateur la garde ouverte et sa requête suivante reçoit un
+`ECONNRESET`. Un directeur qui essayait de joindre un scan de 10 Mo obtenait un
+refus poli, **puis un écran cassé au clic suivant**, sans rien pour l'expliquer.
+Le corps est maintenant drainé jusqu'au bout.
+
+`npm run test:pieces` — 35 assertions. Elle éprouve le défaut dans les deux
+sens (taper ne justifie plus, joindre justifie), refuse un script déguisé en
+PDF, force la réutilisation de la connexion pour reproduire l'`ECONNRESET`, et
+**restaure une sauvegarde** pour vérifier que les octets survivent — c'est la
+raison d'être du choix `bytea`, donc elle se prouve.
+
 ### Sur l'écran d'accueil
 
 Web, et rien d'autre — c'est la décision arrêtée : *PWA d'abord, les trois

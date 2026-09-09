@@ -99,6 +99,26 @@ try {
     !vue.includes("0 point") || vue.includes(">0 point<"),
     "rien n'a été justifié : le critère vaut simplement zéro");
 
+  /* AUCUN FORMULAIRE N'EST IMBRIQUÉ DANS UN AUTRE.
+   *
+   * Chaque critère porte désormais son propre formulaire d'envoi de fichier,
+   * dans une cellule du tableau. Placés à l'intérieur du formulaire du
+   * dossier, ils l'auraient CASSÉ : un formulaire dans un formulaire est
+   * interdit en HTML, le navigateur ferme celui du dehors en rencontrant celui
+   * du dedans, et le bouton « Enregistrer » se retrouve dehors, rattaché à
+   * rien. Le HTML se relit sans que rien ne saute aux yeux ; seul un vrai
+   * navigateur le montre. D'où cette assertion, qui interroge le DOM tel que
+   * le navigateur l'a construit — et non la chaîne que le serveur a écrite. */
+  const imbrication = await page.evaluate(() =>
+    [...document.forms].filter((f) => f.closest("form") !== f).length);
+  check("AUCUN FORMULAIRE N'EST IMBRIQUÉ DANS UN AUTRE", imbrication === 0,
+    `${imbrication} formulaire(s) imbriqué(s) — le bouton « Enregistrer » `
+      + `n'appartiendrait plus à rien`);
+  const champsDossier = await page.evaluate(() =>
+    document.getElementById("dossier")?.elements.length ?? 0);
+  check("et le formulaire du dossier possède bien tous ses champs",
+    champsDossier > 20, `${champsDossier} champs`);
+
   console.log("\nSaisie");
   // Une note hors barème doit être refusée, pas rognée en silence.
   const premier = await page.locator('input[name^="p_"]').first().getAttribute("name");
@@ -106,7 +126,7 @@ try {
   const { rows: mx } = await client.query(
     `select max_points from category_criteria where id = $1`, [critId]);
   await page.fill(`[name="${premier}"]`, String(Number(mx[0].max_points) + 5));
-  await envoyer(page, 'form[action="/categorisation"] button[type=submit]');
+  await envoyer(page, 'button[form="dossier"]');
   check("des points au-dessus du maximum sont refusés",
     (await page.content()).includes("pour un maximum de"));
   const apresRefus = await client.query(
@@ -118,7 +138,7 @@ try {
   await page.goto(`${BASE}/categorisation`);
   await page.fill(`[name="p_${critId}"]`, String(mx[0].max_points));
   await page.fill(`[name="e_${critId}"]`, "classeur 3, pièce 12");
-  await envoyer(page, 'form[action="/categorisation"] button[type=submit]');
+  await envoyer(page, 'button[form="dossier"]');
   const ok = await client.query(
     `select awarded_points, evidence_key from category_criteria where id = $1`, [critId]);
   check("les points sont enregistrés",
@@ -139,14 +159,14 @@ try {
   console.log("\nDéclaration");
   await page.goto(`${BASE}/categorisation`);
   await page.fill('[name="categorie"]', "4");
-  await envoyer(page, 'form[action="/categorisation"] button[type=submit]');
+  await envoyer(page, 'button[form="dossier"]');
   check("une catégorie hors 1-2-3 est refusée",
     (await page.content()).includes("La catégorie est 1, 2 ou 3"));
 
   await page.goto(`${BASE}/categorisation`);
   await page.fill('[name="categorie"]', "2");
   await page.fill('[name="plafond"]', "180000");
-  await envoyer(page, 'form[action="/categorisation"] button[type=submit]');
+  await envoyer(page, 'button[form="dossier"]');
   const decl = await client.query(
     `select category, declared_ceiling_fcfa from category_assessments where id = $1`,
     [dossierId]);

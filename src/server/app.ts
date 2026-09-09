@@ -29,6 +29,8 @@ import {
   readSubmitted, decodeRows, applyCorrections,
 } from "./roster.ts";
 import { isMultipart, readMultipart } from "./multipart.ts";
+import { joindre as joindrePiece, retirer as retirerPiece,
+         telecharger as telechargerPiece, nomSur, TAILLE_MAX } from "./pieces.ts";
 import { rentreePage, saveYear, openYear, addClass } from "./rentree.ts";
 import { conseilPage, saveDeliberation } from "./conseil.ts";
 import { categorisationPage, saveDossier, addCriterion } from "./categorisation.ts";
@@ -1281,6 +1283,63 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       return html(res, await categorisationPage(
         user, await chromeFor(user, "categorisation"), r.flash, r.error));
     }
+    /* --- Pièces justificatives ------------------------------------------
+     *
+     * Le téléchargement d'un fichier déposé par un utilisateur est le point le
+     * plus délicat de tout le produit. Trois précautions, ensemble :
+     *
+     *   - `Content-Disposition: attachment` : le navigateur enregistre, il
+     *     n'affiche jamais. Un document affiché depuis NOTRE origine
+     *     s'exécuterait avec le cookie de session de celui qui l'ouvre — le
+     *     directeur, puisque c'est lui qui relit le dossier.
+     *   - `X-Content-Type-Options: nosniff` : le navigateur ne cherche pas à
+     *     deviner un type plus « intéressant » que celui annoncé.
+     *   - un nom de fichier reconstruit, jamais celui de l'expéditeur : un nom
+     *     contenant un guillemet ou un retour à la ligne s'échapperait de
+     *     l'en-tête.
+     *
+     * Et 404, jamais 403, quand la pièce appartient à un autre établissement :
+     * un 403 confirmerait que l'identifiant existe. */
+    if (path === "/categorisation/piece" && req.method === "GET") {
+      if (!can(user, "voir_categorisation")) return html(res, "Accès refusé.", 403);
+      const p = await telechargerPiece(user, url.searchParams.get("id") ?? "");
+      if (!p) return html(res, "Pièce introuvable.", 404);
+      res.writeHead(200, {
+        "content-type": p.type,
+        "content-length": String(p.bytes.length),
+        "content-disposition":
+          `attachment; filename="${nomSur(p.nom, p.type)}"`,
+        "x-content-type-options": "nosniff",
+        "cache-control": "no-store",
+      });
+      return res.end(p.bytes);
+    }
+    if (path === "/categorisation/piece" && req.method === "POST") {
+      if (!can(user, "voir_categorisation")) return html(res, "Accès refusé.", 403);
+      const chrome = await chromeFor(user, "categorisation");
+      if (!isMultipart(req)) {
+        return html(res, await categorisationPage(user, chrome, undefined,
+          "Le formulaire n'a pas envoyé de fichier."));
+      }
+      let r: { flash?: string; error?: string };
+      try {
+        const corps = await readMultipart(req, TAILLE_MAX + 65_536);
+        r = await joindrePiece(user, corps.fields.get("critere") ?? "",
+          corps.files.get("fichier"), corps.fields.get("label") ?? "");
+      } catch (e) {
+        // Dépassement de taille : `readMultipart` interrompt la lecture.
+        r = { error: "Ce fichier est trop volumineux pour être joint." };
+      }
+      return html(res, await categorisationPage(user, chrome, r.flash, r.error));
+    }
+    if (path === "/categorisation/piece/retirer" && req.method === "POST") {
+      if (!can(user, "voir_categorisation")) return html(res, "Accès refusé.", 403);
+      const form = await formBody(req);
+      const r = await retirerPiece(user, form.get("id") ?? "");
+      return html(res, await categorisationPage(
+        user, await chromeFor(user, "categorisation"), r.flash, r.error));
+    }
+
     if (path === "/categorisation/critere" && req.method === "POST") {
       if (!can(user, "voir_categorisation")) return html(res, "Accès refusé.", 403);
       const r = await addCriterion(user, await formBody(req));

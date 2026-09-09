@@ -233,8 +233,46 @@ async function main() {
                                         label, max_points, awarded_points, evidence_key)
          values ($1,$2,$3,$4,$5,$6,$7,$8)`,
         [schoolId, ca.rows[0].id, axis, code, label, max, got,
-         justified ? `evidence/${code.toLowerCase()}.pdf` : null],
+         // Une DESCRIPTION de la pièce attendue, pas un faux chemin de
+         // fichier. L'ancienne valeur — `evidence/bati.pdf` — ressemblait à un
+         // document stocké et n'en était pas un : la démonstration apprenait
+         // elle-même à l'utilisateur que la case voulait dire « un fichier est
+         // joint ». Ce qui justifie un critère est un document dans
+         // `documents`, et rien d'autre.
+         justified ? `Pièce à joindre : justificatif ${code}` : null],
       );
+    }
+
+    /* Une vraie pièce jointe sur deux critères, pour que la démonstration
+       montre la chose telle qu'elle est : un fichier qu'on ouvre, pas une
+       ligne de texte. Un PDF minimal mais VALIDE — le dépôt vérifie la
+       signature des octets, et un faux PDF serait refusé par le produit
+       lui-même, ce qui est exactement ce qu'on veut pouvoir montrer. */
+    const pdfDemo = (titre: string): Buffer => {
+      const corps = `%PDF-1.4\n% ${titre}\n`
+        + `1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n`
+        + `2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n`
+        + `3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 595 842]>>endobj\n`
+        + `trailer<</Root 1 0 R>>\n%%EOF\n`;
+      return Buffer.from(corps, "latin1");
+    };
+    for (const code of ["BATI", "EXAMENS"]) {
+      const crit = await c.query(
+        `select id from category_criteria
+          where category_assessment_id = $1 and code = $2`,
+        [ca.rows[0].id, code]);
+      if (!crit.rows[0]) continue;
+      const octets = pdfDemo(code);
+      await c.query(
+        `insert into documents (school_id, category_criterion_id, label, doc_type,
+                                content, content_type, byte_size, sha256)
+         values ($1,$2,$3,'declaration',$4,'application/pdf',$5,
+                 encode(sha256($4), 'hex'))
+         on conflict do nothing`,
+        [schoolId, crit.rows[0].id,
+         code === "BATI" ? "Photo du bâtiment principal.pdf"
+                         : "Résultats au BEPC 2025-2026.pdf",
+         octets, octets.length]);
     }
 
     // Évaluations : deux devoirs et une composition par discipline.

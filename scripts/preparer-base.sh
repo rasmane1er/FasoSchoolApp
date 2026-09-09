@@ -108,7 +108,8 @@ psql "$CIBLE" -v ON_ERROR_STOP=1 -q \
   -f db/migrations/0007_discipline.sql \
   -f db/migrations/0008_justifications.sql \
   -f db/migrations/0009_auth_sessions_rls.sql \
-  -f db/migrations/0010_calendrier.sql
+  -f db/migrations/0010_calendrier.sql \
+  -f db/migrations/0011_pieces_justificatives.sql
 echo "migrations appliquées"
 
 echo
