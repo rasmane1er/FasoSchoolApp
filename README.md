@@ -793,6 +793,72 @@ saisit quarante notes, le réseau tombe, tout est perdu. Ici :
 4. Sans JavaScript, le formulaire se poste normalement. Le hors-ligne est une
    amélioration, jamais une dépendance.
 
+### Une famille qu'on n'a pas pu prévenir doit apparaître quelque part
+
+Dans `saveAbsences`, une ligne :
+
+```ts
+const row = g.rows[0];
+if (!row?.phone) continue;              // <— ici
+```
+
+L'élève est marqué absent, et pour sa famille il ne se passe **rien** : aucun
+SMS, aucune ligne dans `sms_messages`, aucune tâche dans le registre, aucun nom
+dans la confirmation. L'écran répondait, mot pour mot :
+
+> Appel enregistré : 3 absences, 2 SMS envoyés pour 16 F.
+
+Trois enfants absents, deux familles prévenues. La troisième n'est nulle part —
+elle disparaît dans une soustraction que personne ne fait. C'est la **deuxième
+des trois promesses du produit** qui tombe en silence, et qui retombera demain,
+et tous les jours où cet élève sera absent.
+
+Le reste du logiciel sait déjà le dire : `discipline.ts` (« Aucun numéro
+joignable : prévenez la famille autrement, et corrigez le numéro dans la fiche
+de l'élève »), `cloture.ts`, `eleve.ts`, `attention.ts`. Quatre écrans portent
+la règle ; le cinquième — celui qui porte la promesse — l'avait oubliée.
+
+Et le tableau de bord ne remplaçait pas ce qui manquait : il annonce un **état**
+permanent (« trois élèves sans numéro »), jamais l'**événement** du jour (« ce
+matin Boukary était absent, et personne n'a pu être prévenu »). Le second est
+une tâche avec une heure ; le premier est une statistique.
+
+**Le second défaut, plus discret.** La requête qui choisit le destinataire ne
+filtrait pas sur le numéro : `order by sg.is_primary desc nulls last limit 1`.
+Elle prend donc le tuteur **principal**, même sans numéro — et un principal sans
+numéro **masque** un second tuteur joignable inscrit au même dossier. Éprouvé :
+la tante au 70 99 98 88 n'a rien reçu, parce que le père listé en premier avait
+changé de puce. Un père dont le numéro a changé et une mère inscrite en second,
+c'est le cas ordinaire.
+
+**Ce qui change.**
+
+* un état `injoignable`, distinct de `echoue`, parce que le geste n'est pas le
+  même : `echoue` veut dire que l'opérateur a refusé — on renvoie, ou on
+  téléphone ; `injoignable` veut dire qu'il n'y avait **pas de numéro à
+  composer** — on téléphone si on en trouve un, et surtout on corrige la fiche
+  de l'élève, sinon demain sera identique ;
+* la ligne porte **le texte qu'on aurait envoyé**, pour que celui qui appelle la
+  famille sache quoi lui dire, et un `to_phone` vide, qui se lit « il n'y en
+  avait pas » — pas un numéro inventé ;
+* elle **ne coûte rien** : rien n'a été composé, rien n'est débité ;
+* la confirmation la **nomme**, et dit le geste : « Une famille n'a aucun numéro
+  au dossier : prévenez-la autrement, et corrigez le numéro dans la fiche de
+  l'élève. Elle est listée dans le suivi des messages. » ;
+* elle remonte au registre « à traiter » et au tableau de bord, sous son propre
+  mot — **Sans numéro**, pas « Non remis » ;
+* **« Renvoyer » n'est pas proposé** sur un message qui n'a aucun numéro où
+  aller, et le POST fabriqué à la main est refusé lui aussi : un bouton qui ne
+  peut pas marcher est pire qu'un bouton absent, il laisse croire qu'on a
+  réessayé. « Famille appelée » et « Abandonné » restent offerts — ce sont les
+  deux gestes qui ne demandent pas de numéro ;
+* la requête de destinataire porte enfin le filtre que tout le reste du code
+  écrit déjà, **à l'affichage comme à l'envoi**.
+
+`tests/injoignable.e2e.mjs` : 31 assertions. Les contrôles négatifs ont été
+faits — le silence restauré fait tomber douze assertions, le filtre retiré en
+fait tomber quatre de plus, dont « ET IL PART CHEZ LA TANTE ».
+
 ### Un bulletin doit dire sur quoi il a été calculé
 
 Une discipline sans **aucune** note sortait du calcul de la moyenne générale —
@@ -1146,8 +1212,10 @@ Comptes de démonstration — le code s'affiche à l'écran, aucun SMS n'est env
 | `70000004` | Économe |
 | `70000005` | Directeur |
 
-Vérifications : `npm run check:all` — typecheck strict, 60 tests unitaires,
-et vingt-six parcours, dont vingt-trois dans un vrai navigateur :
+Vérifications : `npm run check:all` — typecheck strict, 60 tests unitaires, et
+**trente-quatre parcours**, chacun contre un vrai PostgreSQL et un vrai serveur.
+Le tableau ci-dessous en détaille une partie ; les autres sont décrits, avec ce
+qu'ils ont trouvé, dans les sections qui précèdent.
 
 | suite | ce qu'elle prouve |
 |---|---|
@@ -1163,6 +1231,7 @@ et vingt-six parcours, dont vingt-trois dans un vrai navigateur :
 | `test:eleve` (35) | on retrouve un élève par le numéro de son tuteur, un tuteur partagé se corrige pour la fratrie, et voir n'est pas corriger |
 | `test:personnel` (29) | un établissement crée ses propres comptes ; le dernier chef ne peut être ni écarté ni rétrogradé ; écarter quelqu'un ferme ses sessions ouvertes |
 | `test:messages` (26) | un refus de l'opérateur est enregistré avec sa raison, remonte au tableau de bord, et ne se referme que par un geste humain tracé |
+| `test:injoignable` (31) | un absent dont la famille n'a aucun numéro laisse une tâche nommée au lieu d'un silence, et un tuteur principal sans numéro ne masque plus un second tuteur joignable |
 | `test:evaluations` (22) | un enseignant ouvre un devoir pour sa matière ; une composition ne s'ouvre que par le censeur, et pour tout le niveau |
 | `test:transferts` (23) | un parcours déclaré est accepté et étiqueté, une moyenne inventée est refusée, le certificat porte sa réserve |
 | `test:communiques` (17) | le coût est annoncé avant l'envoi, les tuteurs sont dédoublonnés, un crédit court refuse l'envoi en bloc |

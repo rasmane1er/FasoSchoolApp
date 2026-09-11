@@ -766,11 +766,20 @@ async function absencesPage(user: SessionUser, url: URL, flash?: string,
         ? [period.year_id] : [period.year_id, perimetre.classIds]);
     if (!classId) return { classes: classes.rows, students: [], marks: new Map() };
 
+    /* LE NUMÉRO AFFICHÉ EST CELUI QU'ON COMPOSERA.
+     *
+     * Le filtre sur le numéro est dans le WHERE, pas seulement dans le tri :
+     * sans lui, un tuteur principal SANS numéro sort en tête et masque un
+     * second tuteur joignable inscrit au même dossier. L'écran annonçait
+     * alors « Aucun tuteur joignable » pour un élève dont la tante était
+     * parfaitement atteignable — et l'envoi faisait la même erreur.
+     * C'est la requête que le reste du logiciel écrit déjà partout ailleurs. */
     const students = await c.query(
       `select st.id, st.last_name, st.first_names,
               (select g.phone from student_guardians sg
                  join guardians g on g.id = sg.guardian_id
                 where sg.student_id = st.id and sg.receives_sms
+                  and g.phone is not null and g.phone <> ''
                 order by sg.is_primary desc limit 1) as tuteur_phone
          from enrolments e join students st on st.id = e.student_id
         where e.class_id = $1 order by st.last_name, st.first_names`,
@@ -871,7 +880,8 @@ async function absencesPage(user: SessionUser, url: URL, flash?: string,
 }
 
 async function saveAbsences(user: SessionUser, url: URL, form: URLSearchParams):
-  Promise<{ absents: number; queued: number; cost: number } | { refus: string } | null> {
+  Promise<{ absents: number; queued: number; cost: number; injoignables: number }
+         | { refus: string } | null> {
   // Comme pour les notes : le contrôle est à l'écriture, pas à l'affichage.
   const perimetreAppel = await perimetreDe(user);
   if (!peutClasse(perimetreAppel, url.searchParams.get("classe") ?? "")) return null;
@@ -908,7 +918,7 @@ async function saveAbsences(user: SessionUser, url: URL, form: URLSearchParams):
     const tpl = await c.query(`select body from sms_templates where code = 'ABSENCE' limit 1`);
     const template = tpl.rows[0]?.body ?? "{{ecole}}: {{eleve}} absent(e) le {{date}}.";
 
-    let absents = 0, queued = 0, cost = 0;
+    let absents = 0, queued = 0, cost = 0, injoignables = 0;
 
     for (const [name, status] of form) {
       if (!name.startsWith("s_")) continue;
@@ -932,23 +942,54 @@ async function saveAbsences(user: SessionUser, url: URL, form: URLSearchParams):
       absents += 1;
       if (wasAbsent) continue; // déjà signalé : on ne renvoie pas de SMS
 
+      /* QUI EST-CE QU'ON APPELLE ?
+       *
+       * Le filtre sur le numéro est dans le WHERE. Sans lui, `is_primary desc`
+       * remonte le tuteur principal MÊME S'IL N'A PAS DE NUMÉRO, et ce tuteur
+       * masque un second tuteur joignable du même dossier : le message ne part
+       * pour personne alors qu'il y avait quelqu'un à prévenir. Éprouvé. */
+      const eleve = await c.query(
+        `select first_names, last_name from students where id = $1`, [studentId]);
       const g = await c.query(
-        `select st.first_names, g.id as guardian_id, g.phone
-           from students st
-           left join student_guardians sg on sg.student_id = st.id and sg.receives_sms
-           left join guardians g on g.id = sg.guardian_id
-          where st.id = $1
-          order by sg.is_primary desc nulls last limit 1`,
+        `select g.id as guardian_id, g.phone
+           from student_guardians sg
+           join guardians g on g.id = sg.guardian_id
+          where sg.student_id = $1 and sg.receives_sms
+            and g.phone is not null and g.phone <> ''
+          order by sg.is_primary desc limit 1`,
         [studentId]);
       const row = g.rows[0];
-      if (!row?.phone) continue;
 
       const body = renderTemplate(template, {
         ecole: school.rows[0]?.name ?? "",
-        eleve: row.first_names,
+        eleve: eleve.rows[0]?.first_names ?? "",
         date: new Date(date).toLocaleDateString("fr-FR"),
         telephone: "",
       }).replace(/\s+Contact:\s*\.$/, ".");
+
+      /* AUCUN NUMÉRO : ON L'ÉCRIT, ON NE PASSE PAS.
+       *
+       * Avant, un `continue` : l'élève était marqué absent et sa famille
+       * n'existait nulle part — ni SMS, ni ligne, ni tâche, ni nom dans la
+       * confirmation. « 3 absences, 2 SMS envoyés » était tout ce qu'on
+       * voyait, et la troisième famille disparaissait dans la soustraction.
+       *
+       * Une ligne `injoignable` porte le texte qu'on AURAIT envoyé — celui
+       * qui appellera la famille saura quoi lui dire — et rejoint le registre
+       * des messages à traiter, dont la doctrine vaut ici mot pour mot : un
+       * message non remis n'est pas une ligne de journal, c'est une tâche.
+       *
+       * Elle ne coûte rien : rien n'a été composé, donc rien n'est débité. */
+      if (!row) {
+        injoignables += 1;
+        await c.query(
+          `insert into sms_messages (school_id, student_id, to_phone, body,
+                                     segments, cost_fcfa, status, error_detail)
+           values ($1,$2,'',$3,$4,0,'injoignable',$5)`,
+          [schoolId, studentId, body, countSegments(body),
+           "Aucun numéro de tuteur au dossier : rien n'a pu être composé."]);
+        continue;
+      }
 
       const segments = countSegments(body);
       const result = await sms.send({ to: row.phone, body, schoolId, studentId });
@@ -978,9 +1019,10 @@ async function saveAbsences(user: SessionUser, url: URL, form: URLSearchParams):
     await c.query(
       `insert into audit_log (school_id, actor_id, action, target_type, detail)
        values ($1,$2,'attendance.save','class',$3)`,
-      [schoolId, user.userId, JSON.stringify({ classe: classId, date, absents, sms: queued })]);
+      [schoolId, user.userId, JSON.stringify({ classe: classId, date, absents,
+                                               sms: queued, injoignables })]);
 
-    return { absents, queued, cost };
+    return { absents, queued, cost, injoignables };
   });
 }
 
@@ -1195,8 +1237,21 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
         return html(res, await absencesPage(user, url, undefined,
           `Appel impossible. ${r.refus}`));
       }
+      /* LA CONFIRMATION DIT AUSSI CE QUI N'A PAS EU LIEU.
+       *
+       * « 3 absences, 2 SMS envoyés » laissait la troisième famille dans une
+       * soustraction que personne ne fait. Le nombre manquant est nommé, et
+       * la phrase dit le geste — celle de `discipline.ts`, mot pour mot,
+       * parce que c'est le même geste. */
+      const manque = r.injoignables === 0 ? "" : r.injoignables === 1
+        ? " Une famille n'a aucun numéro au dossier : prévenez-la autrement,"
+          + " et corrigez le numéro dans la fiche de l'élève. Elle est listée"
+          + " dans le suivi des messages."
+        : ` ${r.injoignables} familles n'ont aucun numéro au dossier :`
+          + " prévenez-les autrement, et corrigez les numéros dans les fiches"
+          + " des élèves. Elles sont listées dans le suivi des messages.";
       return html(res, await absencesPage(user, url,
-        `Appel enregistré : ${plural(r.absents, "absence")}, ${plural(r.queued, "SMS envoyé", "SMS envoyés")} pour ${r.cost} F.`));
+        `Appel enregistré : ${plural(r.absents, "absence")}, ${plural(r.queued, "SMS envoyé", "SMS envoyés")} pour ${r.cost} F.${manque}`));
     }
 
     if (path === "/api/sync/notes" && req.method === "POST") {

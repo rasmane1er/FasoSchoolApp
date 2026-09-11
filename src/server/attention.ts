@@ -110,7 +110,7 @@ export async function pointsDAttention(
     // ne s'en occupe, il remonte ici.
     const nonRemis = await un(
       `select count(*)::int as n from sms_messages
-        where status = 'echoue' and resolution is null`);
+        where status in ('echoue', 'injoignable') and resolution is null`);
     if (nonRemis > 0) {
       points.push({
         gravite: "important",

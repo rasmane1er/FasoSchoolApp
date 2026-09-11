@@ -42,6 +42,10 @@ export const RESOLUTIONS: Array<[Resolution, string, string]> = [
   ["abandonne", "Abandonné", "renoncement assumé, tracé"],
 ];
 
+/** Les états qui demandent un geste. Un message `injoignable` n'a pas échoué
+ *  chez l'opérateur : il n'a jamais eu de numéro à composer. */
+export const EN_SOUFFRANCE = new Set(["echoue", "injoignable"]);
+
 export type Filtre = "a_traiter" | "echecs" | "tous";
 
 export interface Ligne {
@@ -78,9 +82,13 @@ export async function loadRegistre(
   schoolId: string, filtre: Filtre = "a_traiter",
 ): Promise<Registre> {
   return withSchool(schoolId, async (c) => {
+    /* `injoignable` compte comme `echoue` PARTOUT où la question est
+     * « qui attend un geste ». Ce n'est pas le même geste — on ne renvoie
+     * pas un message qui n'a pas de numéro — mais c'est la même attente :
+     * une famille n'a pas été prévenue et quelqu'un doit s'en occuper. */
     const où = filtre === "a_traiter"
-      ? "where m.status = 'echoue' and m.resolution is null"
-      : filtre === "echecs" ? "where m.status = 'echoue'" : "";
+      ? "where m.status in ('echoue', 'injoignable') and m.resolution is null"
+      : filtre === "echecs" ? "where m.status in ('echoue', 'injoignable')" : "";
 
     const r = await c.query(
       `select m.id, m.to_phone, m.body, m.status, m.error_detail, m.queued_at,
@@ -94,16 +102,19 @@ export async function loadRegistre(
          left join staff sf on sf.id = m.resolved_by
          left join users rs on rs.id = sf.user_id
          ${où}
-        order by (m.status = 'echoue' and m.resolution is null) desc,
+        order by (m.status in ('echoue', 'injoignable')
+                    and m.resolution is null) desc,
                  m.queued_at desc
         limit 120`);
 
     const compte = await c.query(
       `select
          count(*) filter (
-           where status = 'echoue' and resolution is null)::int as a_traiter,
+           where status in ('echoue', 'injoignable')
+             and resolution is null)::int as a_traiter,
          count(*) filter (
-           where status = 'echoue' and queued_at::date = current_date)::int as echecs_jour,
+           where status in ('echoue', 'injoignable')
+             and queued_at::date = current_date)::int as echecs_jour,
          count(*) filter (
            where status = 'envoye' and queued_at::date = current_date)::int as envoyes_jour
        from sms_messages`);
@@ -144,7 +155,7 @@ export async function resoudre(
     const m = await c.query(
       `select id, status, resolution from sms_messages where id = $1`, [messageId]);
     if (m.rowCount === 0) return { error: "Ce message n'existe pas." };
-    if (m.rows[0].status !== "echoue") {
+    if (!EN_SOUFFRANCE.has(m.rows[0].status)) {
       return { error: "Ce message est parti : il n'y a rien à traiter." };
     }
     if (m.rows[0].resolution) {
@@ -186,6 +197,16 @@ export async function renvoyer(user: SessionUser, messageId: string): Promise<Is
     return m.rows[0] ?? null;
   });
   if (!cible) return { error: "Ce message n'existe pas." };
+  /* On ne renvoie pas un message qui n'a jamais eu de numéro où aller.
+   * Proposer « Renvoyer » ici serait un bouton qui ne peut pas marcher — et
+   * pire, un bouton qui laisserait croire qu'on a réessayé. Le seul geste
+   * qui change quelque chose est dans la fiche de l'élève. */
+  if (cible.status === "injoignable") {
+    return { error: "Ce message n'a pas de numéro où aller : il n'y en avait "
+      + "aucun au dossier. Ajoutez-en un dans la fiche de l'élève — la "
+      + "prochaine absence partira. En attendant, appelez la famille et "
+      + "marquez-le ici." };
+  }
   if (cible.status !== "echoue") {
     return { error: "Ce message est parti : il n'y a rien à renvoyer." };
   }
@@ -251,8 +272,13 @@ const FILTRES: Array<[Filtre, string]> = [
 ];
 
 const etat = (l: Ligne): string => {
-  if (l.status !== "echoue") return `<span class="pill p-ok">Parti</span>`;
-  if (!l.resolution) return `<span class="pill p-bad">Non remis</span>`;
+  if (!EN_SOUFFRANCE.has(l.status)) return `<span class="pill p-ok">Parti</span>`;
+  if (!l.resolution) {
+    // Deux mots différents, parce que ce sont deux gestes différents.
+    return l.status === "injoignable"
+      ? `<span class="pill p-bad">Sans numéro</span>`
+      : `<span class="pill p-bad">Non remis</span>`;
+  }
   const libelle = RESOLUTIONS.find(([c]) => c === l.resolution)?.[1] ?? l.resolution;
   return `<span class="pill p-info">${esc(libelle)}</span>`;
 };
@@ -270,7 +296,9 @@ export async function messagesPage(
   <h1>Suivi des messages</h1>
   <p class="sub">Ce que les familles ont reçu, et surtout ce qu'elles n'ont pas
   reçu. Un message refusé par l'opérateur n'est pas un incident technique :
-  c'est une famille qui n'a pas été prévenue.</p>
+  c'est une famille qui n'a pas été prévenue. Un message « sans numéro » non
+  plus — sauf que celui-là ne repartira jamais tant que la fiche de l'élève
+  restera vide.</p>
 </div>
 
 ${error ? `<div class="note bad">${esc(error)}</div>` : ""}
@@ -295,8 +323,9 @@ ${flash ? `<div class="note good">${esc(flash)}</div>` : ""}
 ${r.lignes.length === 0 ? `
 <div class="note good">
   ${r.filtre === "a_traiter"
-    ? "Aucun message en souffrance. Toutes les familles jointes ont reçu ce "
-      + "qui leur était destiné."
+    ? "Aucun message en souffrance. Toutes les familles joignables ont reçu "
+      + "ce qui leur était destiné, et aucune absence n'est restée sans "
+      + "destinataire."
     : "Rien à afficher ici."}
 </div>` : `
 <div class="card">
@@ -324,17 +353,20 @@ ${r.lignes.length === 0 ? `
           <span class="dit">${esc(l.body.length > 96
             ? l.body.slice(0, 96) + "…" : l.body)}</span></td>
         <td>${esc(l.tuteur ?? "—")}</td>
-        <td class="num">${esc(l.phone)}</td>
+        <td class="num">${l.phone
+          ? esc(l.phone)
+          : `<span class="hint">aucun au dossier</span>`}</td>
         <td>${etat(l)}</td>
         <td>${l.raison ? esc(l.raison) : ""}${
           l.resolution && l.resoluLe
             ? `<span class="hint">${esc(l.resoluPar ?? "")} — ${
                 esc(l.resoluLe)}</span>` : ""}</td>
-        <td class="gestes">${l.status === "echoue" && !l.resolution ? `
+        <td class="gestes">${EN_SOUFFRANCE.has(l.status) && !l.resolution ? `
+          ${l.status === "injoignable" ? "" : `
           <form method="post" action="/messages/renvoyer">
             <input type="hidden" name="message" value="${l.id}">
             <button type="submit" class="btn ghost petit">Renvoyer</button>
-          </form>
+          </form>`}
           ${RESOLUTIONS.filter(([c]) => c !== "reessaye").map(([c, lib]) => `
           <form method="post" action="/messages/resoudre">
             <input type="hidden" name="message" value="${l.id}">
@@ -348,8 +380,8 @@ ${r.lignes.length === 0 ? `
 
 <div class="note">
   <b>Ce que cet écran ne fait pas.</b> Il ne corrige pas les numéros : un
-  numéro faux se répare dans la fiche de l'élève, au secrétariat, sinon le
-  prochain message échouera pareil. Il ne rappelle pas non plus les familles à
+  numéro faux — ou absent — se répare dans la fiche de l'élève, au
+  secrétariat, sinon le prochain message échouera pareil. Il ne rappelle pas non plus les familles à
   votre place — « appelée » est une déclaration humaine, et le logiciel la
   croit sur parole parce qu'il n'a aucun moyen de la vérifier.
 </div>`;
@@ -362,5 +394,6 @@ export async function messagesEnSouffrance(schoolId: string): Promise<number> {
   return withSchool(schoolId, async (c) =>
     Number((await c.query(
       `select count(*)::int as n from sms_messages
-        where status = 'echoue' and resolution is null`)).rows[0].n));
+        where status in ('echoue', 'injoignable')
+          and resolution is null`)).rows[0].n));
 }
