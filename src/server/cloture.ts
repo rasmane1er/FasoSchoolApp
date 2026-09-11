@@ -31,6 +31,7 @@ import { loadBulletinInputs } from "../lib/repository.ts";
 import { createSmsChannel, countSegments,
          COST_PER_SEGMENT_FCFA } from "../lib/sms.ts";
 import { plural } from "./html.ts";
+import { garderEnvoi } from "./envois.ts";
 import type { SessionUser } from "./session.ts";
 
 // ---------------------------------------------------------------------------
@@ -157,10 +158,12 @@ export interface PublishOutcome { publies: number; republies: number }
  */
 export interface AvisOutcome {
   envoyes: number; refuses: number; cout: number; error?: string;
+  /** Vrai quand cocher « envoyer quand même » lèverait le refus. */
+  forcable?: boolean;
 }
 
 export async function previenirFamilles(
-  user: SessionUser, classId: string, termId: string,
+  user: SessionUser, classId: string, termId: string, forcer = false,
 ): Promise<AvisOutcome> {
   const schoolId = user.schoolId!;
   const adresse = (process.env.FASOSCHOOL_PUBLIC_URL ?? "").trim()
@@ -231,6 +234,14 @@ export async function previenirFamilles(
         error: `Crédit insuffisant : ${besoin} messages nécessaires, ${credit} `
           + `disponibles. Rien n'a été envoyé.` };
     }
+
+    /* Les mêmes gardes que pour un communiqué : le corps est identique d'un
+       envoi à l'autre pour une même classe, donc un second clic renverrait le
+       message mot pour mot à toutes les familles. Et l'heure : rien
+       n'empêchait d'annoncer les bulletins à 23 h. */
+    const refus = await garderEnvoi(c, corps, forcer);
+    if (refus) return { envoyes: 0, refuses: 0, cout: 0,
+                        error: refus.message, forcable: refus.forcable };
 
     const sms = createSmsChannel();
     let envoyes = 0, refuses = 0;

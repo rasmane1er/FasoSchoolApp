@@ -65,7 +65,8 @@ psql "$CIBLE" -v ON_ERROR_STOP=1 -q \
   -f db/migrations/0010_calendrier.sql \
   -f db/migrations/0011_pieces_justificatives.sql \
   -f db/migrations/0012_bulletin_conseil.sql \
-  -f db/migrations/0013_examens.sql
+  -f db/migrations/0013_examens.sql \
+  -f db/migrations/0014_garde_envois.sql
 echo "migrations appliquées"
 
 echo

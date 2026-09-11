@@ -793,6 +793,42 @@ saisit quarante notes, le réseau tombe, tout est perdu. Ici :
 4. Sans JavaScript, le formulaire se poste normalement. Le hors-ligne est une
    amélioration, jamais une dépendance.
 
+### Deux gardes sur les envois en masse
+
+Trouvé en éprouvant l'envoi : **le même communiqué, envoyé deux fois de suite,
+partait deux fois.** 11 familles × 2, 22 messages, 176 FCFA, et chaque parent
+recevait le texte identique en double. Les deux envois annonçaient « 11 familles
+prévenues » — le directeur ne voyait rien.
+
+Ce n'est pas un cas tordu, c'est le **double-clic**. Sur une connexion lente — la
+connexion visée — la page met plusieurs secondes à répondre, et cliquer une
+seconde fois est le comportement humain normal. Le coût est double : le crédit,
+et la crédibilité du canal. Une famille qui reçoit deux fois le même message
+cesse de les lire, et c'est le SMS d'absence qui meurt avec.
+
+Seconde garde, **l'heure** : rien n'empêchait un envoi en masse à 23 h. Un
+communiqué scolaire qui réveille trois cents foyers est un incident, et c'est le
+logiciel qu'on accuse. La fenêtre de silence est une donnée de l'établissement
+(21 h → 6 h par défaut), et l'heure comparée est celle de **Ouagadougou**, pas
+celle du serveur : le conteneur tourne en UTC et le Burkina est à UTC+0, ce qui
+est exactement le genre de coïncidence qui casse le jour où la machine déménage.
+
+**On compare le corps du message, pas un jeton de formulaire.** Un jeton attrape
+le double-clic et rien d'autre ; le corps attrape aussi le retour arrière, le
+rechargement, et le re-clic après une attente jugée trop longue — tous les gestes
+qui produisent réellement un doublon. Et les deux refus sont **toujours
+forçables** : une école peut vouloir renvoyer le même texte demain, et un mur
+sans porte est un défaut.
+
+**Ce que les gardes ne couvrent pas, volontairement.** Un SMS d'absence et une
+confirmation de paiement répondent à un geste qui vient d'avoir lieu ; les
+retenir jusqu'à 6 h du matin les rendrait faux. L'appel est déjà borné par le
+calendrier scolaire.
+
+`npm run test:envois` — 23 assertions. Le doublon est compté dans la base, pas
+déduit ; la fenêtre qui traverse minuit est vérifiée heure par heure ; et une
+assertion exige qu'un SMS d'absence parte **malgré** les heures de silence.
+
 ### Les résultats aux examens, et les chiffres du dossier
 
 `students.cep_result` et `students.concours_6e_result` étaient dans le schéma

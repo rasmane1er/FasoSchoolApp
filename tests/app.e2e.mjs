@@ -58,7 +58,20 @@ async function connecter(page, phone) {
   if (rows[0]) {
     await client.query(`select set_config('fasoschool.school_id', $1, false)`, [rows[0].school_id]);
     await client.query(`delete from attendance_sessions where session_date = $1`, [JOUR_ECOLE]);
-    await client.query(`delete from sms_messages where queued_at::date = current_date`);
+    /* PAR CONTENU, PAS PAR DATE. Cette purge effaçait « les messages
+       d'aujourd'hui ». Les exécutions des jours PRÉCÉDENTS restaient donc en
+       base pour toujours : neuf messages s'y étaient accumulés sur cinq jours,
+       et la démonstration montrait des SMS qu'aucun geste n'avait produits. La
+       démonstration n'en sème aucun — tout `sms_messages` présent est un
+       résidu de test. On efface donc ce que ce parcours fabrique, quel que
+       soit le jour où il l'a fabriqué. */
+    await client.query(
+      `delete from sms_messages
+        where body like '%absent(e) le%' or body like '%paiement de%recu pour%'`);
+    await client.query(
+      `delete from sms_credit_ledger
+        where note in ('Confirmation de paiement', 'SMS d''absence')
+           or note like '%bsence%'`);
     // Le parcours confirme les règles et modifie la pondération : on remet
     // l'établissement dans l'état où seed_school_defaults() le laisse.
     await client.query(`update grading_policies
@@ -358,6 +371,30 @@ try {
 } finally {
   await browser.close();
   server.kill();
+
+  /* ON NETTOIE AUSSI À LA FIN, PAS SEULEMENT AU DÉBUT.
+     Ce parcours purgeait en ouvrant, ce qui efface les traces de la fois
+     PRÉCÉDENTE et laisse les siennes. La base de démonstration gardait donc en
+     permanence les SMS du dernier passage — et, tant que la purge portait sur
+     « aujourd'hui », ceux de tous les jours d'avant. Une suite doit rendre la
+     base telle qu'elle l'a trouvée : la démonstration ne sème aucun SMS. */
+  const fin = new pg.Client({ connectionString: process.env.DATABASE_URL });
+  await fin.connect().catch(() => {});
+  const { rows: ec } = await fin.query(
+    `select school_id from auth_lookup_user('70000001')`).catch(() => ({ rows: [] }));
+  if (ec[0]) {
+    await fin.query(`select set_config('fasoschool.school_id', $1, false)`,
+      [ec[0].school_id]).catch(() => {});
+    await fin.query(
+      `delete from sms_messages
+        where body like '%absent(e) le%' or body like '%paiement de%recu pour%'`)
+      .catch(() => {});
+    await fin.query(
+      `delete from sms_credit_ledger where direction = 'consommation'
+        and (note like '%bsence%' or note = 'Confirmation de paiement')`)
+      .catch(() => {});
+  }
+  await fin.end().catch(() => {});
 }
 
 console.log(`\n${passed} assertions passées, ${failures.length} échec(s).`);

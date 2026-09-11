@@ -25,6 +25,7 @@
 import { withSchool } from "../lib/db.ts";
 import { createSmsChannel, countSegments, COST_PER_SEGMENT_FCFA } from "../lib/sms.ts";
 import { page, esc, fcfa, plural, type PageChrome } from "./html.ts";
+import { garderEnvoi, caseForcer } from "./envois.ts";
 import type { SessionUser } from "./session.ts";
 
 export type Cible = "tous" | "classe" | "impayes";
@@ -112,6 +113,8 @@ export async function devis(
 
 export interface EnvoiOutcome {
   envoyes: number; cout: number; refuses?: number; error?: string;
+  /** Vrai quand cocher « envoyer quand même » lèverait le refus. */
+  forcable?: boolean;
 }
 
 export async function envoyer(
@@ -147,7 +150,19 @@ export async function envoyer(
   const gens = await destinataires(schoolId, cible, classId);
   const sms = createSmsChannel();
 
+  const forcer = form.get("forcer") === "1";
+
   return withSchool(schoolId, async (c) => {
+    /* LES GARDES AVANT TOUTE ÉCRITURE.
+     *
+     * Placées ici et non dans l'écran : ce POST se fabrique à la main, et
+     * c'est exactement ce que fait le test. Placées avant l'insertion du
+     * communiqué : un refus ne doit pas laisser une annonce « publiée »
+     * derrière lui, sans quoi l'historique mentirait. */
+    const refus = await garderEnvoi(c, corps, forcer);
+    if (refus) return { envoyes: 0, cout: 0, error: refus.message,
+                        forcable: refus.forcable };
+
     const staff = await c.query(
       `select id from staff where user_id = $1 limit 1`, [user.userId]);
 
@@ -203,7 +218,7 @@ export async function envoyer(
 
 export async function communiquesPage(
   user: SessionUser, chrome: PageChrome, url: URL,
-  flash?: string, error?: string,
+  flash?: string, error?: string, forcable = false,
 ): Promise<string> {
   const schoolId = user.schoolId!;
   const corps = url.searchParams.get("corps") ?? "";
@@ -307,6 +322,8 @@ ${d.destinataires === 0 ? `<div class="note bad">
   Aucune famille joignable pour cette cible.
   <a href="/inscriptions"><b>Vérifiez les numéros de tuteurs</b></a>.</div>` : `
 <form method="post" action="/communiques" class="card">
+  ${forcable && error ? `<div class="body" style="padding-bottom:0">
+    ${caseForcer(error)}</div>` : ""}
   <input type="hidden" name="titre" value="${esc(titre)}">
   <input type="hidden" name="corps" value="${esc(corps)}">
   <input type="hidden" name="cible" value="${esc(cible)}">

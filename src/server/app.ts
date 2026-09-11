@@ -1423,7 +1423,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
                              "messages ne sont pas partis")} : voyez le suivi `
                   + `des messages pour joindre ces familles autrement.`
                 : ""),
-        out.error));
+        out.error, out.forcable === true));
     }
 
     // --- Justifications ------------------------------------------------------
@@ -1659,7 +1659,8 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       const period = await currentPeriod(user.schoolId);
       const classe = url.searchParams.get("classe") ?? "";
       if (!period || !classe) return redirect(res, "/bulletins");
-      const a = await previenirFamilles(user, classe, period.term_id);
+      const a = await previenirFamilles(user, classe, period.term_id,
+        (await formBody(req)).get("forcer") === "1");
       return html(res, await bulletinsPage(user, url, a.error
         ? a.error
         : `${plural(a.envoyes, "famille prévenue", "familles prévenues")} `
