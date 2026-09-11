@@ -79,13 +79,23 @@ const { rows: notesRetirees } = await client.query(
     where ge.student_id = $1 and ev.subject_id = $2`,
   [ELEVE.id, MATIERE.subject_id]);
 
+/* `purger()` est appelée AUSSI EN COURS D'ÉPREUVE, entre les deux
+ * publications. Elle ne doit donc toucher qu'aux bulletins : fermer les
+ * sessions ici déconnecterait le censeur au milieu de son propre test, et
+ * la moitié des assertions liraient l'écran de connexion en croyant lire
+ * un refus de publication. Les sessions se ferment au début et à la fin,
+ * là où personne n'est connecté. */
 const purger = async () => {
   await client.query(`delete from bulletin_lines`);
   await client.query(`delete from bulletins`);
   await client.query(`delete from auth_rate_limits`);
   await client.query(`delete from auth_otp_challenges`);
 };
+const fermerLesSessions = async () => {
+  await client.query(`delete from auth_sessions`);
+};
 await purger();
+await fermerLesSessions();
 
 const server = spawn(process.execPath, ["--experimental-strip-types", "src/server/app.ts"], {
   env: { ...process.env, PORT: String(PORT) }, stdio: ["ignore", "pipe", "pipe"],
@@ -235,6 +245,7 @@ try {
        g.is_justified, g.recorded_by]).catch(() => {});
   }
   await purger().catch(() => {});
+  await fermerLesSessions().catch(() => {});
   await client.end();
 }
 

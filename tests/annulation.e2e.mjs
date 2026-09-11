@@ -42,6 +42,7 @@ const schoolId = sc[0].school_id;
 await client.query(`select set_config('fasoschool.school_id', $1, false)`, [schoolId]);
 await client.query(`delete from auth_rate_limits`);
 await client.query(`delete from auth_otp_challenges`);
+await client.query(`delete from auth_sessions`);
 
 /* On préfère une facture encore vierge, mais on ne le SUPPOSE pas : d'autres
    suites encaissent sur la démonstration et laissent leurs lignes. Tout ce qui

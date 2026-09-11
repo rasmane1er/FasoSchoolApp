@@ -51,7 +51,11 @@ const SCHOOL = sc[0].school_id;
 await client.query(`select set_config('fasoschool.school_id', $1, false)`, [SCHOOL]);
 
 const MARQUE = "EPREUVE ENVOIS";
-const JOUR_ECOLE = "2026-10-20";           // un mardi, dans l'année scolaire
+/* UN JOUR QUE LA DÉMONSTRATION N'OCCUPE PAS. Le 20 octobre en était un :
+ * `npm run demo` sème l'assiduité tous les cinq jours à partir du 5 octobre,
+ * et la purge de cette suite emportait donc une séance et douze présences du
+ * jeu de démonstration à chaque exécution. Le 16 est un vendredi libre. */
+const JOUR_ECOLE = "2026-10-16";           // un vendredi, dans l'année scolaire
 const { rows: fenetre } = await client.query(
   `select sms_quiet_from, sms_quiet_to from schools limit 1`);
 
@@ -69,6 +73,7 @@ const purger = async () => {
     [fenetre[0].sms_quiet_from, fenetre[0].sms_quiet_to]);
   await client.query(`delete from auth_rate_limits`);
   await client.query(`delete from auth_otp_challenges`);
+  await client.query(`delete from auth_sessions`);
 };
 await purger();
 

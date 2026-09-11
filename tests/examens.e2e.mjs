@@ -59,6 +59,7 @@ const purger = async () => {
   await client.query(`delete from audit_log where action = 'examens.saisie'`);
   await client.query(`delete from auth_rate_limits`);
   await client.query(`delete from auth_otp_challenges`);
+  await client.query(`delete from auth_sessions`);
 };
 await purger();
 

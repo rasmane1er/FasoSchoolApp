@@ -44,6 +44,7 @@ const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
 await client.connect();
 await client.query(`delete from auth_rate_limits`);
 await client.query(`delete from auth_otp_challenges`);
+await client.query(`delete from auth_sessions`);
 
 const { rows: demo } = await client.query(
   `select school_id from auth_lookup_user('70000005')`);

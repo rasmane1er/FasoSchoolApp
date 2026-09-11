@@ -46,8 +46,12 @@ import pg from "pg";
 
 const PORT = 4247;
 const BASE = `http://127.0.0.1:${PORT}`;
-const JOUR = "2026-10-13";        // un mardi, dans l'année scolaire
-const JOUR2 = "2026-10-14";       // le mercredi suivant
+/* Deux jours qui n'appartiennent qu'à cette suite : ni au semis de la
+ * démonstration (tous les cinq jours depuis le 5 octobre), ni aux jours
+ * d'épreuve des autres — `app.e2e` tient le 13, `messages` le 14. Une purge
+ * par date n'est sûre que si la date n'est à personne d'autre. */
+const JOUR = "2026-10-21";        // un mercredi, dans l'année scolaire
+const JOUR2 = "2026-10-22";       // le jeudi suivant
 
 let passed = 0;
 const failures = [];

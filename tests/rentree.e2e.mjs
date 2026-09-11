@@ -29,6 +29,7 @@ const { rows: sc } = await client.query(`select school_id from auth_lookup_user(
 await client.query(`select set_config('fasoschool.school_id', $1, false)`, [sc[0].school_id]);
 await client.query(`delete from auth_rate_limits`);
 await client.query(`delete from auth_otp_challenges`);
+await client.query(`delete from auth_sessions`);
 
 // L'année de test est effacée avant ET après : le reste de la démonstration
 // ne doit rien voir passer.

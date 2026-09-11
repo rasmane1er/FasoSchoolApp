@@ -90,6 +90,7 @@ async function connecter(page, phone) {
   // Sans purge, le parcours n'est jouable qu'une fois par fenêtre.
   await client.query(`delete from auth_rate_limits`);
   await client.query(`delete from auth_otp_challenges`);
+  await client.query(`delete from auth_sessions`);
   await client.end();
 }
 
@@ -393,6 +394,19 @@ try {
       `delete from sms_credit_ledger where direction = 'consommation'
         and (note like '%bsence%' or note = 'Confirmation de paiement')`)
       .catch(() => {});
+    /* LA SÉANCE D'APPEL AUSSI. Elle était purgée à l'ouverture et laissée à la
+       fermeture : la démonstration gardait donc en permanence un treizième
+       appel, sur un jour où elle n'en sème aucun. Ce n'est pas grave en soi —
+       c'est la même négligence qui, ailleurs, a fini par MANGER des séances de
+       la fixture. Une suite rend la base telle qu'elle l'a trouvée. */
+    await fin.query(
+      `delete from attendance_records where attendance_session_id in
+         (select id from attendance_sessions where session_date = $1)`,
+      [JOUR_ECOLE]).catch(() => {});
+    await fin.query(
+      `delete from attendance_sessions where session_date = $1`, [JOUR_ECOLE])
+      .catch(() => {});
+    await fin.query(`delete from auth_sessions`).catch(() => {});
   }
   await fin.end().catch(() => {});
 }

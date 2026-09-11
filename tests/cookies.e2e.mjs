@@ -44,6 +44,7 @@ await client.query(`select set_config('fasoschool.school_id', $1, false)`,
   [ecole[0].school_id]);
 await client.query(`delete from auth_rate_limits`);
 await client.query(`delete from auth_otp_challenges`);
+await client.query(`delete from auth_sessions`);
 
 const serveurs = [];
 const lancer = async (port, env) => {

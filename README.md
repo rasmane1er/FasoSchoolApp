@@ -793,6 +793,47 @@ saisit quarante notes, le réseau tombe, tout est perdu. Ici :
 4. Sans JavaScript, le formulaire se poste normalement. Le hors-ligne est une
    amélioration, jamais une dépendance.
 
+### Les tests mangeaient la démonstration
+
+Trouvé en comptant, après avoir remarqué que le jeu de démonstration n'avait
+plus le même nombre de lignes qu'à sa création. Deux suites emportaient à
+chaque `check:all` des données qui ne leur appartenaient pas :
+
+* `calendrier.e2e.mjs` purgeait « toute séance d'appel hors de l'année scolaire
+  **ou** tombant dans cette liste de dates » — dont le 5 et le 10 octobre 2026.
+  Or `npm run demo` sème l'assiduité tous les cinq jours **à partir du
+  5 octobre**. Deux séances et vingt-quatre présences partaient à chaque
+  exécution ;
+* `pieces.e2e.mjs` purgeait `documents where category_criterion_id is not null`
+  — c'est-à-dire aussi les deux pièces de la démonstration, la photo du bâtiment
+  et les résultats au BEPC ;
+* `envois.e2e.mjs` purgeait le 20 octobre, une autre date du semis ;
+* `app.e2e.mjs` purgeait sa séance d'appel **en ouvrant** et la laissait en
+  fermant : la démonstration gardait en permanence un treizième appel.
+
+Aucune assertion ne tombait. Un bulletin se calcule aussi bien sur dix séances
+que sur douze, et un dossier sans pièce jointe a l'air normal. Pire : les
+assertions de `pieces.e2e.mjs` — « le compte est zéro », « il n'y en a qu'un »,
+« le critère redevient sans pièce » — **ne tenaient que grâce à cette
+érosion**. Le test travaillait sur un critère auquel la démonstration attache
+déjà une pièce, et ne s'en apercevait pas parce qu'il commençait par l'effacer.
+
+**La règle, posée une fois pour toutes.** Une suite ne supprime que ce qu'elle
+a créé, et elle le reconnaît par une marque qu'elle a posée elle-même — jamais
+par un prédicat qui décrit une famille de lignes (« tout ce qui ressemble à une
+pièce », « toutes les dates de cette plage »). Un prédicat attrape aussi ce qui
+n'est pas à lui. En pratique : chaque suite a ses propres jours, hors du semis
+de démonstration et hors de ceux des autres suites, et chaque dépôt porte un
+préfixe témoin.
+
+**Et un témoin, parce qu'une règle sans mesure se perd.** `tests/fixture.e2e.mjs`
+passe **en dernier** dans `check:all` et compte : douze élèves, 288 notes, douze
+séances, 144 présences, deux pièces jointes avec leurs octets, onze tuteurs, zéro
+SMS, zéro bulletin. Un écart nomme la table et le nombre manquant. C'est la seule
+suite du dépôt qui n'écrit rien : un témoin qui déplace ce qu'il observe ne sert
+à rien. Contrôle négatif fait — les purges d'origine remises, elle tombe sur
+exactement les trois lignes attendues.
+
 ### Une famille qu'on n'a pas pu prévenir doit apparaître quelque part
 
 Dans `saveAbsences`, une ligne :
@@ -1213,7 +1254,7 @@ Comptes de démonstration — le code s'affiche à l'écran, aucun SMS n'est env
 | `70000005` | Directeur |
 
 Vérifications : `npm run check:all` — typecheck strict, 60 tests unitaires, et
-**trente-quatre parcours**, chacun contre un vrai PostgreSQL et un vrai serveur.
+**trente-cinq parcours**, chacun contre un vrai PostgreSQL et un vrai serveur.
 Le tableau ci-dessous en détaille une partie ; les autres sont décrits, avec ce
 qu'ils ont trouvé, dans les sections qui précèdent.
 
@@ -1231,6 +1272,7 @@ qu'ils ont trouvé, dans les sections qui précèdent.
 | `test:eleve` (35) | on retrouve un élève par le numéro de son tuteur, un tuteur partagé se corrige pour la fratrie, et voir n'est pas corriger |
 | `test:personnel` (29) | un établissement crée ses propres comptes ; le dernier chef ne peut être ni écarté ni rétrogradé ; écarter quelqu'un ferme ses sessions ouvertes |
 | `test:messages` (26) | un refus de l'opérateur est enregistré avec sa raison, remonte au tableau de bord, et ne se referme que par un geste humain tracé |
+| `test:fixture` (16) | le jeu de démonstration sort de `check:all` exactement comme il y est entré : une suite qui emporte ce qui n'est pas à elle est nommée, avec la table et le nombre |
 | `test:injoignable` (31) | un absent dont la famille n'a aucun numéro laisse une tâche nommée au lieu d'un silence, et un tuteur principal sans numéro ne masque plus un second tuteur joignable |
 | `test:evaluations` (22) | un enseignant ouvre un devoir pour sa matière ; une composition ne s'ouvre que par le censeur, et pour tout le niveau |
 | `test:transferts` (23) | un parcours déclaré est accepté et étiqueté, une moyenne inventée est refusée, le certificat porte sa réserve |
@@ -1378,6 +1420,13 @@ le carnet de notes.
 **Le hors-ligne se limite au strict nécessaire.** La saisie des notes et
 l'appel, sur le poste de l'enseignant. Ni l'administration ni la comptabilité :
 ces utilisateurs sont à un bureau.
+
+**Une suite de tests ne supprime que ce qu'elle a créé.** Elle le reconnaît par
+une marque qu'elle a posée elle-même, jamais par un prédicat qui décrit une
+famille de lignes — un prédicat attrape aussi ce qui n'est pas à lui. Chaque
+suite a ses propres jours, hors du semis de démonstration et hors de ceux des
+autres ; chaque dépôt porte un préfixe témoin. `test:fixture` le vérifie en
+dernier, en comptant.
 
 ---
 

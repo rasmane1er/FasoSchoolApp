@@ -51,28 +51,64 @@ const { rows: ec } = await client.query(
 const SCHOOL = ec[0].school_id;
 await client.query(`select set_config('fasoschool.school_id', $1, false)`, [SCHOOL]);
 
-/* La purge doit couvrir TOUTES les dates que ce test touche, y compris les
-   jours OUVERTS. Sans 2026-10-06, la séance créée au premier passage
-   survivait, et au second « l'appel a bien lieu le jour d'une composition »
-   échouait — non parce que le produit refusait, mais parce que la séance
-   existait déjà et que le compteur ne bougeait plus. */
+/* LA PURGE NE TOUCHE QUE LES JOURS DE CE TEST.
+ *
+ * CE QU'ELLE FAISAIT AVANT. Elle effaçait toute séance d'appel hors de
+ * l'année scolaire OU tombant dans une liste de dates — dont le 5 et le
+ * 10 octobre 2026. Or le jeu de démonstration sème l'assiduité tous les
+ * cinq jours À PARTIR DU 5 OCTOBRE : cette purge lui prenait deux séances
+ * et vingt-quatre présences À CHAQUE `check:all`. Personne ne le voyait,
+ * parce qu'un bulletin se calcule aussi bien sur dix séances que sur douze.
+ *
+ * La règle, posée une fois pour toutes : UNE SUITE NE SUPPRIME QUE CE
+ * QU'ELLE A CRÉÉ. Elle ne s'arroge pas une plage de dates, ni « tout ce qui
+ * ressemble à ». Ici cela veut dire deux choses :
+ *
+ *   1. les jours d'épreuve sont choisis HORS du semis de démonstration —
+ *      le lundi 12 et le samedi 17 octobre, non le 5 et le 10 ;
+ *   2. la purge nomme exactement ces jours-là, sans intervalle ouvert.
+ *
+ * La borne « hors année scolaire » est retirée : ces appels-là sont refusés,
+ * donc ils n'écrivent rien — il n'y avait jamais rien à purger, seulement un
+ * risque d'emporter les séances d'une autre année. */
+const JOURS = [
+  "2026-12-25",   // Noël, fermé
+  "2026-10-04",   // un dimanche
+  "2026-10-12",   // un lundi ordinaire, hors semis de démonstration
+  "2026-10-06",   // le jour d'une composition : ouvert
+  "2026-10-17",   // un samedi, hors semis de démonstration
+  "2027-01-05", "2027-01-06",   // les congés saisis par l'école
+  "2027-05-27",   // Tabaski, saisie par l'école
+];
+
 const purger = async () => {
   await client.query(`delete from calendar_events where label like $1`, [TEMOIN + "%"]);
   await client.query(
     `delete from attendance_records where attendance_session_id in
-       (select id from attendance_sessions where session_date < '2026-10-01'
-           or session_date > '2027-07-15' or session_date in
-             ('2026-12-25','2027-01-05','2027-01-06','2026-10-04','2026-10-10',
-              '2026-10-05','2026-10-06','2027-05-27'))`);
+       (select id from attendance_sessions where session_date = any($1::date[]))`,
+    [JOURS]);
   await client.query(
-    `delete from attendance_sessions where session_date < '2026-10-01'
-        or session_date > '2027-07-15' or session_date in
-          ('2026-12-25','2027-01-05','2027-01-06','2026-10-04','2026-10-10',
-           '2026-10-05','2026-10-06','2027-05-27')`);
+    `delete from attendance_sessions where session_date = any($1::date[])`, [JOURS]);
   await client.query(`delete from auth_rate_limits`);
   await client.query(`delete from auth_otp_challenges`);
+  await client.query(`delete from auth_sessions`);
   await client.query(`update schools set school_days = '{1,2,3,4,5}'`);
 };
+
+/* LE GARDE-FOU. Si un jour le jeu de démonstration sème une séance sur l'un
+ * de ces jours, la purge recommencerait à manger la fixture — en silence.
+ * On l'apprend ici, bruyamment, AVANT de supprimer quoi que ce soit. */
+const { rows: collision } = await client.query(
+  `select session_date::text as d from attendance_sessions
+    where session_date = any($1::date[])`, [JOURS]);
+if (collision.length > 0) {
+  console.error(
+    "REFUS : le jeu de démonstration occupe des jours de cette épreuve — "
+    + collision.map((x) => x.d).join(", ") + ".\n"
+    + "Les purger prendrait des données qui ne sont pas à ce test. "
+    + "Choisissez d'autres jours dans JOURS.");
+  process.exit(1);
+}
 await purger();
 const semaineInitiale = (await client.query(
   `select school_days from schools limit 1`)).rows[0].school_days;
@@ -221,10 +257,10 @@ try {
 
   /* === 4. Un jour ouvert reste ouvert ===================================== */
   console.log("\nUn jour d'école ordinaire marche toujours");
-  const lundi = "2026-10-05";
+  const lundi = "2026-10-12";
   const ouvert = await poster(`/absences?classe=${classe}&date=${lundi}`, cookie, {});
   const corpsOuvert = await ouvert.text();
-  check("le lundi 5 octobre est accepté", /Appel enregistré/.test(corpsOuvert),
+  check("le lundi 12 octobre est accepté", /Appel enregistré/.test(corpsOuvert),
     corpsOuvert.slice(0, 160));
 
   /* === 5. Ce que l'école ajoute ========================================== */
@@ -251,7 +287,7 @@ try {
 
   /* === 6. La semaine de l'établissement ================================== */
   console.log("\nLa semaine est une donnée, pas une constante du code");
-  const samedi = "2026-10-10";
+  const samedi = "2026-10-17";
   const avant = await appel(samedi);
   check("par défaut, pas d'école le samedi", !avant.ecrit);
   await poster("/calendrier/semaine", cookie, { jour: ["1", "2", "3", "4", "5", "6"] });

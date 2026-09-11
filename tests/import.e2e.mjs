@@ -57,6 +57,7 @@ const schoolId = sc[0].school_id;
 await client.query(`select set_config('fasoschool.school_id', $1, false)`, [schoolId]);
 await client.query(`delete from auth_rate_limits`);
 await client.query(`delete from auth_otp_challenges`);
+await client.query(`delete from auth_sessions`);
 
 /*
  * Le test doit pouvoir tourner deux fois de suite, et surtout ne pas abîmer

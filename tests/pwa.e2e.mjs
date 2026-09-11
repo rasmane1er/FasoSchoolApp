@@ -108,6 +108,7 @@ function lirePng(buf) {
   await client.connect();
   await client.query(`delete from auth_rate_limits`);
   await client.query(`delete from auth_otp_challenges`);
+  await client.query(`delete from auth_sessions`);
   await client.end();
 }
 

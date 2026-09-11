@@ -54,17 +54,33 @@ const SCHOOL = e[0].school_id;
 await client.query(`select set_config('fasoschool.school_id', $1, false)`, [SCHOOL]);
 
 const HORS_DOSSIER = "Pièce d'une autre école";
+const TEMOIN = "ÉPREUVE PIÈCES";     // préfixe du libellé de tout ce qu'on dépose
+
+/* LA PURGE NE TOUCHE QUE LES PIÈCES DE CE TEST.
+ *
+ * CE QU'ELLE FAISAIT AVANT :
+ *
+ *     delete from documents where category_criterion_id is not null
+ *
+ * « tout ce qui ressemble à une pièce de dossier » — donc AUSSI les deux
+ * pièces du jeu de démonstration, la photo du bâtiment et les résultats au
+ * BEPC. Elles disparaissaient à chaque `check:all`, et personne ne le voyait :
+ * un écran de dossier sans pièce jointe a l'air normal.
+ *
+ * La règle : une suite ne supprime QUE ce qu'elle a créé, et elle le reconnaît
+ * par une marque qu'elle a posée elle-même — pas par un prédicat qui décrit
+ * une famille de lignes. Tout dépôt de ce test porte donc `TEMOIN` dans son
+ * libellé, y compris ceux dont le libellé ne sert à rien d'autre. */
 const purger = async () => {
-  await client.query(`delete from documents where category_criterion_id is not null`);
-  /* La ligne « hors dossier » du test porte justement un critère NUL : la
-     purge écrite pour les pièces ne la voyait pas, et elle s'accumulait à
-     chaque exécution. Une suite doit rendre la base telle qu'elle l'a
-     trouvée — sinon c'est la suivante qui paie, ou personne, pendant
-     longtemps. */
+  await client.query(`delete from documents where label like $1`, [TEMOIN + "%"]);
+  /* La ligne « hors dossier » du test porte un critère NUL et son propre
+     libellé : la purge écrite pour les pièces ne la voyait pas, et elle
+     s'accumulait à chaque exécution. */
   await client.query(`delete from documents where label = $1`, [HORS_DOSSIER]);
   await client.query(`delete from audit_log where action like 'piece.%'`);
   await client.query(`delete from auth_rate_limits`);
   await client.query(`delete from auth_otp_challenges`);
+  await client.query(`delete from auth_sessions`);
 };
 await purger();
 
@@ -103,6 +119,9 @@ const login = async (phone) => {
 /** Un envoi multipart fabriqué à la main : c'est ce que fait le navigateur, et
  *  c'est ce que ferait quelqu'un qui contourne le formulaire. */
 const envoyer = async (cookie, critere, nom, type, octets, label = "") => {
+  // Toute pièce déposée ici porte la marque : c'est ce qui permet à la purge
+  // de la retrouver sans emporter celles du jeu de démonstration.
+  label = label ? `${TEMOIN} ${label}` : `${TEMOIN} ${nom}`;
   const B = "----fs" + Math.random().toString(36).slice(2);
   const tete = (n, v) =>
     Buffer.from(`--${B}\r\nContent-Disposition: form-data; name="${n}"\r\n\r\n${v}\r\n`);
@@ -131,7 +150,16 @@ try {
   const cookie = await login("70000005");   // le directeur : c'est son dossier
   const { rows: cr } = await client.query(
     `select id, code from category_criteria order by code`);
-  const BATI = cr.find((x) => x.code === "BATI");
+  /* LE CRITÈRE D'ÉPREUVE EST CHOISI VIDE.
+   *
+   * Ce test travaillait sur BATI, auquel la démonstration attache déjà une
+   * pièce — et il ne s'en apercevait pas parce que sa propre purge effaçait
+   * cette pièce au démarrage. Les assertions « le compte est zéro », « il n'y
+   * en a qu'un », « le critère redevient sans pièce » ne tenaient donc que
+   * grâce à l'érosion de la fixture. On prend un critère que la démonstration
+   * laisse vide : les mêmes assertions deviennent vraies pour la bonne
+   * raison, et la pièce de démonstration reste en place. */
+  const VIDE = cr.find((x) => x.code === "STAB");
   const INFO = cr.find((x) => x.code === "INFO");
 
   /* === 1. Le défaut exact ================================================ */
@@ -139,28 +167,28 @@ try {
   const avecTexte = await fetch(`${BASE}/categorisation`, { method: "POST",
     headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
-      [`p_${BATI.id}`]: "8", [`e_${BATI.id}`]: "evidence/bati.pdf" }).toString() });
+      [`p_${VIDE.id}`]: "8", [`e_${VIDE.id}`]: "evidence/stab.pdf" }).toString() });
   const apresTexte = await avecTexte.text();
   check("la description est bien enregistrée",
     (await client.query(`select evidence_key from category_criteria where id = $1`,
-      [BATI.id])).rows[0].evidence_key === "evidence/bati.pdf");
+      [VIDE.id])).rows[0].evidence_key === "evidence/stab.pdf");
   check("MAIS LE CRITÈRE RESTE « SANS PIÈCE »",
-    /BATI[\s\S]{0,3000}?sans pièce/.test(apresTexte),
+    /STAB[\s\S]{0,3000}?sans pièce/.test(apresTexte),
     "avant, taper ce texte suffisait à le rendre « justifié »");
-  check("et le compte de pièces est toujours zéro", (await compte(BATI.id)) === 0);
+  check("et le compte de pièces est toujours zéro", (await compte(VIDE.id)) === 0);
 
   console.log("\nJoindre un vrai document, en revanche, le justifie");
-  const depot = await envoyer(cookie, BATI.id, "bati.pdf", "application/pdf", PDF,
+  const depot = await envoyer(cookie, VIDE.id, "stab.pdf", "application/pdf", PDF,
     "Photo du bâtiment principal");
   check("le dépôt est accepté", depot.statut === 200);
-  check("le fichier est en base", (await compte(BATI.id)) === 1);
+  check("le fichier est en base", (await compte(VIDE.id)) === 1);
   const apresDepot = await (await fetch(`${BASE}/categorisation`, { headers: { cookie } })).text();
   check("LE CRITÈRE N'EST PLUS « SANS PIÈCE »",
-    !/BATI[\s\S]{0,3000}?sans pièce/.test(apresDepot));
+    !/STAB[\s\S]{0,3000}?sans pièce/.test(apresDepot));
 
   /* Un envoi partiel n'efface pas le reste du dossier.
    *
-   * Défaut trouvé parce que le POST ci-dessus ne portait QUE le critère BATI :
+   * Défaut trouvé parce que le POST ci-dessus ne portait QUE le critère d'épreuve :
    * les douze autres se sont retrouvés à null. `saveDossier` lisait
    * `form.get()`, qui ne distingue pas une case vidée d'une case absente de
    * l'envoi, et traitait donc « non soumis » comme « efface ». Le dossier qui
@@ -243,14 +271,14 @@ try {
     "sans réutilisation, ce test ne prouverait rien");
   agent.destroy();
 
-  const doublon = await envoyer(cookie, BATI.id, "copie.pdf", "application/pdf", PDF);
+  const doublon = await envoyer(cookie, VIDE.id, "copie.pdf", "application/pdf", PDF);
   check("le même fichier joint deux fois est refusé", /déjà joint/.test(doublon.corps));
-  check("et il n'y en a toujours qu'un", (await compte(BATI.id)) === 1);
+  check("et il n'y en a toujours qu'un", (await compte(VIDE.id)) === 1);
 
   /* === 3. Le téléchargement ============================================== */
   console.log("\nLe téléchargement ne s'affiche jamais dans le navigateur");
   const { rows: d1 } = await client.query(
-    `select id, sha256 from documents where category_criterion_id = $1`, [BATI.id]);
+    `select id, sha256 from documents where category_criterion_id = $1`, [VIDE.id]);
   const tel = await fetch(`${BASE}/categorisation/piece?id=${d1[0].id}`,
     { headers: { cookie } });
   const recu = Buffer.from(await tel.arrayBuffer());
@@ -312,7 +340,7 @@ try {
     body: new URLSearchParams({ id: d1[0].id }).toString() });
   const ditRetrait = await retrait.text();
   check("le retrait est confirmé", /retiré/.test(ditRetrait));
-  check("le critère redevient « sans pièce »", (await compte(BATI.id)) === 0);
+  check("le critère redevient « sans pièce »", (await compte(VIDE.id)) === 0);
   const { rows: arch } = await client.query(
     `select status, octet_length(content) as n from documents where id = $1`, [d1[0].id]);
   check("MAIS LA LIGNE EXISTE TOUJOURS, ARCHIVÉE", arch[0]?.status === "archive",

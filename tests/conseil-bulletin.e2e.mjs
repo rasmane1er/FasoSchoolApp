@@ -74,6 +74,7 @@ const purger = async () => {
     [CLASSE.id, ppDepart[0].professeur_principal_id]);
   await client.query(`delete from auth_rate_limits`);
   await client.query(`delete from auth_otp_challenges`);
+  await client.query(`delete from auth_sessions`);
   await client.query(`delete from audit_log where action = 'classe.professeur_principal'`);
 };
 await purger();
