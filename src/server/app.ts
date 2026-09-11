@@ -597,7 +597,8 @@ async function saveNotes(
   return { saved, refuses };
 }
 
-async function bulletinsPage(user: SessionUser, url: URL, flash?: string): Promise<string> {
+async function bulletinsPage(user: SessionUser, url: URL, flash?: string,
+                             refus?: string, forcable = false): Promise<string> {
   const schoolId = user.schoolId!;
   const period = await currentPeriod(schoolId);
   const chrome = await chromeFor(user, "bulletins", period ? `Trimestre ${period.sequence}` : undefined);
@@ -669,6 +670,7 @@ async function bulletinsPage(user: SessionUser, url: URL, flash?: string): Promi
       </div>${selector}</div>
 
     ${flash ? `<div class="note good">${esc(flash)}</div>` : ""}
+    ${refus ? `<div class="note bad">${esc(refus)}</div>` : ""}
     ${warn.length ? `<div class="note warn"><b>Règles à confirmer avec le censeur.</b><br>${warn.map(esc).join("<br>")}</div>` : ""}
 
     ${divergents.length ? `<div class="note bad">
@@ -687,6 +689,12 @@ async function bulletinsPage(user: SessionUser, url: URL, flash?: string): Promi
 
     ${can(user, "publier_bulletins") ? `<div class="card"><div class="body row">
       <form method="post" action="/bulletins/publier?classe=${esc(classId)}" style="margin:0">
+        ${refus && forcable ? `<label style="display:flex;align-items:center;gap:7px;
+            text-transform:none;letter-spacing:0;font-size:13.5px;color:var(--ink);
+            margin-bottom:8px">
+            <input type="checkbox" name="forcer" value="1" style="width:auto;height:auto">
+            Publier quand même — le bulletin dira sur quoi il a été calculé
+          </label>` : ""}
         <button type="submit" class="btn">${
           fige.size > 0 ? "Republier les bulletins" : "Publier les bulletins"}</button>
       </form>
@@ -1649,7 +1657,13 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       const period = await currentPeriod(user.schoolId);
       const classe = url.searchParams.get("classe") ?? "";
       if (!period || !classe) return redirect(res, "/bulletins");
-      const out = await publishClass(user, classe, period.term_id);
+      const form = await formBody(req);
+      const out = await publishClass(user, classe, period.term_id,
+        form.get("forcer") === "1");
+      if (out.error) {
+        return html(res, await bulletinsPage(user, url, undefined, out.error,
+          out.forcable === true));
+      }
       return html(res, await bulletinsPage(user, url,
         `${plural(out.publies + out.republies, "bulletin figé", "bulletins figés")}`
         + `${out.republies ? ` (dont ${out.republies} remplacés)` : ""}.`));

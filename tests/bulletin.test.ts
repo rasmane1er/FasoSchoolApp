@@ -151,10 +151,10 @@ test("mentions : bornes exactes", () => {
 
 test("classement : ex aequo en 1, 2, 2, 4", () => {
   const rs: StudentResult[] = [
-    { studentId: "a", subjects: [], moyenneGenerale: 18, totalPoints: 0, totalCoefficients: 0, mention: null, rang: null, effectif: 0 },
-    { studentId: "b", subjects: [], moyenneGenerale: 15, totalPoints: 0, totalCoefficients: 0, mention: null, rang: null, effectif: 0 },
-    { studentId: "c", subjects: [], moyenneGenerale: 15, totalPoints: 0, totalCoefficients: 0, mention: null, rang: null, effectif: 0 },
-    { studentId: "d", subjects: [], moyenneGenerale: 11, totalPoints: 0, totalCoefficients: 0, mention: null, rang: null, effectif: 0 },
+    { studentId: "a", subjects: [], moyenneGenerale: 18, totalPoints: 0, totalCoefficients: 0, totalCoefficientsAttendus: 0, matieresSansNote: [], mention: null, rang: null, effectif: 0 },
+    { studentId: "b", subjects: [], moyenneGenerale: 15, totalPoints: 0, totalCoefficients: 0, totalCoefficientsAttendus: 0, matieresSansNote: [], mention: null, rang: null, effectif: 0 },
+    { studentId: "c", subjects: [], moyenneGenerale: 15, totalPoints: 0, totalCoefficients: 0, totalCoefficientsAttendus: 0, matieresSansNote: [], mention: null, rang: null, effectif: 0 },
+    { studentId: "d", subjects: [], moyenneGenerale: 11, totalPoints: 0, totalCoefficients: 0, totalCoefficientsAttendus: 0, matieresSansNote: [], mention: null, rang: null, effectif: 0 },
   ];
   assignRanks(rs, policy);
   assert.equal(rs.find((r) => r.studentId === "a")!.rang, 1);
@@ -166,10 +166,10 @@ test("classement : ex aequo en 1, 2, 2, 4", () => {
 test("classement dense : 1, 2, 2, 3", () => {
   const dense = { ...policy, rankTiePolicy: "same_rank_dense" as const };
   const rs: StudentResult[] = [
-    { studentId: "a", subjects: [], moyenneGenerale: 18, totalPoints: 0, totalCoefficients: 0, mention: null, rang: null, effectif: 0 },
-    { studentId: "b", subjects: [], moyenneGenerale: 15, totalPoints: 0, totalCoefficients: 0, mention: null, rang: null, effectif: 0 },
-    { studentId: "c", subjects: [], moyenneGenerale: 15, totalPoints: 0, totalCoefficients: 0, mention: null, rang: null, effectif: 0 },
-    { studentId: "d", subjects: [], moyenneGenerale: 11, totalPoints: 0, totalCoefficients: 0, mention: null, rang: null, effectif: 0 },
+    { studentId: "a", subjects: [], moyenneGenerale: 18, totalPoints: 0, totalCoefficients: 0, totalCoefficientsAttendus: 0, matieresSansNote: [], mention: null, rang: null, effectif: 0 },
+    { studentId: "b", subjects: [], moyenneGenerale: 15, totalPoints: 0, totalCoefficients: 0, totalCoefficientsAttendus: 0, matieresSansNote: [], mention: null, rang: null, effectif: 0 },
+    { studentId: "c", subjects: [], moyenneGenerale: 15, totalPoints: 0, totalCoefficients: 0, totalCoefficientsAttendus: 0, matieresSansNote: [], mention: null, rang: null, effectif: 0 },
+    { studentId: "d", subjects: [], moyenneGenerale: 11, totalPoints: 0, totalCoefficients: 0, totalCoefficientsAttendus: 0, matieresSansNote: [], mention: null, rang: null, effectif: 0 },
   ];
   assignRanks(rs, dense);
   assert.equal(rs.find((r) => r.studentId === "d")!.rang, 3);
@@ -177,8 +177,8 @@ test("classement dense : 1, 2, 2, 3", () => {
 
 test("élève sans moyenne : non classé, pas dernier", () => {
   const rs: StudentResult[] = [
-    { studentId: "a", subjects: [], moyenneGenerale: 12, totalPoints: 0, totalCoefficients: 0, mention: null, rang: null, effectif: 0 },
-    { studentId: "b", subjects: [], moyenneGenerale: null, totalPoints: 0, totalCoefficients: 0, mention: null, rang: null, effectif: 0 },
+    { studentId: "a", subjects: [], moyenneGenerale: 12, totalPoints: 0, totalCoefficients: 0, totalCoefficientsAttendus: 0, matieresSansNote: [], mention: null, rang: null, effectif: 0 },
+    { studentId: "b", subjects: [], moyenneGenerale: null, totalPoints: 0, totalCoefficients: 0, totalCoefficientsAttendus: 0, matieresSansNote: [], mention: null, rang: null, effectif: 0 },
   ];
   assignRanks(rs, policy);
   assert.equal(rs[0]!.rang, 1);

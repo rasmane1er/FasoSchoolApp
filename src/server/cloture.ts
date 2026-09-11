@@ -139,7 +139,13 @@ export async function publishedFor(schoolId: string, studentId: string, termId: 
   });
 }
 
-export interface PublishOutcome { publies: number; republies: number }
+export interface PublishOutcome {
+  publies: number; republies: number;
+  /** Motif du refus, le cas échéant. Rien n'a alors été figé. */
+  error?: string;
+  /** Vrai quand cocher « publier quand même » lèverait le refus. */
+  forcable?: boolean;
+}
 
 /**
  * Prévenir les familles qu'un bulletin est disponible.
@@ -285,7 +291,7 @@ export async function previenirFamilles(
  * connaissance de l'écart que l'écran lui a montré.
  */
 export async function publishClass(
-  user: SessionUser, classId: string, termId: string,
+  user: SessionUser, classId: string, termId: string, forcer = false,
 ): Promise<PublishOutcome> {
   const schoolId = user.schoolId!;
   const inputs = await loadBulletinInputs(schoolId, classId, termId);
@@ -296,6 +302,40 @@ export async function publishClass(
     policy: inputs.policy,
     mentionBands: inputs.mentionBands,
   });
+
+  /* PUBLIER, C'EST FIGER. On ne fige pas un calcul incomplet sans le dire.
+   *
+   * Une discipline sans aucune note sort du calcul — ni au numérateur ni au
+   * dénominateur. La règle est juste : une matière non notée ne vaut pas zéro.
+   * Mais la moyenne générale est alors calculée sur une PARTIE du programme,
+   * et le rang compare des élèves notés sur des ensembles de matières
+   * différents. Rien ne le disait, et la publication rendait le tout définitif
+   * sur le papier remis aux familles.
+   *
+   * Le cas n'a rien d'exotique : il suffit qu'un enseignant n'ait pas fini sa
+   * saisie le jour du conseil. D'où un refus — forçable, parce qu'un
+   * établissement peut légitimement publier sans une matière dont
+   * l'enseignant est parti, et le bulletin le dira alors lui-même. */
+  const incomplets = klass.students.filter(
+    (st) => st.totalCoefficients < st.totalCoefficientsAttendus);
+
+  if (incomplets.length > 0 && !forcer) {
+    const manquantes = new Set<string>();
+    for (const st of incomplets) for (const m of st.matieresSansNote) manquantes.add(m);
+    const noms = inputs.subjects
+      .filter((sub) => manquantes.has(sub.id)).map((sub) => sub.label);
+    return {
+      publies: 0, republies: 0, forcable: true,
+      error: `${incomplets.length} bulletin${incomplets.length > 1 ? "s" : ""} `
+        + `sur ${klass.students.length} ${incomplets.length > 1 ? "sont" : "est"} `
+        + `incomplet${incomplets.length > 1 ? "s" : ""} : `
+        + `${noms.slice(0, 4).join(", ")}${noms.length > 4 ? "…" : ""} `
+        + `${noms.length > 1 ? "n'ont" : "n'a"} aucune note. La moyenne `
+        + `générale serait calculée sur une partie du programme, et le rang `
+        + `comparerait des élèves notés sur des matières différentes. Rien `
+        + `n'a été publié.`,
+    };
+  }
 
   return withSchool(schoolId, async (c) => {
     const staff = await c.query(
@@ -348,9 +388,10 @@ export async function publishClass(
             coefficient_set_id, moyenne_generale, total_points, total_coefficients,
             rang, effectif, moyenne_de_classe, mention, absences_count,
             retards_count, appreciation_generale, decision_conseil,
-            professeur_principal, status, published_at, published_by, computed_at)
+            professeur_principal, total_coefficients_attendus,
+            status, published_at, published_by, computed_at)
          values (current_school_id(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-                 $11, $12, $13, $14, $16, $17, $18, 'publie', now(), $15, now())
+                 $11, $12, $13, $14, $16, $17, $18, $19, 'publie', now(), $15, now())
          on conflict (student_id, term_id) do update set
            class_id = excluded.class_id,
            grading_policy_id = excluded.grading_policy_id,
@@ -366,6 +407,7 @@ export async function publishClass(
            appreciation_generale = excluded.appreciation_generale,
            decision_conseil = excluded.decision_conseil,
            professeur_principal = excluded.professeur_principal,
+           total_coefficients_attendus = excluded.total_coefficients_attendus,
            status = 'publie', published_at = now(),
            published_by = excluded.published_by, computed_at = now()
          returning id, (xmax = 0) as cree`,
@@ -375,7 +417,7 @@ export async function publishClass(
          abs.justified + abs.unjustified, abs.late, staffId,
          conseil.get(st.studentId)?.appreciation ?? null,
          conseil.get(st.studentId)?.decision ?? null,
-         pp]);
+         pp, st.totalCoefficientsAttendus]);
 
       const bulletinId = b.rows[0].id as string;
       if (b.rows[0].cree) out.publies += 1; else out.republies += 1;
@@ -472,6 +514,7 @@ export async function frozenClassResult(
       points: number | null; gradesCounted: number; rangMatiere: number | null;
     }>;
     moyenneGenerale: number | null; totalPoints: number; totalCoefficients: number;
+    totalCoefficientsAttendus: number; matieresSansNote: string[];
     mention: string | null; rang: number | null; effectif: number;
   }>;
   moyenneDeClasse: number | null;
@@ -481,6 +524,7 @@ export async function frozenClassResult(
   return withSchool(schoolId, async (c) => {
     const b = await c.query(
       `select id, student_id, moyenne_generale, total_points, total_coefficients,
+              total_coefficients_attendus,
               rang, effectif, moyenne_de_classe, mention, published_at
          from bulletins
         where class_id = $1 and term_id = $2 and status = 'publie'
@@ -521,6 +565,15 @@ export async function frozenClassResult(
         moyenneGenerale: r.moyenne_generale === null ? null : Number(r.moyenne_generale),
         totalPoints: Number(r.total_points ?? 0),
         totalCoefficients: Number(r.total_coefficients ?? 0),
+        /* `null` se lit « on ne sait pas » : un bulletin publié avant la
+           migration 0015 ne porte pas ce nombre, et on ne l'invente pas. On
+           retombe sur les coefficients retenus, ce qui rend l'écart nul et
+           n'annonce donc rien de faux. */
+        totalCoefficientsAttendus: Number(
+          r.total_coefficients_attendus ?? r.total_coefficients ?? 0),
+        matieresSansNote: (parBulletin.get(r.id) ?? [])
+          .filter((l: any) => l.moyenne_matiere === null)
+          .map((l: any) => l.subject_id),
         mention: r.mention,
         rang: r.rang,
         effectif: r.effectif ?? b.rowCount,

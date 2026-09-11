@@ -69,7 +69,24 @@ export interface StudentResult {
   subjects: SubjectResult[];
   moyenneGenerale: number | null;
   totalPoints: number;
+  /** Les coefficients RETENUS : ceux des disciplines qui avaient une moyenne. */
   totalCoefficients: number;
+  /**
+   * Les coefficients ATTENDUS : ceux de toutes les disciplines de la classe.
+   *
+   * Une discipline sans aucune note sortait du calcul en silence — ni au
+   * numérateur, ni au dénominateur. Le bulletin imprimait alors une moyenne
+   * parfaitement plausible, calculée sur douze coefficients au lieu de
+   * quatorze, et un rang qui comparait des élèves notés sur des ensembles de
+   * matières DIFFÉRENTS. Rien ne le disait.
+   *
+   * Garder les deux nombres permet à l'écran, au bulletin et à la publication
+   * de voir l'écart. La règle de calcul, elle, ne change pas : une discipline
+   * non notée ne vaut pas zéro.
+   */
+  totalCoefficientsAttendus: number;
+  /** Disciplines de la classe sans aucune moyenne pour cet élève. */
+  matieresSansNote: string[];
   mention: string | null;
   rang: number | null;
   effectif: number;
@@ -345,12 +362,22 @@ export function computeClassBulletins(input: {
 
     const general = computeGeneralAverage(subjects, policy);
 
+    /* Ce que le calcul a laissé de côté. On ne le corrige pas — une discipline
+       non notée ne vaut pas zéro — mais on cesse de le taire. */
+    let attendus = 0;
+    for (const [, coefficient] of coefficients) attendus += coefficient;
+    const matieresSansNote = subjects
+      .filter((x) => x.moyenne === null)
+      .map((x) => x.subjectId);
+
     return {
       studentId,
       subjects,
       moyenneGenerale: general.moyenne,
       totalPoints: general.totalPoints,
       totalCoefficients: general.totalCoefficients,
+      totalCoefficientsAttendus: attendus,
+      matieresSansNote,
       mention: findMention(general.moyenne, mentionBands),
       rang: null,
       effectif: 0,

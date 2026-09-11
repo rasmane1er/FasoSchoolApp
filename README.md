@@ -793,6 +793,45 @@ saisit quarante notes, le réseau tombe, tout est perdu. Ici :
 4. Sans JavaScript, le formulaire se poste normalement. Le hors-ligne est une
    amélioration, jamais une dépendance.
 
+### Un bulletin doit dire sur quoi il a été calculé
+
+Une discipline sans **aucune** note sortait du calcul de la moyenne générale —
+ni au numérateur, ni au dénominateur :
+
+```js
+if (s.moyenne === null) continue;
+```
+
+La règle est **juste** : une matière non notée ne vaut pas zéro, et la
+neutraliser est ce qu'il faut faire. Ce qui manquait, c'est de le **dire**.
+
+Conséquences, toutes invisibles :
+
+- le bulletin imprimait une moyenne parfaitement plausible, calculée sur une
+  partie du programme ;
+- le **rang** comparait des élèves notés sur des ensembles de matières
+  différents — un élève à qui il manque les mathématiques, coefficient 3, était
+  classé contre des camarades qui les avaient ;
+- et rien n'empêchait de publier. La publication **fige** : le papier remis aux
+  familles portait ce rang-là.
+
+Le cas n'a rien d'exotique : il suffit qu'un enseignant n'ait pas fini sa saisie
+le jour du conseil, ou qu'il ait quitté l'établissement en cours de trimestre.
+
+La publication **refuse** désormais une classe incomplète, en nommant les
+disciplines vides — refus forçable, parce qu'un établissement peut légitimement
+publier sans une matière dont l'enseignant est parti. Et s'il force, **le
+bulletin le dit lui-même** : « Moyenne calculée sur 26 coefficients sur 28.
+Anglais n'a aucune note ce trimestre. Une discipline non notée ne compte pas
+zéro — elle est écartée du calcul. Le rang est donc établi sur un programme
+partiel. » Le total attendu est figé à côté du total retenu, pour que le double
+ressorti en juin dise la même chose.
+
+`npm run test:bulletin-complet` — 21 assertions, dont la plus importante : la
+moyenne obtenue est bien celle des matières **notées**, et **pas** celle qu'on
+obtiendrait en comptant un zéro. La règle n'a pas changé ; c'est le silence qui
+a disparu.
+
 ### Deux gardes sur les envois en masse
 
 Trouvé en éprouvant l'envoi : **le même communiqué, envoyé deux fois de suite,

@@ -173,6 +173,21 @@ function sheet(
       </div>
     </div>
 
+    ${result.totalCoefficients < result.totalCoefficientsAttendus ? `
+    <div style="margin-top:9px;border:1px solid #A8402A;background:#FCF3F0;
+                padding:7px 10px;font-size:8pt;line-height:1.4">
+      <b>Moyenne calculée sur ${fr(result.totalCoefficients, 0)} coefficients
+      sur ${fr(result.totalCoefficientsAttendus, 0)}.</b>
+      ${result.matieresSansNote.length === 1 ? "Une discipline n'a" :
+        `${result.matieresSansNote.length} disciplines n'ont`} aucune note ce
+      trimestre${result.matieresSansNote.length
+        ? " : " + result.matieresSansNote
+            .map((id) => esc(subjectById.get(id)?.label ?? "?")).join(", ")
+        : ""}.
+      Une discipline non notée ne compte pas zéro — elle est écartée du calcul.
+      Le rang est donc établi sur un programme partiel.
+    </div>` : ""}
+
     <div style="display:grid;grid-template-columns:.85fr 1.6fr;gap:11px;margin-top:11px">
       <div class="box">
         <div style="font-size:7pt;letter-spacing:.06em;text-transform:uppercase;color:#6B6F80;margin-bottom:6px">Assiduité</div>
