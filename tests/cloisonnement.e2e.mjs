@@ -53,7 +53,7 @@ const MIGRATIONS = [
   "0004_message_suivi", "0005_personnel", "0006_annulation_paiement",
   "0007_discipline", "0008_justifications", "0009_auth_sessions_rls",
   "0010_calendrier", "0011_pieces_justificatives",
-  "0012_bulletin_conseil",
+  "0012_bulletin_conseil", "0013_examens",
 ];
 
 const BASE_SANS_0009 = `fasoschool_sans_0009_${process.pid}`;

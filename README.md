@@ -793,6 +793,42 @@ saisit quarante notes, le réseau tombe, tout est perdu. Ici :
 4. Sans JavaScript, le formulaire se poste normalement. Le hors-ligne est une
    amélioration, jamais une dépendance.
 
+### Les résultats aux examens, et les chiffres du dossier
+
+`students.cep_result` et `students.concours_6e_result` étaient dans le schéma
+depuis la première migration, avec leurs contraintes de valeur. **Aucune ligne
+de code ne les lisait ni ne les écrivait**, et aucun écran ne permettait de les
+renseigner.
+
+Ce n'est pas un détail. « Résultats aux examens » est le critère le plus lourd
+de la moitié qualité de l'arrêté n°2026-101 — celle qui décide du plafond légal
+des frais. C'est aussi l'argument central pour lequel un établissement achète un
+logiciel plutôt qu'un tableur : **la grille réclame des chiffres qu'un système
+de gestion produit comme sous-produit**, et qu'une école sans système rassemble
+à la main chaque année. Un logiciel qui ne sait pas dire son taux de réussite
+au BEPC ne soutient pas l'argument qui le vend.
+
+Ajouté : le BEPC et le BAC (les deux colonnes existantes ne couvraient que la
+fin du primaire — l'établissement de démonstration est un collège, qui ne passe
+ni CEP ni concours d'entrée en 6e), un écran de saisie, et un panneau
+« Ce que le logiciel établit déjà » sur le dossier de catégorisation.
+
+**« Non présenté » n'est pas « refusé ».** Le dénominateur du taux est le nombre
+de *présentés*. Confondre les deux ferait baisser un chiffre qui part au
+ministère : dans le cas éprouvé par le test, 66,7 % deviendrait 50 %. Le calcul
+vit dans `taux_reussite()`, une seule définition que l'écran, le dossier et les
+tests lisent tous — trois copies d'un même calcul finissent par diverger, et
+celle qui part au ministère est celle qu'on ne relit pas.
+
+**Le logiciel n'attribue aucun point.** Il établit le chiffre et nomme le
+critère auquel il se rapporte. La grille de l'arrêté n'a pas pu être obtenue ;
+la deviner conduirait un établissement à facturer un montant illégal — c'est la
+même règle que pour la catégorie et le plafond.
+
+`npm run test:examens` — 20 assertions. Elle fabrique une 3e (la démonstration
+n'a pas de classe d'examen), pose les deux calculs côte à côte, et vérifie que
+le dossier affiche le taux **et** dit qu'il refuse de le noter.
+
 ### Ce que le conseil de classe décide, et que le bulletin n'imprimait pas
 
 L'écran du conseil fait saisir, élève par élève, une **décision** et une

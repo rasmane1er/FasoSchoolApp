@@ -50,6 +50,7 @@ import { elevePage, elevesPage, corrigerIdentite, enregistrerTuteur,
          retirerTuteur, enregistrerUrgence, retirerUrgence } from "./eleve.ts";
 import { disciplinePage, consigner, retirer as retirerIncident } from "./discipline.ts";
 import { justificationsPage, decider as deciderJustification } from "./justifications.ts";
+import { examensPage, enregistrer as enregistrerExamens } from "./examens.ts";
 import { calendrierPage, ajouter as ajouterPeriode,
          retirer as retirerPeriode, changerSemaine,
          jourEcole, dateValide } from "./calendrier.ts";
@@ -1441,6 +1442,21 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
         if (out.classId) retour.searchParams.set("classe", out.classId);
         return html(res, await justificationsPage(user, chrome, retour,
           out.flash, out.error));
+      }
+    }
+
+    /* --- Résultats aux examens --------------------------------------------
+     *
+     * Le censeur les enregistre : ils viennent de la liste publiée par le
+     * ministère, pas d'une saisie d'enseignant. Ce sont aussi les chiffres que
+     * réclame la moitié qualité du dossier de catégorisation. */
+    if (path === "/examens") {
+      if (!can(user, "publier_bulletins")) return html(res, "Accès refusé.", 403);
+      const chrome = await chromeFor(user, "examens");
+      if (req.method === "GET") return html(res, await examensPage(user, chrome));
+      if (req.method === "POST") {
+        const r = await enregistrerExamens(user, await formBody(req));
+        return html(res, await examensPage(user, chrome, r.flash, r.error));
       }
     }
 

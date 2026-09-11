@@ -29,6 +29,7 @@ import { withSchool } from "../lib/db.ts";
 import { page, esc, fcfa, plural, type PageChrome } from "./html.ts";
 import type { SessionUser } from "./session.ts";
 import { piecesParCritere, blocPieces, TYPES_ACCEPTES } from "./pieces.ts";
+import { loadExamens } from "./examens.ts";
 
 export const AXES = [
   ["investissement", "Investissement"],
@@ -266,6 +267,26 @@ export async function categorisationPage(
   const s = scores(d.criteria);
   const pieces = await piecesParCritere(user.schoolId!);
 
+  /* LES CHIFFRES QUE LE LOGICIEL ÉTABLIT DÉJÀ.
+   *
+   * C'est l'argument central pour lequel un établissement achète un système de
+   * gestion plutôt qu'un tableur : la moitié qualité de la grille réclame des
+   * chiffres qu'un système produit comme sous-produit — effectifs par classe,
+   * résultats aux examens — et qu'une école sans système rassemble à la main
+   * chaque année.
+   *
+   * LE LOGICIEL NE LES NOTE PAS. Il les établit et dit à quel critère ils se
+   * rapportent. La grille de l'arrêté n'a pas pu être obtenue ; convertir un
+   * taux en points serait inventer le barème dont dépend ce qu'une école a le
+   * droit de facturer. */
+  const examens = await loadExamens(user.schoolId!);
+  const effectifs = await withSchool(user.schoolId!, async (c) => {
+    if (!examens.annee) return [];
+    return (await c.query(
+      `select classe, effectif from effectifs_par_classe($1)`,
+      [examens.annee.id])).rows as Array<{ classe: string; effectif: number }>;
+  });
+
   const tile = (v: string, k: string, n: string) =>
     `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div>
        <div class="n">${n}</div></div>`;
@@ -313,6 +334,44 @@ export async function categorisationPage(
     </div>`;
   };
 
+  const nb = effectifs.map((e) => Number(e.effectif));
+  const chiffres = `
+<div class="card" style="margin-bottom:18px">
+  <header><b>Ce que le logiciel établit déjà</b>
+    <span style="color:var(--muted);font-size:13px">chiffres, pas points</span></header>
+  <div class="body">
+    <p class="hint" style="margin:0 0 12px">La moitié « qualité » de la grille
+    réclame des chiffres qu'un établissement sans logiciel recompte à la main
+    chaque année. Les voici, tirés de vos propres données. <b>Le logiciel ne
+    les convertit pas en points</b> : la grille de l'arrêté n'a pas pu être
+    obtenue, et l'inventer conduirait à facturer un montant illégal.</p>
+
+    <div class="tiles">
+      ${nb.length ? `<div class="tile">
+        <div class="k">Effectif par classe</div>
+        <div class="v">${Math.min(...nb)}&ndash;${Math.max(...nb)}</div>
+        <div class="n">${plural(nb.length, "classe")} ·
+          moyenne ${Math.round(nb.reduce((a, b) => a + b, 0) / nb.length)}
+          · critère « Effectifs par classe »</div>
+      </div>` : ""}
+      ${examens.taux.map((t) => `<div class="tile">
+        <div class="k">${esc(t.label)}</div>
+        <div class="v">${t.taux === null ? "—" : `${String(t.taux).replace(".", ",")}&nbsp;%`}</div>
+        <div class="n">${t.presentes === 0
+          ? `<a href="/examens">à saisir</a>`
+          : `${t.admis} admis sur ${t.presentes} présentés`}
+          · critère « Résultats aux examens »</div>
+      </div>`).join("")}
+    </div>
+
+    ${examens.taux.some((t) => t.presentes === 0) ? `<div class="note warn"
+      style="margin-top:14px">Des résultats d'examen ne sont pas saisis. Tant
+      qu'ils manquent, le critère le plus lourd de l'axe qualité n'a aucun
+      chiffre à l'appui — <a href="/examens">les saisir</a>.</div>` : ""}
+  </div>
+</div>
+`;
+
   const body = `
 <div>
   <h1>Dossier de catégorisation</h1>
@@ -322,6 +381,7 @@ export async function categorisationPage(
 
 ${error ? `<div class="note bad">${esc(error)}</div>` : ""}
 ${flash ? `<div class="note good">${esc(flash)}</div>` : ""}
+${chiffres}
 
 <div class="tiles">
   ${tile(`${s.total}`, "Score total", "sur 100 points")}
