@@ -793,6 +793,53 @@ saisit quarante notes, le réseau tombe, tout est perdu. Ici :
 4. Sans JavaScript, le formulaire se poste normalement. Le hors-ligne est une
    amélioration, jamais une dépendance.
 
+### « Signalé quatre fois sans que rien n'ait été fait »
+
+L'en-tête de `discipline.ts` porte cette phrase depuis le premier jour, et
+l'écran la répète au directeur en sous-titre :
+
+> Une description est obligatoire, une sanction ne l'est pas. Beaucoup de faits
+> se consignent sans être punis, et c'est précisément ce registre qui permet de
+> dire, **au conseil**, qu'un élève a été signalé quatre fois sans qu'on ait
+> jamais rien fait.
+
+Éprouvée, elle était fausse des deux côtés.
+
+**Au conseil de classe**, la requête ne comptait que deux choses : le nombre de
+faits, et le nombre d'exclusions. Deux élèves du jeu de démonstration, quatre
+faits chacun — l'un jamais puni, l'autre convoqué quatre fois — affichaient
+tous deux `4`, et rien d'autre. Le conseil décidait de leur passage sur ce
+chiffre-là.
+
+**Au registre**, cent vingt lignes chronologiques et aucun total par élève :
+pour voir qu'un nom revient quatre fois, il fallait le compter à la main sur
+une page entière.
+
+**Et le sens est opposé.** « Quatre faits, quatre convocations » dit que
+l'établissement a réagi et que la situation a persisté. « Quatre faits, aucune
+suite » dit qu'il a été prévenu quatre fois et n'a rien fait : c'est une phrase
+sur l'**école**, pas sur l'enfant. Le même `4` les confondait, au moment précis
+où l'on décide de l'année de cet enfant.
+
+Ce qui change :
+
+* le conseil compte un troisième nombre — les faits restés **sans aucune
+  suite** — et l'affiche : « aucune suite donnée », ou « dont *n* sans suite » ;
+* la mention n'est **pas** en laterite, et le choix est délibéré : une pastille
+  rouge ferait lire « quatre fautes impunies » là où il faut lire « l'école a
+  été prévenue quatre fois ». Elle est en gris, du côté de l'établissement ;
+* le registre ouvre sur **« Ce qui revient »** — un élève par ligne, ses faits,
+  et ce qu'on en a fait : *toutes*, *aucune*, ou *n sur m*. Trié par ce qui est
+  resté sans suite, parce que c'est là que l'établissement doit se prononcer ;
+* un fait **retiré** ne compte dans aucun des deux — la règle du registre vaut
+  ici aussi : il reste écrit et barré, mais il ne pèse plus.
+
+Le seuil de récurrence est deux, et c'est un repère de lecture : rien ne s'y
+déclenche, aucune sanction ne s'y attache, il décide seulement de ce qui remonte
+en haut de l'écran. `tests/recurrence.e2e.mjs` : 18 assertions, dont la paire
+décisive — le conseil distingue les deux dossiers, et ne marque pas « sans
+suite » celui qui a reçu quatre convocations.
+
 ### Les tests mangeaient la démonstration
 
 Trouvé en comptant, après avoir remarqué que le jeu de démonstration n'avait
@@ -1254,7 +1301,7 @@ Comptes de démonstration — le code s'affiche à l'écran, aucun SMS n'est env
 | `70000005` | Directeur |
 
 Vérifications : `npm run check:all` — typecheck strict, 60 tests unitaires, et
-**trente-cinq parcours**, chacun contre un vrai PostgreSQL et un vrai serveur.
+**trente-six parcours**, chacun contre un vrai PostgreSQL et un vrai serveur.
 Le tableau ci-dessous en détaille une partie ; les autres sont décrits, avec ce
 qu'ils ont trouvé, dans les sections qui précèdent.
 
@@ -1272,6 +1319,7 @@ qu'ils ont trouvé, dans les sections qui précèdent.
 | `test:eleve` (35) | on retrouve un élève par le numéro de son tuteur, un tuteur partagé se corrige pour la fratrie, et voir n'est pas corriger |
 | `test:personnel` (29) | un établissement crée ses propres comptes ; le dernier chef ne peut être ni écarté ni rétrogradé ; écarter quelqu'un ferme ses sessions ouvertes |
 | `test:messages` (26) | un refus de l'opérateur est enregistré avec sa raison, remonte au tableau de bord, et ne se referme que par un geste humain tracé |
+| `test:recurrence` (18) | « quatre faits, quatre convocations » et « quatre faits, aucune suite » ne sont plus le même chiffre au conseil de classe, et le registre ouvre sur ce qui revient |
 | `test:fixture` (16) | le jeu de démonstration sort de `check:all` exactement comme il y est entré : une suite qui emporte ce qui n'est pas à elle est nommée, avec la table et le nombre |
 | `test:injoignable` (31) | un absent dont la famille n'a aucun numéro laisse une tâche nommée au lieu d'un silence, et un tuteur principal sans numéro ne masque plus un second tuteur joignable |
 | `test:evaluations` (22) | un enseignant ouvre un devoir pour sa matière ; une composition ne s'ouvre que par le censeur, et pour tout le niveau |

@@ -88,13 +88,34 @@ const jour = (d: Date | string | null): string => {
     String(t.getMonth() + 1).padStart(2, "0")}/${t.getFullYear()}`;
 };
 
+/** Un élève qui revient dans le registre, et ce qu'on en a fait. */
+export interface Recurrent {
+  studentId: string;
+  eleve: string;
+  classe: string | null;
+  faits: number;
+  sansSuite: number;
+  dernier: string;
+}
+
 export interface Registre {
   incidents: Incident[];
   classes: Array<{ id: string; label: string }>;
   eleves: Array<{ id: string; nom: string }>;
   classId: string | null;
   ouverts: number;
+  recurrents: Recurrent[];
 }
+
+/**
+ * À partir de combien de faits un élève « revient » dans le registre.
+ *
+ * Deux, parce qu'un second fait est déjà une répétition, et parce que c'est
+ * un REPÈRE DE LECTURE et non un seuil réglementaire : rien ne se déclenche à
+ * ce nombre, aucune sanction ne s'y attache, il décide seulement de ce qui
+ * remonte en haut de l'écran. Le registre lui-même reste entier en dessous.
+ */
+export const SEUIL_RECURRENCE = 2;
 
 export async function loadRegistre(
   schoolId: string, classId: string | null,
@@ -142,9 +163,43 @@ export async function loadRegistre(
         order by bi.occurred_on desc, bi.created_at desc
         limit 120`, [yearId]);
 
+    /* CE QUI REVIENT, PAR ÉLÈVE.
+     *
+     * Le registre est une liste chronologique de cent vingt lignes. Pour y
+     * voir qu'un élève a été signalé quatre fois, il faut compter des noms à
+     * la main sur une page entière — personne ne le fait. Or c'est exactement
+     * ce que l'en-tête de ce fichier dit que le registre sert à montrer, et la
+     * seule chose qu'il ne montrait pas.
+     *
+     * `sans_suite` compte les faits consignés SANS AUCUNE sanction. Ce n'est
+     * pas une charge de plus contre l'élève : c'est ce que l'établissement n'a
+     * pas fait, en face de ce qu'il a écrit. */
+    const rec = await c.query(
+      `select bi.student_id,
+              st.last_name || ' ' || st.first_names as eleve,
+              cl.label as classe,
+              count(*)::int as faits,
+              count(*) filter (where coalesce(bi.sanction, '') = '')::int as sans_suite,
+              max(bi.occurred_on) as dernier
+         from behavior_incidents bi
+         join students st on st.id = bi.student_id
+         left join enrolments e on e.student_id = st.id
+                               and e.academic_year_id = $1
+         left join classes cl on cl.id = e.class_id
+        where bi.retracted_at is null
+        group by bi.student_id, st.last_name, st.first_names, cl.label
+       having count(*) >= $2
+        order by count(*) filter (where coalesce(bi.sanction, '') = '') desc,
+                 count(*) desc, st.last_name`,
+      [yearId, SEUIL_RECURRENCE]);
+
     return {
       classes, eleves, classId: choisie,
       ouverts: r.rows.filter((x: any) => !x.retracted_at).length,
+      recurrents: rec.rows.map((x: any): Recurrent => ({
+        studentId: x.student_id, eleve: x.eleve, classe: x.classe,
+        faits: x.faits, sansSuite: x.sans_suite, dernier: jour(x.dernier),
+      })),
       incidents: r.rows.map((x: any): Incident => ({
         id: x.id, studentId: x.student_id, eleve: x.eleve, classe: x.classe,
         date: jour(x.occurred_on), description: x.description,
@@ -394,6 +449,49 @@ ${flash ? `<div class="note good">${esc(flash)}</div>` : ""}
     </p>
   </form>
 </div>
+
+${r.recurrents.length === 0 ? "" : `
+<div class="card">
+  <header><b>Ce qui revient</b> — ${plural(r.recurrents.length,
+    "élève signalé plusieurs fois", "élèves signalés plusieurs fois")}
+    cette année</header>
+  <div class="scroll"><table>
+    <thead><tr><th>Élève</th><th class="r">Faits</th><th>Suites données</th>
+      <th class="num">Dernier</th></tr></thead>
+    <tbody>${r.recurrents.map((x) => `
+      <tr>
+        <td><a href="/eleve?id=${x.studentId}">${esc(x.eleve)}</a>
+          <span class="dit">${esc(x.classe ?? "")}</span></td>
+        <td class="num r">${x.faits}</td>
+        <td>${x.sansSuite === 0
+          // Tout a reçu une suite : le dossier est celui d'une école qui a
+          // réagi. On le dit, sinon l'absence de mention se lit comme un
+          // reproche par défaut.
+          ? `<span class="pill p-ok">toutes</span>`
+          : x.sansSuite === x.faits
+            // Le cas que l'en-tête de ce fichier nomme depuis le premier jour.
+            // Pas de pastille rouge : ce n'est pas une charge contre l'élève.
+            ? `<span class="pill p-info">aucune</span>
+               <span class="dit">${x.faits} fois signalé, rien n'a été
+               décidé</span>`
+            : `<span class="pill p-info">${x.faits - x.sansSuite} sur ${
+                 x.faits}</span>
+               <span class="dit">${x.sansSuite} ${x.sansSuite > 1
+                 ? "faits sont restés" : "fait est resté"} sans suite</span>`
+        }</td>
+        <td class="num">${esc(x.dernier)}</td>
+      </tr>`).join("")}
+    </tbody>
+  </table></div>
+  <div class="body" style="padding-top:0">
+    <p class="hint">Un élève signalé quatre fois avec quatre convocations et un
+    élève signalé quatre fois sans aucune suite ne sont pas le même dossier —
+    et dans la liste chronologique ci-dessous, il fallait compter des noms à la
+    main pour les distinguer. « Aucune suite » ne dit rien de plus contre
+    l'élève : c'est ce que l'établissement n'a pas fait, écrit en face de ce
+    qu'il a consigné. Le conseil de classe voit désormais la même chose.</p>
+  </div>
+</div>`}
 
 ${r.incidents.length === 0 ? `
 <div class="note good">Le registre est vide pour cette année.</div>` : `

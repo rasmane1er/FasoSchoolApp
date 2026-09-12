@@ -67,6 +67,8 @@ export interface DeliberationRow {
   retards: number;
   incidents: number;
   sanctionsLourdes: number;
+  /** Faits consignés qui n'ont reçu AUCUNE suite. Une phrase sur l'école. */
+  faitsSansSuite: number;
 }
 
 export interface Deliberation {
@@ -135,11 +137,30 @@ export async function loadDeliberation(
         where e.class_id = $1
         group by e.student_id`, [classId]);
 
+    /* TROIS NOMBRES, PAS DEUX.
+     *
+     * `incidents` seul ment par omission. Un élève signalé quatre fois sans
+     * qu'on ait jamais rien fait et un élève signalé quatre fois avec quatre
+     * convocations des parents affichaient tous deux « 4 » — éprouvé — et le
+     * conseil décidait de leur passage sur ce chiffre-là.
+     *
+     * Or ce sont deux dossiers OPPOSÉS. « Quatre faits, quatre convocations »
+     * dit que l'établissement a réagi et que la situation a persisté. « Quatre
+     * faits, aucune suite » dit que l'établissement a été prévenu quatre fois
+     * et n'a rien fait : c'est une phrase sur l'ÉCOLE, pas sur l'enfant, et
+     * elle doit être lue comme telle au moment où l'on décide de son année.
+     *
+     * `discipline.ts` dit depuis le premier jour que c'est à cela que sert le
+     * registre : « une description est obligatoire, une sanction ne l'est pas
+     * [...] c'est précisément ce registre qui permet de dire, au conseil, qu'un
+     * élève a été signalé quatre fois sans qu'on ait jamais rien fait ». Le
+     * registre le permettait ; le conseil ne le demandait pas. */
     const conduite = await c.query(
       `select bi.student_id,
               count(*)::int as incidents,
               count(*) filter (where bi.sanction in
-                ('exclusion_temporaire','exclusion_definitive'))::int as lourdes
+                ('exclusion_temporaire','exclusion_definitive'))::int as lourdes,
+              count(*) filter (where coalesce(bi.sanction, '') = '')::int as sans_suite
          from behavior_incidents bi
          join enrolments e on e.student_id = bi.student_id
         where e.class_id = $1 and bi.retracted_at is null
@@ -219,6 +240,7 @@ export async function loadDeliberation(
       retards: Number(v?.retards ?? 0),
       incidents: Number(cd?.incidents ?? 0),
       sanctionsLourdes: Number(cd?.lourdes ?? 0),
+      faitsSansSuite: Number(cd?.sans_suite ?? 0),
     };
   }).sort((a, b) => (b.moyenneAnnuelle ?? -1) - (a.moyenneAnnuelle ?? -1));
 
@@ -405,7 +427,16 @@ export async function conseilPage(
         ? ' style="color:var(--laterite);font-weight:600"' : ""}>${r.incidents}${
         r.sanctionsLourdes > 0
           ? `<span class="dit bad">dont ${r.sanctionsLourdes} exclusion${
-              r.sanctionsLourdes > 1 ? "s" : ""}</span>` : ""}</td>`;
+              r.sanctionsLourdes > 1 ? "s" : ""}</span>` : ""}${
+        /* LE CHIFFRE SEUL NE DIT PAS DE QUOI IL EST FAIT.
+           « Sans suite » n'est PAS mis en laterite : ce n'est pas une charge
+           de plus contre l'élève, c'est le contraire. On l'écrit en gris, à sa
+           place, et on le formule du côté de l'établissement — « aucune suite
+           donnée », pas « quatre fautes impunies ». */
+        r.faitsSansSuite > 0
+          ? `<span class="dit">${r.faitsSansSuite === r.incidents
+              ? "aucune suite donnée" : `dont ${r.faitsSansSuite} sans suite`
+            }</span>` : ""}</td>`;
 
     return `<tr${r.decision ? (assidu ? ' class="warn"' : "") : ' class="warn"'}>
       <td><b>${esc(r.lastName)}</b> ${esc(r.firstNames)}
@@ -446,6 +477,15 @@ ${d.termsWithData < d.termCount ? `<div class="note bad">
   nationale dans un logiciel privé. Au-delà de ${d.seuilAbsences} absences, ou
   s'il y a eu exclusion, la ligne est mise en évidence — c'est un repère de
   lecture, pas un seuil réglementaire, et la décision reste entière.
+</div>
+
+<div class="note">
+  <b>« Sans suite » se lit du côté de l'établissement.</b> Quatre faits avec
+  quatre convocations et quatre faits sans aucune suite affichaient le même
+  « 4 ». Ce sont pourtant deux dossiers opposés : le premier dit que l'école a
+  réagi et que la situation a persisté ; le second dit qu'elle a été prévenue
+  quatre fois et n'a rien fait. La mention n'est donc pas en rouge — ce n'est
+  pas une charge de plus contre l'élève, c'est ce qui manque en face.
 </div>
 
 <div class="note warn">
