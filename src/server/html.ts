@@ -379,7 +379,11 @@ ${ENTETE_APPLICATION}
            </form>`
         : `<p style="color:var(--muted);margin:0 0 24px">Code envoyé au <span class="num">${esc(opts.phone)}</span>.</p>
            ${opts.error ? `<div class="err" style="margin-bottom:16px">${esc(opts.error)}</div>` : ""}
-           ${opts.devCode ? `<div class="note warn" style="margin-bottom:16px">Mode démonstration — code : <b class="num">${esc(opts.devCode)}</b></div>` : ""}
+           ${opts.devCode ? `<div class="note warn" style="margin-bottom:16px">
+             <b>Mode démonstration — aucun SMS n'est envoyé.</b> Ce code
+             s'affiche parce que cette installation ne sait pas en envoyer :
+             <b class="num" id="code-demo">${esc(opts.devCode)}</b>. En production il
+             arrive par SMS et n'apparaît sur aucun écran.</div>` : ""}
            <form method="post" action="/connexion/verifier">
              <input type="hidden" name="phone" value="${esc(opts.phone)}">
              <label for="code">Code à six chiffres</label>

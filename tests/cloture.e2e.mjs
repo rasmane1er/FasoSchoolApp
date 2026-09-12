@@ -76,8 +76,33 @@ await remettreEnEtat();
    précisément l'un des deux cas que cette suite éprouve. On lance donc le
    serveur AVEC, et on relancera un second serveur SANS pour vérifier le refus. */
 const ADRESSE = "https://wend-panga.example.bf";
+
+/* CETTE SUITE NE DOIT PAS DÉPENDRE DE L'HEURE QU'IL EST.
+ *
+ * Elle affirme que des messages PARTENT. Or la garde des heures de silence —
+ * 21 h → 6 h par défaut, heure de Ouagadougou — refuse les envois en masse la
+ * nuit. La suite passait donc en journée et échouait le soir, sur des
+ * assertions dont le message ne parlait pas du tout d'horaire.
+ *
+ * Une suite possède les réglages dont dépendent ses assertions. On pose une
+ * fenêtre de silence CALCULÉE pour exclure l'instant présent, et c'est
+ * PostgreSQL qui la calcule, dans le fuseau de l'école, puisque c'est lui qui
+ * l'évaluera. L'ancienne est remise à la fin. */
+const { rows: fenetreInitiale } = await client.query(
+  `select sms_quiet_from, sms_quiet_to from schools limit 1`);
+await client.query(
+  `update schools
+      set sms_quiet_from = (timezone('Africa/Ouagadougou', now())
+                            + interval '2 hours')::time,
+          sms_quiet_to   = (timezone('Africa/Ouagadougou', now())
+                            + interval '3 hours')::time`);
+const rendreLaFenetre = async () => {
+  await client.query(`update schools set sms_quiet_from = $1, sms_quiet_to = $2`,
+    [fenetreInitiale[0].sms_quiet_from, fenetreInitiale[0].sms_quiet_to]);
+};
+
 const server = spawn(process.execPath, ["--experimental-strip-types", "src/server/app.ts"], {
-  env: { ...process.env, PORT: String(PORT), FASOSCHOOL_PUBLIC_URL: ADRESSE },
+  env: { ...process.env, PORT: String(PORT), SMS_PROVIDER: "mock", FASOSCHOOL_PUBLIC_URL: ADRESSE },
   stdio: ["ignore", "pipe", "pipe"],
 });
 let stderr = ""; server.stderr.on("data", (d) => { stderr += d.toString(); });
@@ -95,7 +120,7 @@ const connecter = async (p, tel) => {
   await p.fill("#phone", tel);
   await p.click("button[type=submit]");
   await p.waitForSelector("#code");
-  await p.fill("#code", (await p.textContent(".note.warn b")).trim());
+  await p.fill("#code", (await p.textContent("#code-demo")).trim());
   await p.click("button[type=submit]");
   await p.waitForLoadState("networkidle");
 };
@@ -108,7 +133,7 @@ const connecter2 = async (p, tel, port) => {
   await p.fill("#phone", tel);
   await p.click("button[type=submit]");
   await p.waitForSelector("#code");
-  await p.fill("#code", (await p.textContent(".note.warn b")).trim());
+  await p.fill("#code", (await p.textContent("#code-demo")).trim());
   await p.click("button[type=submit]");
   await p.waitForLoadState("networkidle");
 };
@@ -159,7 +184,7 @@ try {
     if ((await parent.content()).includes("Numéro de téléphone")) {
       await parent.fill("#phone", tuteur[0].phone);
       await Promise.all([parent.waitForNavigation(), parent.click("button[type=submit]")]);
-      await parent.fill("#code", (await parent.textContent(".note b")).trim());
+      await parent.fill("#code", (await parent.textContent("#code-demo")).trim());
       await Promise.all([parent.waitForNavigation(), parent.click("button[type=submit]")]);
     }
     return parent.content();
@@ -355,6 +380,7 @@ try {
   server.kill();
   await remettreEnEtat().catch(() => {});
   await client.query(`delete from auth_rate_limits`).catch(() => {});
+  await rendreLaFenetre().catch(() => {});
   await client.end();
 }
 

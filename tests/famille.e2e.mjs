@@ -61,7 +61,7 @@ await client.query(
   `update grading_policies set source_note = 'DÉFAUT NON VÉRIFIÉ — test famille'`);
 
 const server = spawn(process.execPath, ["--experimental-strip-types", "src/server/app.ts"], {
-  env: { ...process.env, PORT: String(PORT) }, stdio: ["ignore", "pipe", "pipe"],
+  env: { ...process.env, PORT: String(PORT), SMS_PROVIDER: "mock" }, stdio: ["ignore", "pipe", "pipe"],
 });
 let stderr = ""; server.stderr.on("data", (d) => { stderr += d.toString(); });
 for (let i = 0; i < 50; i += 1) {
@@ -94,7 +94,7 @@ try {
   await page.goto(`${BASE}/famille`);
   await page.fill("#phone", tuteur.phone);
   await Promise.all([page.waitForNavigation(), page.click("button[type=submit]")]);
-  const code = (await page.textContent(".note b")).trim();
+  const code = (await page.textContent("#code-demo")).trim();
   await page.fill("#code", code);
   await Promise.all([page.waitForNavigation(), page.click("button[type=submit]")]);
 
@@ -146,7 +146,7 @@ try {
   await p2.fill("#phone", "70000001");
   await p2.click("button[type=submit]");
   await p2.waitForSelector("#code");
-  await p2.fill("#code", (await p2.textContent(".note.warn b")).trim());
+  await p2.fill("#code", (await p2.textContent("#code-demo")).trim());
   await p2.click("button[type=submit]");
   await p2.waitForLoadState("networkidle");
   await p2.goto(`${BASE}/famille`);

@@ -14,7 +14,8 @@ import { withSchool, pool } from "../lib/db.ts";
 import { computeClassBulletins } from "../lib/bulletin.ts";
 import { loadBulletinInputs } from "../lib/repository.ts";
 import { renderClassBulletins } from "../lib/render.ts";
-import { createSmsChannel, renderTemplate, countSegments } from "../lib/sms.ts";
+import { createSmsChannel, renderTemplate, countSegments,
+         verdictCanal } from "../lib/sms.ts";
 import {
   startLogin, verifyLogin, resolveSession, revokeSession, can,
   type SessionUser,
@@ -1162,6 +1163,33 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       cookieSession(req, "fs_session", "", "/", 0));
   }
 
+  /* LA SANTÉ SE LIT SANS SE CONNECTER.
+   *
+   * `/sante` était DERRIÈRE ce mur : un appel non authentifié était redirigé
+   * vers /connexion, et `fetch` suivant la redirection, l'appelant recevait
+   * 200 et une page de connexion. Une sonde, un répartiteur de charge ou un
+   * script d'exploitation lisaient donc « en bonne santé » quelle que soit
+   * l'état réel du service — base arrêtée comprise. Les suites de tests de ce
+   * dépôt ont attendu ce point pendant des mois ; elles attendaient en fait la
+   * page de connexion.
+   *
+   * On le sort du mur, et on lui fait dire quelque chose de vrai : la base
+   * répond-elle, et cette installation enverra-t-elle réellement un message. */
+  if (path === "/sante") {
+    let base = false;
+    try {
+      await withoutSchool(async (c) => { await c.query("select 1"); });
+      base = true;
+    } catch { base = false; }
+    res.writeHead(base ? 200 : 503, { "content-type": "application/json" });
+    return res.end(JSON.stringify({
+      ok: base, service: "fasoschool", base,
+      // Sans ce champ, rien en dehors du serveur ne pouvait distinguer une
+      // installation qui envoie d'une qui fait semblant.
+      sms: VERDICT.canal, simule: Boolean(VERDICT.simule),
+    }));
+  }
+
   if (!user) return redirect(res, "/connexion");
   if (!user.schoolId) {
     return html(res, `<!doctype html><meta charset="utf-8"><p style="font-family:sans-serif;padding:40px">
@@ -1846,10 +1874,6 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       return html(res, resultPage(await chromeFor(user, "inscriptions"), out));
     }
 
-    if (path === "/sante") {
-      res.writeHead(200, { "content-type": "application/json" });
-      return res.end(JSON.stringify({ ok: true, service: "fasoschool" }));
-    }
   } catch (error) {
     console.error(error);
     return html(res, `<!doctype html><meta charset="utf-8">
@@ -1858,6 +1882,32 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
 
   return html(res, `<!doctype html><meta charset="utf-8">
     <p style="font-family:sans-serif;padding:40px">Page introuvable. <a href="/">Retour au tableau de bord</a></p>`, 404);
+}
+
+/* LE SERVEUR REFUSE DE DÉMARRER SANS CANAL SMS DÉCLARÉ.
+ *
+ * Avant, `SMS_PROVIDER` absent ou mal orthographié donnait silencieusement
+ * l'adaptateur de démonstration : aucun message ne partait, le produit
+ * annonçait le contraire, et le code de connexion s'affichait à l'écran de qui
+ * le demandait. Une installation ne doit pas pouvoir tomber là-dedans par
+ * omission — c'est le même refus que `sauvegarde.sh` devant une phrase de
+ * passe manquante, et pour la même raison : le défaut ne se voit pas le jour
+ * de l'installation. */
+const VERDICT = verdictCanal();
+if (!VERDICT.ok) {
+  console.error("\nFasoSchool refuse de démarrer.\n");
+  console.error(VERDICT.refus);
+  console.error("");
+  process.exit(2);
+}
+if (VERDICT.simule) {
+  // Pas une ligne de journal parmi d'autres : c'est l'état dans lequel le
+  // produit ne tient AUCUNE de ses promesses de message.
+  console.error(
+    "\n  ┌─ MODE DÉMONSTRATION (SMS_PROVIDER=mock)\n"
+    + "  │  AUCUN SMS NE PARTIRA. Les écrans le disent, et le code de\n"
+    + "  │  connexion s'affiche à l'écran : ne jamais utiliser en production.\n"
+    + "  └─\n");
 }
 
 const server = createServer((req, res) => {

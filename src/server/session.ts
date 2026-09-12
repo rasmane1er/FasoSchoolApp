@@ -12,7 +12,7 @@
 import { randomBytes, createHash, timingSafeEqual } from "node:crypto";
 import type { PoolClient } from "pg";
 import { withoutSchool } from "../lib/db.ts";
-import { createSmsChannel } from "../lib/sms.ts";
+import { createSmsChannel, verdictCanal } from "../lib/sms.ts";
 
 const OTP_TTL_MS = 5 * 60_000;
 const SESSION_TTL_MS = 12 * 60 * 60_000;
@@ -94,17 +94,51 @@ export async function issueOtp(
         where expires_at < now() - interval '1 hour'`,
     );
 
-    if (await isKnown(phone, c) && process.env.SMS_PROVIDER === "orange_bf") {
-      const sms = createSmsChannel();
-      await sms.send({
-        to: phone,
-        schoolId: "",
-        body: `FasoSchool: votre code de connexion est ${code}. Valable 5 minutes.`,
-      });
-      return { ok: true };
+    const connu = await isKnown(phone, c);
+    const canal = verdictCanal();
+
+    /* LE CODE NE S'AFFICHE QUE SI RIEN NE PART — ET SEULEMENT LÀ.
+     *
+     * Avant, la condition était `process.env.SMS_PROVIDER === "orange_bf"` :
+     * toute autre valeur, y compris l'absence de valeur, renvoyait le code en
+     * clair, que la page affiche. Il suffisait de connaître le numéro d'un
+     * censeur. Le serveur refuse désormais de démarrer sans canal déclaré, et
+     * ce test-ci ne regarde plus une chaîne d'environnement mais le verdict :
+     * le code n'est rendu QUE par l'adaptateur de démonstration. */
+    if (canal.simule) return { ok: true, devCode: code };
+
+    // Numéro inconnu : on ne l'a pas dit plus haut pour ne pas faire de cette
+    // page un annuaire, et on ne le dit pas ici non plus. Rien ne part.
+    if (!connu) return { ok: true };
+
+    const sms = createSmsChannel();
+    const corps = `FasoSchool: votre code de connexion est ${code}. `
+      + `Valable 5 minutes.`;
+    const envoi = await sms.send({ to: phone, schoolId: "", body: corps });
+
+    /* UN ENVOI RATÉ N'EST PAS UN ENVOI.
+     *
+     * Le résultat était ignoré : crédit épuisé, ligne résiliée, panne
+     * d'opérateur — la page répondait « un code vous a été envoyé », personne
+     * ne recevait rien, l'utilisateur réessayait, et au bout de cinq essais la
+     * limitation de débit le mettait dehors de son propre logiciel. Sans un
+     * seul mot pour dire pourquoi.
+     *
+     * On le dit, avec la raison de l'opérateur, et on ANNULE le défi : le
+     * garder ouvert n'a pas de sens quand personne n'a le code, et le laisser
+     * consommer un essai punirait l'utilisateur d'une panne qui n'est pas la
+     * sienne. */
+    if (!envoi.ok) {
+      await c.query(`delete from auth_otp_challenges
+                      where phone = $1 and consumed_at is null`, [phone]);
+      await c.query(`delete from auth_rate_limits where bucket_key = $1`,
+        [`otp:${phone}`]);
+      return { ok: false, error:
+        `Le code n'a pas pu être envoyé : ${envoi.error ?? "refus de l'opérateur"}. `
+        + `Prévenez l'établissement — ce n'est pas votre numéro qui est en cause.` };
     }
 
-    return { ok: true, devCode: code };
+    return { ok: true };
   });
 }
 

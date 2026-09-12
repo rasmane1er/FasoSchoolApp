@@ -113,7 +113,7 @@ function lirePng(buf) {
 }
 
 const server = spawn(process.execPath, ["--experimental-strip-types", "src/server/app.ts"], {
-  env: { ...process.env, PORT: String(PORT) }, stdio: ["ignore", "pipe", "pipe"],
+  env: { ...process.env, PORT: String(PORT), SMS_PROVIDER: "mock" }, stdio: ["ignore", "pipe", "pipe"],
 });
 let stderr = "";
 server.stderr.on("data", (d) => { stderr += d.toString(); });
@@ -272,7 +272,7 @@ try {
   await page.fill("#phone", "70000001");
   await page.click("button[type=submit]");
   await page.waitForSelector("#code");
-  await page.fill("#code", (await page.textContent(".note.warn b")).trim());
+  await page.fill("#code", (await page.textContent("#code-demo")).trim());
   await page.click("button[type=submit]");
   await page.waitForLoadState("networkidle");
 

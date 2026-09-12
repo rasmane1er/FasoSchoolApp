@@ -372,8 +372,12 @@ export function familleLoginPage(step: "phone" | "code", opts: {
   vous avez donné à l'établissement.</p>
 
 ${opts.error ? `<div class="note bad">${esc(opts.error)}</div>` : ""}
-${opts.devCode ? `<div class="note">Code de connexion :
-  <b style="font-size:20px">${esc(opts.devCode)}</b></div>` : ""}
+${opts.devCode ? `<div class="note warn">
+  <b>Mode démonstration — aucun SMS n'est envoyé.</b>
+  Ce code s'affiche ici parce que cette installation ne sait pas envoyer de
+  message : <b class="num" id="code-demo" style="font-size:20px">${esc(opts.devCode)}</b>.
+  Sur une installation réelle, il arrive par SMS et n'apparaît nulle part.
+</div>` : ""}
 
 ${step === "phone" ? `
 <form method="post" action="/famille/connexion">

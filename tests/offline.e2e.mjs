@@ -37,7 +37,7 @@ await client.query(`delete from sync_conflicts`);
 await client.query(`delete from sync_mutations`);
 
 const server = spawn(process.execPath, ["--experimental-strip-types", "src/server/app.ts"], {
-  env: { ...process.env, PORT: String(PORT) }, stdio: ["ignore", "pipe", "pipe"],
+  env: { ...process.env, PORT: String(PORT), SMS_PROVIDER: "mock" }, stdio: ["ignore", "pipe", "pipe"],
 });
 let stderr = ""; server.stderr.on("data", (d) => { stderr += d.toString(); });
 for (let i = 0; i < 50; i += 1) {
@@ -55,7 +55,7 @@ try {
   await page.fill("#phone", "70000002");
   await page.click("button[type=submit]");
   await page.waitForSelector("#code");
-  await page.fill("#code", (await page.textContent(".note.warn b")).trim());
+  await page.fill("#code", (await page.textContent("#code-demo")).trim());
   await page.click("button[type=submit]");
   await page.waitForLoadState("networkidle");
 
@@ -188,7 +188,7 @@ try {
   await p3.fill("#phone", "70000001");
   await p3.click("button[type=submit]");
   await p3.waitForSelector("#code");
-  await p3.fill("#code", (await p3.textContent(".note.warn b")).trim());
+  await p3.fill("#code", (await p3.textContent("#code-demo")).trim());
   await p3.click("button[type=submit]");
   await p3.waitForLoadState("networkidle");
 

@@ -18,7 +18,7 @@
     "start": "node --experimental-strip-types src/server/app.ts",
     "test:e2e": "node tests/app.e2e.mjs",
     "test:offline": "node tests/offline.e2e.mjs",
-    "check:all": "npm run typecheck && npm test && npm run test:rentree && npm run test:e2e && npm run test:offline && npm run test:evaluations && npm run test:messages && npm run test:personnel && npm run test:eleve && npm run test:annulation && npm run test:installer && npm run test:discipline && npm run test:justifications && npm run test:bareme && npm run test:sauvegarde && npm run test:installation && npm run test:cloisonnement && npm run test:cookies && npm run test:pwa && npm run test:calendrier && npm run test:pieces && npm run test:conseil-bulletin && npm run test:examens && npm run test:envois && npm run test:bulletin-complet && npm run test:injoignable && npm run test:import && npm run test:conseil && npm run test:famille && npm run test:categorisation && npm run test:services && npm run test:cloture && npm run test:frais && npm run test:communiques && npm run test:transferts && npm run test:bourses && npm run test:recurrence && npm run test:fixture",
+    "check:all": "npm run typecheck && npm test && npm run test:rentree && npm run test:e2e && npm run test:offline && npm run test:evaluations && npm run test:messages && npm run test:personnel && npm run test:eleve && npm run test:annulation && npm run test:installer && npm run test:discipline && npm run test:justifications && npm run test:bareme && npm run test:sauvegarde && npm run test:installation && npm run test:cloisonnement && npm run test:cookies && npm run test:pwa && npm run test:calendrier && npm run test:pieces && npm run test:conseil-bulletin && npm run test:examens && npm run test:envois && npm run test:bulletin-complet && npm run test:injoignable && npm run test:import && npm run test:conseil && npm run test:famille && npm run test:categorisation && npm run test:services && npm run test:cloture && npm run test:frais && npm run test:communiques && npm run test:transferts && npm run test:bourses && npm run test:recurrence && npm run test:canal && npm run test:fixture",
     "test:import": "node tests/import.e2e.mjs",
     "test:rentree": "node tests/rentree.e2e.mjs",
     "test:conseil": "node tests/conseil.e2e.mjs",
@@ -54,6 +54,7 @@
     "test:bulletin-complet": "node tests/bulletin-complet.e2e.mjs",
     "test:injoignable": "node tests/injoignable.e2e.mjs",
     "test:recurrence": "node tests/recurrence.e2e.mjs",
+    "test:canal": "node tests/canal.e2e.mjs",
     "test:fixture": "node tests/fixture.e2e.mjs"
   },
   "dependencies": {

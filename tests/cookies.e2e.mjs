@@ -49,7 +49,7 @@ await client.query(`delete from auth_sessions`);
 const serveurs = [];
 const lancer = async (port, env) => {
   const s = spawn(process.execPath, ["--experimental-strip-types", "src/server/app.ts"],
-    { env: { ...process.env, PORT: String(port), ...env },
+    { env: { ...process.env, PORT: String(port), SMS_PROVIDER: "mock", ...env },
       stdio: ["ignore", "pipe", "pipe"] });
   serveurs.push(s);
   for (let i = 0; i < 60; i += 1) {

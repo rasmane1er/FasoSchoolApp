@@ -94,7 +94,7 @@ if (dejaLa[0].n > 0) {
 }
 
 const server = spawn(process.execPath, ["--experimental-strip-types", "src/server/app.ts"], {
-  env: { ...process.env, PORT: String(PORT) }, stdio: ["ignore", "pipe", "pipe"],
+  env: { ...process.env, PORT: String(PORT), SMS_PROVIDER: "mock" }, stdio: ["ignore", "pipe", "pipe"],
 });
 let stderr = "";
 server.stderr.on("data", (d) => { stderr += d.toString(); });

@@ -64,8 +64,33 @@ if (orphelin[0]) {
   rattachementTemporaire = true;
 }
 
+
+/* CETTE SUITE NE DOIT PAS DÉPENDRE DE L'HEURE QU'IL EST.
+ *
+ * Elle affirme que des messages PARTENT. Or la garde des heures de silence —
+ * 21 h → 6 h par défaut, heure de Ouagadougou — refuse les envois en masse la
+ * nuit. La suite passait donc en journée et échouait le soir, sur des
+ * assertions dont le message ne parlait pas du tout d'horaire.
+ *
+ * Une suite possède les réglages dont dépendent ses assertions. On pose une
+ * fenêtre de silence CALCULÉE pour exclure l'instant présent, et c'est
+ * PostgreSQL qui la calcule, dans le fuseau de l'école, puisque c'est lui qui
+ * l'évaluera. L'ancienne est remise à la fin. */
+const { rows: fenetreInitiale } = await client.query(
+  `select sms_quiet_from, sms_quiet_to from schools limit 1`);
+await client.query(
+  `update schools
+      set sms_quiet_from = (timezone('Africa/Ouagadougou', now())
+                            + interval '2 hours')::time,
+          sms_quiet_to   = (timezone('Africa/Ouagadougou', now())
+                            + interval '3 hours')::time`);
+const rendreLaFenetre = async () => {
+  await client.query(`update schools set sms_quiet_from = $1, sms_quiet_to = $2`,
+    [fenetreInitiale[0].sms_quiet_from, fenetreInitiale[0].sms_quiet_to]);
+};
+
 const server = spawn(process.execPath, ["--experimental-strip-types", "src/server/app.ts"], {
-  env: { ...process.env, PORT: String(PORT) }, stdio: ["ignore", "pipe", "pipe"],
+  env: { ...process.env, PORT: String(PORT), SMS_PROVIDER: "mock" }, stdio: ["ignore", "pipe", "pipe"],
 });
 let stderr = ""; server.stderr.on("data", (d) => { stderr += d.toString(); });
 for (let i = 0; i < 50; i += 1) {
@@ -82,7 +107,7 @@ const connecter = async (p, tel) => {
   await p.fill("#phone", tel);
   await p.click("button[type=submit]");
   await p.waitForSelector("#code");
-  await p.fill("#code", (await p.textContent(".note.warn b")).trim());
+  await p.fill("#code", (await p.textContent("#code-demo")).trim());
   await p.click("button[type=submit]");
   await p.waitForLoadState("networkidle");
 };
@@ -222,6 +247,7 @@ try {
   }
   await purge().catch(() => {});
   await client.query(`delete from auth_rate_limits`).catch(() => {});
+  await rendreLaFenetre().catch(() => {});
   await client.end();
 }
 

@@ -56,7 +56,7 @@ const purge = async () => {
 await purge();
 
 const server = spawn(process.execPath, ["--experimental-strip-types", "src/server/app.ts"], {
-  env: { ...process.env, PORT: String(PORT) }, stdio: ["ignore", "pipe", "pipe"],
+  env: { ...process.env, PORT: String(PORT), SMS_PROVIDER: "mock" }, stdio: ["ignore", "pipe", "pipe"],
 });
 let stderr = ""; server.stderr.on("data", (d) => { stderr += d.toString(); });
 for (let i = 0; i < 50; i += 1) {
@@ -73,7 +73,7 @@ const connecter = async (p, tel) => {
   await p.fill("#phone", tel);
   await p.click("button[type=submit]");
   await p.waitForSelector("#code");
-  await p.fill("#code", (await p.textContent(".note.warn b")).trim());
+  await p.fill("#code", (await p.textContent("#code-demo")).trim());
   await p.click("button[type=submit]");
   await p.waitForLoadState("networkidle");
 };

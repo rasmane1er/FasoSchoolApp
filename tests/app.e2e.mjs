@@ -42,7 +42,7 @@ async function connecter(page, phone) {
   await page.fill("#phone", phone);
   await page.click("button[type=submit]");
   await page.waitForSelector("#code");
-  const code = (await page.textContent(".note.warn b")).trim();
+  const code = (await page.textContent("#code-demo")).trim();
   await page.fill("#code", code);
   await page.click("button[type=submit]");
   await page.waitForLoadState("networkidle");
@@ -95,7 +95,7 @@ async function connecter(page, phone) {
 }
 
 const server = spawn(process.execPath, ["--experimental-strip-types", "src/server/app.ts"], {
-  env: { ...process.env, PORT: String(PORT) },
+  env: { ...process.env, PORT: String(PORT), SMS_PROVIDER: "mock" },
   stdio: ["ignore", "pipe", "pipe"],
 });
 let stderr = "";

@@ -793,6 +793,63 @@ saisit quarante notes, le réseau tombe, tout est perdu. Ici :
 4. Sans JavaScript, le formulaire se poste normalement. Le hors-ligne est une
    amélioration, jamais une dépendance.
 
+### Une variable d'environnement oubliée ouvrait le logiciel
+
+Trouvé en éprouvant ce que l'écran du personnel promet : « un code à usage
+unique arrive par SMS à chaque connexion ». La fabrique de canal se lisait :
+
+```ts
+return process.env.SMS_PROVIDER === "orange_bf"
+  ? new OrangeBfSmsChannel() : new MockSmsChannel();
+```
+
+Toute valeur autre que la chaîne exacte `orange_bf` — variable absente, faute de
+frappe, `orange`, `ORANGE_BF` — donnait l'adaptateur de **démonstration**, en
+silence. Dans cet état :
+
+* **aucun SMS ne part, jamais.** Ni absence, ni communiqué, ni bulletin. Mais
+  `sms_messages` enregistre `envoye`, le registre de crédit débite de vrais
+  francs, et l'appel du matin annonce « 2 SMS envoyés pour 16 F ». La deuxième
+  des trois promesses du produit devient un décor ;
+* **le code de connexion est renvoyé à la page, qui l'affiche.** Connaître le
+  numéro d'un censeur suffisait à entrer dans le logiciel de son établissement.
+  Sur la porte des familles, le code apparaissait sans même la mention « mode
+  démonstration ».
+
+Et sur le chemin réel, un troisième défaut : le résultat de l'envoi du code
+était **ignoré**. Crédit épuisé, ligne résiliée, panne d'opérateur — la page
+répondait « Code envoyé au 70 00 00 01 », rien n'arrivait, l'utilisateur
+réessayait, et au bout de cinq essais la limitation de débit le mettait dehors
+de son propre logiciel, sans un mot d'explication.
+
+Ce qui change :
+
+* **le serveur refuse de démarrer sans `SMS_PROVIDER` déclaré** — `orange_bf`
+  ou `mock`, rien d'autre, et `orange_bf` sans ses identifiants est refusé lui
+  aussi. C'est le même refus que `sauvegarde.sh` devant une phrase de passe
+  manquante, et pour la même raison : le défaut ne se voit pas le jour de
+  l'installation, il se voit six mois plus tard ;
+* **le mode démonstration s'annonce partout** : bandeau sur la console, champ
+  `simule` sur `/sante`, phrase sur les deux pages de connexion, et point
+  **bloquant** sur le tableau de bord que le directeur ouvre chaque matin ;
+* **le code n'est rendu que par l'adaptateur de démonstration** — plus par
+  « tout ce qui n'est pas exactement `orange_bf` » ;
+* **un envoi refusé n'est plus annoncé comme réussi** : la raison de l'opérateur
+  est dite, le défi est annulé, et la limitation de débit n'est pas consommée —
+  on ne punit pas un utilisateur d'une panne qui n'est pas la sienne.
+
+**Au passage, `/sante` ne fonctionnait pas.** Il était placé **derrière** le mur
+d'authentification : un appel non connecté était redirigé vers `/connexion`, et
+`fetch` suivant la redirection, l'appelant recevait 200 et une page de
+connexion. Une sonde, un répartiteur de charge ou un script d'exploitation
+lisaient « en bonne santé » quel que soit l'état réel — base arrêtée comprise.
+Les trente-six suites de ce dépôt attendaient ce point au démarrage ; elles
+attendaient en fait la page de connexion. Il est désormais devant le mur, il
+interroge vraiment la base, et il répond 503 quand elle ne répond pas.
+
+`tests/canal.e2e.mjs` : 24 assertions, dont le refus de démarrer sur variable
+absente, sur faute de frappe, et sur `orange_bf` incomplet.
+
 ### « Signalé quatre fois sans que rien n'ait été fait »
 
 L'en-tête de `discipline.ts` porte cette phrase depuis le premier jour, et
@@ -1265,10 +1322,20 @@ APP_ROLE=fasoschool_app APP_PASSWORD='...' \
 ./scripts/preparer-base.sh fasoschool
 
 export DATABASE_URL=postgres://fasoschool_app:...@localhost:5432/fasoschool
+
+# LE CANAL SMS EST UN CHOIX ÉCRIT, SANS DÉFAUT. Le serveur refuse de démarrer
+# sans lui : une variable oubliée basculait l'installation en démonstration,
+# où aucun message ne part et où le code de connexion s'affiche à l'écran.
+export SMS_PROVIDER=mock        # démonstration : rien ne part, et tout le dit
+# export SMS_PROVIDER=orange_bf # production, avec ORANGE_SMS_CLIENT_ID,
+#                               # ORANGE_SMS_CLIENT_SECRET, ORANGE_SMS_SENDER
+
 ADMIN_DATABASE_URL='postgres://postgres@localhost/postgres' \
 npm run db:test:rls        # doit passer avant tout développement
 npm run demo               # établissement de démonstration + bulletins
 npm start                  # http://localhost:4180
+
+curl -s localhost:4180/sante   # {"ok":true,"base":true,"sms":"mock","simule":true}
 ```
 
 **`preparer-base.sh`, et non `db:migrate` à la main.** Le chemin d'installation
@@ -1301,7 +1368,7 @@ Comptes de démonstration — le code s'affiche à l'écran, aucun SMS n'est env
 | `70000005` | Directeur |
 
 Vérifications : `npm run check:all` — typecheck strict, 60 tests unitaires, et
-**trente-six parcours**, chacun contre un vrai PostgreSQL et un vrai serveur.
+**trente-sept parcours**, chacun contre un vrai PostgreSQL et un vrai serveur.
 Le tableau ci-dessous en détaille une partie ; les autres sont décrits, avec ce
 qu'ils ont trouvé, dans les sections qui précèdent.
 
@@ -1319,6 +1386,7 @@ qu'ils ont trouvé, dans les sections qui précèdent.
 | `test:eleve` (35) | on retrouve un élève par le numéro de son tuteur, un tuteur partagé se corrige pour la fratrie, et voir n'est pas corriger |
 | `test:personnel` (29) | un établissement crée ses propres comptes ; le dernier chef ne peut être ni écarté ni rétrogradé ; écarter quelqu'un ferme ses sessions ouvertes |
 | `test:messages` (26) | un refus de l'opérateur est enregistré avec sa raison, remonte au tableau de bord, et ne se referme que par un geste humain tracé |
+| `test:canal` (24) | le serveur refuse de démarrer sans canal SMS déclaré, le mode démonstration s'annonce partout, et un code que l'opérateur refuse n'est plus annoncé comme envoyé |
 | `test:recurrence` (18) | « quatre faits, quatre convocations » et « quatre faits, aucune suite » ne sont plus le même chiffre au conseil de classe, et le registre ouvre sur ce qui revient |
 | `test:fixture` (16) | le jeu de démonstration sort de `check:all` exactement comme il y est entré : une suite qui emporte ce qui n'est pas à elle est nommée, avec la table et le nombre |
 | `test:injoignable` (31) | un absent dont la famille n'a aucun numéro laisse une tâche nommée au lieu d'un silence, et un tuteur principal sans numéro ne masque plus un second tuteur joignable |
@@ -1465,9 +1533,22 @@ rien du module scolarité. Le jour où un directeur demande de masquer les
 bulletins des familles en retard, cela se fait à l'affichage, sans corrompre
 le carnet de notes.
 
+**Une configuration dangereuse n'a pas de valeur par défaut.** Le canal SMS se
+déclare ou le serveur ne démarre pas ; la sauvegarde exige sa phrase de passe ou
+elle refuse de tourner. Le point commun : dans les deux cas, le défaut ne se voit
+pas le jour de l'installation — il se voit le jour où l'on en a besoin.
+
 **Le hors-ligne se limite au strict nécessaire.** La saisie des notes et
 l'appel, sur le poste de l'enseignant. Ni l'administration ni la comptabilité :
 ces utilisateurs sont à un bureau.
+
+**Une suite de tests possède les réglages dont dépendent ses assertions.**
+Trois suites affirmaient que des messages partent, sans neutraliser la garde des
+heures de silence : elles passaient en journée et échouaient le soir, sur des
+assertions dont le message ne parlait pas d'horaire. Découvert en lançant
+`check:all` à 21 h 27. Elles posent désormais une fenêtre de silence calculée
+par PostgreSQL, dans le fuseau de l'école, pour exclure l'instant présent — et
+la remettent en sortant.
 
 **Une suite de tests ne supprime que ce qu'elle a créé.** Elle le reconnaît par
 une marque qu'elle a posée elle-même, jamais par un prédicat qui décrit une

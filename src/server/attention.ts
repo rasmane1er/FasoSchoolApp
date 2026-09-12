@@ -12,6 +12,7 @@
  */
 
 import { withSchool } from "../lib/db.ts";
+import { verdictCanal } from "../lib/sms.ts";
 import { esc, plural, accord } from "./html.ts";
 import { can, type SessionUser } from "./session.ts";
 
@@ -132,6 +133,25 @@ export async function pointsDAttention(
           ? "Le crédit SMS est épuisé : plus aucune famille n'est prévenue."
           : `Il reste ${credit} SMS. À ce rythme le crédit tombera pendant le trimestre.`,
         action: "Voir", lien: "/absences", droit: "faire_appel",
+      });
+    }
+
+    /* L'INSTALLATION SAIT-ELLE ENVOYER UN SMS ?
+     *
+     * En mode démonstration, rien ne part : ni absence, ni communiqué, ni
+     * bulletin — et pourtant le produit annonce des envois, débite du crédit,
+     * et affiche le code de connexion à l'écran. Le serveur le dit à son
+     * démarrage, dans une console que personne ne relit. Il faut que ce soit
+     * ici aussi, sur l'écran que le directeur ouvre chaque matin, et que ce
+     * soit BLOQUANT : c'est l'état où la deuxième des trois promesses du
+     * produit n'existe pas. */
+    if (verdictCanal().simule) {
+      points.push({
+        gravite: "bloquant",
+        texte: "Cette installation est en mode démonstration : AUCUN SMS ne "
+          + "part, et le code de connexion s'affiche à l'écran. Les envois "
+          + "annoncés par les autres écrans n'ont pas lieu.",
+        action: "Voir", lien: "/messages", droit: "suivre_messages",
       });
     }
 

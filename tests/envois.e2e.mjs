@@ -77,8 +77,34 @@ const purger = async () => {
 };
 await purger();
 
+/* CETTE SUITE NE DOIT PAS DÉPENDRE DE L'HEURE QU'IL EST.
+ *
+ * Elle affirme qu'un premier communiqué PART. Or la garde des heures de
+ * silence — 21 h → 6 h par défaut, heure de Ouagadougou — refuse les envois en
+ * masse la nuit. La suite passait donc en journée et échouait le soir, avec
+ * sept assertions rouges et un message qui ne parlait pas du tout d'horaire.
+ * Trouvé en la lançant à 21 h 27.
+ *
+ * Une suite possède les réglages dont dépendent ses assertions. On pose donc
+ * une fenêtre de silence CALCULÉE pour exclure l'instant présent — deux heures
+ * plus tard, pendant une heure — et c'est PostgreSQL qui la calcule, dans le
+ * fuseau de l'école, puisque c'est lui qui l'évaluera ensuite. La section qui
+ * éprouve le silence pose ensuite sa propre fenêtre, comme avant. */
+await client.query(
+  `update schools
+      set sms_quiet_from = (timezone('Africa/Ouagadougou', now())
+                            + interval '2 hours')::time,
+          sms_quiet_to   = (timezone('Africa/Ouagadougou', now())
+                            + interval '3 hours')::time`);
+const { rows: verif } = await client.query(
+  `select heures_de_silence(now()) as s`);
+if (verif[0].s) {
+  console.error("La fenêtre de silence posée couvre encore l'instant présent.");
+  process.exit(1);
+}
+
 const server = spawn(process.execPath, ["--experimental-strip-types", "src/server/app.ts"], {
-  env: { ...process.env, PORT: String(PORT) }, stdio: ["ignore", "pipe", "pipe"],
+  env: { ...process.env, PORT: String(PORT), SMS_PROVIDER: "mock" }, stdio: ["ignore", "pipe", "pipe"],
 });
 let stderr = "";
 server.stderr.on("data", (d) => { stderr += d.toString(); });
