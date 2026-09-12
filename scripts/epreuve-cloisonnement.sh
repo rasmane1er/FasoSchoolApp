@@ -68,7 +68,8 @@ psql "$CIBLE" -v ON_ERROR_STOP=1 -q \
   -f db/migrations/0013_examens.sql \
   -f db/migrations/0014_garde_envois.sql \
   -f db/migrations/0015_bulletin_complet.sql \
-  -f db/migrations/0016_famille_injoignable.sql
+  -f db/migrations/0016_famille_injoignable.sql \
+  -f db/migrations/0017_echeancier.sql
 echo "migrations appliquées"
 
 echo

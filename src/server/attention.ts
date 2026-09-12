@@ -155,6 +155,29 @@ export async function pointsDAttention(
       });
     }
 
+    /* LES FAMILLES EN RETARD SUR CE QUI ÉTAIT DÛ.
+     *
+     * Pas « celles qui doivent encore quelque chose » : en mars, c'est tout le
+     * monde, et un point d'attention qui désigne tout le monde ne désigne
+     * personne. `retard_de` compare au seul échéancier, et renvoie null quand
+     * il n'y en a pas — un null ne compte pas ici, parce qu'on ne réclame pas
+     * sur une échéance qu'on ne connaît pas. */
+    const retardataires = await un(
+      `select count(*)::int as n from invoices i
+        where i.status <> 'annulee'
+          and coalesce(retard_de(i.id, current_date), 0) > 0`);
+    if (retardataires > 0) {
+      const montant = await un(
+        `select coalesce(sum(retard_de(i.id, current_date)), 0)::int as n
+           from invoices i where i.status <> 'annulee'`);
+      points.push({
+        gravite: "important",
+        texte: `${plural(retardataires, "famille a dépassé", "familles ont dépassé")} `
+          + `une échéance de scolarité : ${montant} F exigibles et non versés.`,
+        action: "Voir", lien: "/scolarite", droit: "voir_scolarite",
+      });
+    }
+
     // --- Ce qui est simplement incomplet -----------------------------------
 
     if (yearId) {

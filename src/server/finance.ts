@@ -22,10 +22,22 @@ import { createSmsChannel, renderTemplate, countSegments } from "../lib/sms.ts";
 import { page, esc, fcfa, plural, type PageChrome } from "./html.ts";
 import type { SessionUser } from "./session.ts";
 
+/** Une date ISO en jour lisible : « 05/01/2027 ». */
+const jour = (iso: string): string => {
+  const [a, m, j] = iso.split("-");
+  return `${j}/${m}/${a}`;
+};
+
 export interface InvoiceLine {
   id: string; reference: string; total: number; paid: number; rest: number;
   studentId: string; lastName: string; firstNames: string; classe: string | null;
   guardianPhone: string | null;
+  /** Ce qui était exigible AUJOURD'HUI. `null` : pas d'échéancier. */
+  echu: number | null;
+  /** Exigible et non versé. `null` se propage : inconnu, pas nul. */
+  retard: number | null;
+  /** La prochaine tranche, pour dire à la famille ce qui vient. */
+  prochaine: { label: string; montant: number; le: string } | null;
 }
 
 export async function listInvoices(schoolId: string, filter: "tous" | "impayes") {
@@ -34,9 +46,20 @@ export async function listInvoices(schoolId: string, filter: "tous" | "impayes")
       `select i.id, i.reference, i.total_fcfa, i.student_id,
               st.last_name, st.first_names, cl.label as classe,
               montant_regle(i.id) as paye,
+              -- « En retard » ne peut pas vouloir dire « doit quelque chose » :
+              -- le jour de l'émission, cela désignerait toutes les familles.
+              montant_echu(i.id, current_date) as echu,
+              retard_de(i.id, current_date) as retard,
+              (select row_to_json(p) from prochaine_echeance(i.id, current_date) p)
+                as prochaine,
+              -- Le filtre sur le numéro est dans le WHERE : sans lui, un
+              -- tuteur PRINCIPAL sans numéro sort en tête et masque un second
+              -- tuteur joignable du même dossier. Même défaut que celui trouvé
+              -- sur l'appel du matin, dans le module d'à côté.
               (select g.phone from student_guardians sg
                  join guardians g on g.id = sg.guardian_id
                 where sg.student_id = st.id and sg.receives_sms
+                  and g.phone is not null and g.phone <> ''
                 order by sg.is_primary desc limit 1) as tuteur
          from invoices i
          join students st on st.id = i.student_id
@@ -52,6 +75,12 @@ export async function listInvoices(schoolId: string, filter: "tous" | "impayes")
       rest: Number(x.total_fcfa) - Number(x.paye),
       studentId: x.student_id, lastName: x.last_name, firstNames: x.first_names,
       classe: x.classe, guardianPhone: x.tuteur,
+      echu: x.echu === null ? null : Number(x.echu),
+      retard: x.retard === null ? null : Number(x.retard),
+      prochaine: x.prochaine
+        ? { label: x.prochaine.label, montant: Number(x.prochaine.amount_fcfa),
+            le: String(x.prochaine.due_on).slice(0, 10) }
+        : null,
     }));
     return filter === "impayes" ? rows.filter((x) => x.rest > 0) : rows;
   });
@@ -75,20 +104,49 @@ export async function financePage(
   const attendu = rows.reduce((a, r) => a + r.total, 0);
   const encaisse = rows.reduce((a, r) => a + r.paid, 0);
   const reste = attendu - encaisse;
-  const enRetard = rows.filter((r) => r.rest > 0);
 
-  const body = rows.map((r) => `
-    <tr${r.rest > 0 ? ' class="bad"' : ""}>
+  /* « EN RETARD » VEUT DIRE EN RETARD SUR CE QUI ÉTAIT DÛ.
+   *
+   * Cette ligne se lisait `rows.filter((r) => r.rest > 0)` — c'est-à-dire
+   * « doit quelque chose sur l'année ». Le jour de l'émission des factures,
+   * avant qu'un franc ne soit exigible, elle désignait TOUTES les familles, et
+   * la tuile annonçait « 12 familles en retard ». Une famille à jour de sa
+   * première tranche y était comptée comme celle qui n'a rien versé.
+   *
+   * C'est le mot sur lequel un établissement décide qui il renvoie chez lui. */
+  const enRetard = rows.filter((r) => (r.retard ?? 0) > 0);
+  const sansEcheancier = rows.filter((r) => r.retard === null && r.rest > 0);
+  const montantEnRetard = enRetard.reduce((a, r) => a + (r.retard ?? 0), 0);
+
+  const body = rows.map((r) => {
+    const enRetardCeJour = (r.retard ?? 0) > 0;
+    /* Le rouge est réservé au retard réel. Une famille qui doit encore la
+       tranche de janvier n'est pas en faute en octobre. */
+    return `
+    <tr${enRetardCeJour ? ' class="bad"' : ""}>
       <td><b>${esc(r.lastName)}</b> ${esc(r.firstNames)}
         <div style="font-size:12px;color:var(--faint)" class="num">${esc(r.reference)}</div></td>
       <td>${esc(r.classe ?? "—")}</td>
       <td class="num r">${fcfa(r.total)}</td>
       <td class="num r">${fcfa(r.paid)}</td>
       <td class="num r" style="font-weight:600;color:${r.rest > 0 ? "var(--laterite)" : "var(--verdant)"}">${fcfa(r.rest)}</td>
+      <td class="r" style="font-size:13px">${
+        r.retard === null
+          // On ne tranche pas à la place de l'école : sans échéancier, le
+          // retard est INCONNU, et le dire vaut mieux que de choisir.
+          ? `<span class="dit">échéancier absent</span>`
+          : enRetardCeJour
+            ? `<b style="color:var(--laterite)" class="num">${fcfa(r.retard)} F</b>
+               <span class="dit">exigible, non versé</span>`
+            : r.prochaine
+              ? `<span class="pill p-ok">à jour</span>
+                 <span class="dit">${esc(r.prochaine.label)} : ${
+                   fcfa(r.prochaine.montant)} F le ${jour(r.prochaine.le)}</span>`
+              : `<span class="pill p-ok">à jour</span>`}</td>
       <td class="r">${r.rest > 0
         ? `<a class="btn ghost" style="height:36px;padding:0 14px" href="/scolarite/encaisser?facture=${esc(r.id)}">Encaisser</a>`
         : `<span class="pill p-ok">SOLDÉE</span>`}</td>
-    </tr>`).join("");
+    </tr>`; }).join("");
 
   return page(chrome, "Scolarité", `
     <div class="row"><div><h1>Scolarité</h1>
@@ -104,18 +162,40 @@ export async function financePage(
       <div class="tile"><div class="k">Attendu</div><div class="v" style="font-size:22px">${fcfa(attendu)} F</div></div>
       <div class="tile"><div class="k">Encaissé</div><div class="v" style="font-size:22px;color:var(--verdant)">${fcfa(encaisse)} F</div></div>
       <div class="tile"><div class="k">Reste à recouvrer</div><div class="v" style="font-size:22px;color:var(--laterite)">${fcfa(reste)} F</div>
-        <div class="n">${plural(enRetard.length, "famille en retard", "familles en retard")}</div></div>
+        <div class="n">sur l'année entière</div></div>
+      <div class="tile"><div class="k">En retard aujourd'hui</div>
+        <div class="v" style="font-size:22px;color:${enRetard.length > 0 ? "var(--laterite)" : "var(--verdant)"}">${fcfa(montantEnRetard)} F</div>
+        <div class="n">${plural(enRetard.length, "famille", "familles")} — exigible et non versé</div></div>
       <div class="tile"><div class="k">Taux de recouvrement</div><div class="v">${attendu === 0 ? "—" : Math.round((encaisse / attendu) * 100)}<span style="font-size:15px;color:var(--faint)"> %</span></div></div>
     </div>
+
+    ${sansEcheancier.length === 0 ? "" : `<div class="note">
+      <b>${plural(sansEcheancier.length, "facture n'a pas d'échéancier",
+                  "factures n'ont pas d'échéancier")}.</b>
+      Pour celles-là le logiciel ne dit NI « à jour » NI « en retard » : il ne
+      le sait pas, et choisir à votre place se verrait un jour sur la porte
+      d'un élève. Réémettre la facture depuis l'écran des frais lui pose un
+      échéancier aligné sur vos trimestres.</div>`}
 
     ${caps.map((c: any) => `<div class="note warn">
       <b>${esc(c.label)}</b> — ${fcfa(c.plafonne)} F comptés dans le plafond de l'arrêté n°2026-101,
       ${fcfa(Number(c.total) - Number(c.plafonne))} F hors plafond (hébergement).</div>`).join("")}
 
     <div class="card"><div class="scroll"><table>
-      <thead><tr><th>Élève</th><th>Classe</th><th class="r">Dû</th><th class="r">Payé</th><th class="r">Reste</th><th></th></tr></thead>
-      <tbody>${body || `<tr><td colspan="6" style="color:var(--muted)">Aucune facture.</td></tr>`}</tbody>
-    </table></div></div>`);
+      <thead><tr><th>Élève</th><th>Classe</th><th class="r">Dû sur l'année</th>
+        <th class="r">Payé</th><th class="r">Reste</th>
+        <th class="r">Où en est l'échéancier</th><th></th></tr></thead>
+      <tbody>${body || `<tr><td colspan="7" style="color:var(--muted)">Aucune facture.</td></tr>`}</tbody>
+    </table></div></div>
+
+    <div class="note">
+      <b>« En retard » veut dire en retard sur ce qui était dû.</b> Ce mot
+      désignait auparavant toute famille devant encore quelque chose sur
+      l'année : le jour de l'émission des factures, avant qu'un franc ne soit
+      exigible, il les désignait donc TOUTES. Une famille à jour de sa première
+      tranche y était comptée comme celle qui n'a rien versé. C'est le mot sur
+      lequel un établissement décide qui il renvoie chez lui.
+    </div>`);
 }
 
 const MOYENS: Record<string, string> = {
@@ -308,20 +388,52 @@ export async function collect(
 
     // Confirmation au tuteur : c'est ce qui évite la contestation trois mois plus tard.
     if (form.get("sms") === "1") {
+      /* MÊME REQUÊTE QUE PARTOUT AILLEURS, ENFIN.
+       *
+       * Celle-ci prenait le tuteur principal MÊME SANS NUMÉRO, qui masquait
+       * alors un second tuteur joignable du même dossier : la confirmation de
+       * paiement ne partait pour personne. C'est le défaut trouvé sur l'appel
+       * du matin, resté ici parce que le module est un autre fichier. */
+      const nom = await c.query(
+        `select first_names from students where id = $1`,
+        [inv.rows[0].student_id]);
       const g = await c.query(
-        `select st.first_names, g.id as gid, g.phone
-           from students st
-           left join student_guardians sg on sg.student_id = st.id and sg.receives_sms
-           left join guardians g on g.id = sg.guardian_id
-          where st.id = $1 order by sg.is_primary desc nulls last limit 1`,
+        `select g.id as gid, g.phone
+           from student_guardians sg
+           join guardians g on g.id = sg.guardian_id
+          where sg.student_id = $1 and sg.receives_sms
+            and g.phone is not null and g.phone <> ''
+          order by sg.is_primary desc limit 1`,
         [inv.rows[0].student_id]);
       const row = g.rows[0];
       if (row?.phone) {
         const school = await c.query(`select name from schools limit 1`);
-        const body = renderTemplate(
-          "{{ecole}}: paiement de {{montant}} F recu pour {{eleve}}. Reste {{reste}} F. Recu {{recu}}.",
-          { ecole: school.rows[0]?.name ?? "", montant: String(montant),
-            eleve: row.first_names, reste: String(nouveauReste), recu: number });
+        /* « Reste 38 000 F » sur un échéancier en trois tranches se lit comme
+           une somme exigible tout de suite. On dit donc ce qui reste À VERSER
+           MAINTENANT quand l'échéancier le permet, et le solde annuel ensuite.
+           Sans échéancier, la phrase d'origine, inchangée. */
+        const du = await c.query(
+          `select retard_de($1, current_date) as retard`, [invoiceId]);
+        const retard = du.rows[0]?.retard === null || du.rows[0]?.retard === undefined
+          ? null : Number(du.rows[0].retard);
+        const body = retard === null
+          ? renderTemplate(
+              "{{ecole}}: paiement de {{montant}} F recu pour {{eleve}}. "
+              + "Reste {{reste}} F. Recu {{recu}}.",
+              { ecole: school.rows[0]?.name ?? "", montant: String(montant),
+                eleve: nom.rows[0]?.first_names ?? "", reste: String(nouveauReste), recu: number })
+          : retard > 0
+            ? renderTemplate(
+                "{{ecole}}: paiement de {{montant}} F recu pour {{eleve}}. "
+                + "Reste {{retard}} F echu, {{reste}} F sur l annee. Recu {{recu}}.",
+                { ecole: school.rows[0]?.name ?? "", montant: String(montant),
+                  eleve: nom.rows[0]?.first_names ?? "", retard: String(retard),
+                  reste: String(nouveauReste), recu: number })
+            : renderTemplate(
+                "{{ecole}}: paiement de {{montant}} F recu pour {{eleve}}. "
+                + "Vous etes a jour. Reste {{reste}} F sur l annee. Recu {{recu}}.",
+                { ecole: school.rows[0]?.name ?? "", montant: String(montant),
+                  eleve: nom.rows[0]?.first_names ?? "", reste: String(nouveauReste), recu: number });
         const sms = createSmsChannel();
         const result = await sms.send({ to: row.phone, body, schoolId,
           studentId: inv.rows[0].student_id });

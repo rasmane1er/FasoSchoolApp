@@ -793,6 +793,63 @@ saisit quarante notes, le réseau tombe, tout est perdu. Ici :
 4. Sans JavaScript, le formulaire se poste normalement. Le hors-ligne est une
    amélioration, jamais une dépendance.
 
+### « En retard » voulait dire « doit quelque chose »
+
+Dans `finance.ts`, une ligne :
+
+```ts
+const enRetard = rows.filter((r) => r.rest > 0);
+```
+
+et, juste à côté, la tuile qui l'affiche : **« 9 familles en retard »**. Or
+`rest` est le solde de l'**année entière**. Le jour où les factures sont émises,
+avant qu'un seul franc ne soit exigible, cette ligne désignait donc **toutes**
+les familles, et peignait leur ligne en rouge.
+
+Mesuré sur le jeu de démonstration : neuf familles annoncées « en retard », dont
+quatre ayant versé 40 000 F sur 78 000 — c'est-à-dire la première tranche et une
+partie de la deuxième, **en avance** sur l'échéancier.
+
+Ce n'est pas un mot mal choisi dans un coin d'écran. C'est le mot sur lequel un
+établissement décide qui il renvoie à la maison.
+
+**L'échéancier existait déjà, et personne ne le lisait.** `frais.ts` écrit
+`invoice_instalments` à chaque émission : une tranche par trimestre, aux dates
+saisies par l'école. C'est la norme au Burkina, et c'est la question quotidienne
+de l'économe — « qui n'a pas payé la tranche d'octobre ? », jamais « qui doit
+encore quelque chose ? », à quoi la réponse en mars est « tout le monde ». Cette
+table n'était lue par **aucune** requête de l'application. Les suites de tests la
+sauvegardaient et la restauraient ; une en sommait le total pour vérifier qu'une
+bourse la rabote. Pas un écran ne la montrait.
+
+Ce qui change :
+
+* `montant_echu(facture, jour)` et `retard_de(facture, jour)` : ce qui était
+  exigible, et ce qui l'était sans avoir été versé. Jamais négatif — une famille
+  en avance n'est pas « en retard de moins que rien » ;
+* **une facture sans échéancier renvoie `null`, pas zéro et pas le total.**
+  Répondre « rien » rendrait toute famille éternellement à jour ; répondre
+  « tout » les mettrait toutes en retard dès l'émission. L'écran affiche
+  « échéancier absent » et explique comment en poser un — choisir à la place de
+  l'école se verrait un jour sur la porte d'un élève ;
+* la tuile « en retard » compte les retards réels et leur montant ; « reste à
+  recouvrer » dit désormais qu'il porte sur l'année ; le rouge d'une ligne est
+  réservé au retard, pas au solde ;
+* **la famille voit ce qu'elle doit maintenant** — « À verser maintenant : 0 F,
+  vous êtes à jour » puis « Tranche 2 : 26 000 F le 05/01 » — au lieu d'un
+  « vous devez 78 000 F » qu'on ne verse pas d'un coup ;
+* le tableau de bord compte les familles ayant **dépassé une échéance** ;
+* le SMS de paiement dit ce qui reste **échu**, et le solde annuel ensuite.
+
+**Et le même défaut de destinataire, un module plus loin.** La requête qui
+choisit qui reçoit la confirmation de paiement prenait le tuteur principal
+*même sans numéro*, masquant un second tuteur joignable — exactement ce qui
+avait été trouvé sur l'appel du matin. Corrigé ici aussi, ainsi que la colonne
+« tuteur » du tableau de la scolarité.
+
+`tests/echeancier.e2e.mjs` : 26 assertions. Contrôle négatif fait — l'ancien
+filtre remis, la tuile annonce de nouveau « 9 familles » au lieu d'une.
+
 ### Une variable d'environnement oubliée ouvrait le logiciel
 
 Trouvé en éprouvant ce que l'écran du personnel promet : « un code à usage
@@ -1368,7 +1425,7 @@ Comptes de démonstration — le code s'affiche à l'écran, aucun SMS n'est env
 | `70000005` | Directeur |
 
 Vérifications : `npm run check:all` — typecheck strict, 60 tests unitaires, et
-**trente-sept parcours**, chacun contre un vrai PostgreSQL et un vrai serveur.
+**trente-huit parcours**, chacun contre un vrai PostgreSQL et un vrai serveur.
 Le tableau ci-dessous en détaille une partie ; les autres sont décrits, avec ce
 qu'ils ont trouvé, dans les sections qui précèdent.
 
@@ -1386,6 +1443,7 @@ qu'ils ont trouvé, dans les sections qui précèdent.
 | `test:eleve` (35) | on retrouve un élève par le numéro de son tuteur, un tuteur partagé se corrige pour la fratrie, et voir n'est pas corriger |
 | `test:personnel` (29) | un établissement crée ses propres comptes ; le dernier chef ne peut être ni écarté ni rétrogradé ; écarter quelqu'un ferme ses sessions ouvertes |
 | `test:messages` (26) | un refus de l'opérateur est enregistré avec sa raison, remonte au tableau de bord, et ne se referme que par un geste humain tracé |
+| `test:echeancier` (26) | « en retard » veut dire en retard sur une échéance, pas « doit encore quelque chose sur l'année », et une facture sans échéancier ne bascule d'aucun côté |
 | `test:canal` (24) | le serveur refuse de démarrer sans canal SMS déclaré, le mode démonstration s'annonce partout, et un code que l'opérateur refuse n'est plus annoncé comme envoyé |
 | `test:recurrence` (18) | « quatre faits, quatre convocations » et « quatre faits, aucune suite » ne sont plus le même chiffre au conseil de classe, et le registre ouvre sur ce qui revient |
 | `test:fixture` (16) | le jeu de démonstration sort de `check:all` exactement comme il y est entré : une suite qui emporte ce qui n'est pas à elle est nommée, avec la table et le nombre |

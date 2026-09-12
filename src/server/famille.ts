@@ -107,10 +107,22 @@ export interface ChildView {
   justifiees: number;
   duFcfa: number;
   payeFcfa: number;
+  /** Exigible à ce jour d'après l'échéancier. `null` : pas d'échéancier. */
+  echuFcfa: number | null;
+  /** Exigible et non versé. `null` se propage : inconnu, pas nul. */
+  retardFcfa: number | null;
+  /** La tranche suivante, pour dire ce qui vient plutôt qu'une somme brute. */
+  prochaine: { label: string; montant: number; le: string } | null;
   rulesUnverified: boolean;
   /** Date de remise du bulletin figé, si la famille en a reçu un. */
   publishedAt: Date | null;
 }
+
+/** Une date ISO en jour lisible pour une famille : « 05/01/2027 ». */
+const jourFr = (iso: string): string => {
+  const [a, m, j] = iso.split("-");
+  return `${j}/${m}/${a}`;
+};
 
 export async function loadChildren(g: GuardianSession): Promise<ChildView[]> {
   const base = await withSchool(g.schoolId, async (c) => {
@@ -139,11 +151,29 @@ export async function loadChildren(g: GuardianSession): Promise<ChildView[]> {
                 count(*) filter (where ar.status = 'retard')::int as retards,
                 count(*) filter (where ar.status = 'absent' and ar.is_justified)::int as justifiees
            from attendance_records ar where ar.student_id = $1`, [k.id]);
+      /* CE QU'UNE FAMILLE A BESOIN DE SAVOIR N'EST PAS « VOUS DEVEZ 78 000 F ».
+       *
+       * C'est un chiffre qui effraie et qu'on ne peut pas verser d'un coup.
+       * L'échéancier existait depuis le premier jour dans `invoice_instalments`
+       * — une tranche par trimestre, aux dates de l'école — et aucun écran ne
+       * le montrait, ni à l'économe ni ici. La famille lisait donc une somme
+       * annuelle sans savoir ce qui était exigible maintenant.
+       *
+       * `montant_echu` renvoie null quand la facture n'a pas d'échéancier :
+       * l'écran l'affiche comme tel plutôt que d'affirmer que tout est dû. */
       const sco = await c.query(
         `select coalesce(sum(i.total_fcfa), 0)::bigint as du,
-                coalesce(sum(montant_regle(i.id)), 0)::bigint as paye
+                coalesce(sum(montant_regle(i.id)), 0)::bigint as paye,
+                sum(montant_echu(i.id, current_date)) as echu,
+                sum(retard_de(i.id, current_date)) as retard
            from invoices i
           where i.student_id = $1 and i.status <> 'annulee'`, [k.id]);
+      const prochaine = await c.query(
+        `select p.label, p.amount_fcfa, p.due_on::text as due_on
+           from invoices i
+           cross join lateral prochaine_echeance(i.id, current_date) p
+          where i.student_id = $1 and i.status <> 'annulee'
+          order by p.due_on limit 1`, [k.id]);
       out.push({
         id: k.id as string,
         classId: k.class_id as string | null,
@@ -154,6 +184,13 @@ export async function loadChildren(g: GuardianSession): Promise<ChildView[]> {
         justifiees: abs.rows[0].justifiees as number,
         du: Number(sco.rows[0].du),
         paye: Number(sco.rows[0].paye),
+        echu: sco.rows[0].echu === null ? null : Number(sco.rows[0].echu),
+        retard: sco.rows[0].retard === null ? null : Number(sco.rows[0].retard),
+        prochaine: prochaine.rows[0]
+          ? { label: prochaine.rows[0].label as string,
+              montant: Number(prochaine.rows[0].amount_fcfa),
+              le: String(prochaine.rows[0].due_on).slice(0, 10) }
+          : null,
         termId: (term.rows[0]?.id as string) ?? null,
         termSequence: (term.rows[0]?.sequence as number) ?? null,
       });
@@ -218,7 +255,9 @@ export async function loadChildren(g: GuardianSession): Promise<ChildView[]> {
       termLabel: k.termSequence ? `Trimestre ${k.termSequence}` : "Aucun trimestre en cours",
       subjects, moyenne, mention, rang, effectif,
       absences: k.absences, retards: k.retards, justifiees: k.justifiees,
-      duFcfa: k.du, payeFcfa: k.paye, rulesUnverified, publishedAt,
+      duFcfa: k.du, payeFcfa: k.paye,
+      echuFcfa: k.echu, retardFcfa: k.retard, prochaine: k.prochaine,
+      rulesUnverified, publishedAt,
     });
   }
   return views;
@@ -329,10 +368,27 @@ export function famillePage(
   </table>` : ""}
 
   ${k.duFcfa > 0 ? `<table>
-    <tr><td>Scolarité due</td><td class="r">${fcfa(k.duFcfa)} F</td></tr>
+    <tr><td>Scolarité de l'année</td><td class="r">${fcfa(k.duFcfa)} F</td></tr>
     <tr><td>Déjà versé</td><td class="r">${fcfa(k.payeFcfa)} F</td></tr>
-    <tr><td><b>${reste > 0 ? "Reste à payer" : "Solde"}</b></td>
-        <td class="r"><b>${fcfa(Math.abs(reste))} F</b></td></tr>
+    ${k.retardFcfa === null
+      // Pas d'échéancier : on ne dit ni « à jour » ni « en retard ». La
+      // famille voit le solde annuel et sait que c'est tout ce qu'on sait.
+      ? `<tr><td><b>${reste > 0 ? "Reste à payer" : "Solde"}</b></td>
+             <td class="r"><b>${fcfa(Math.abs(reste))} F</b></td></tr>`
+      : k.retardFcfa > 0
+        ? `<tr><td><b>À verser maintenant</b><div style="font-size:12.5px;color:#5C6072">
+               échéance dépassée</div></td>
+             <td class="r"><b style="color:#A8402A">${fcfa(k.retardFcfa)} F</b></td></tr>
+           <tr><td>Reste sur l'année</td>
+               <td class="r">${fcfa(Math.abs(reste))} F</td></tr>`
+        : `<tr><td><b>À verser maintenant</b></td>
+             <td class="r"><b style="color:#3B6349">0 F — vous êtes à jour</b></td></tr>
+           ${k.prochaine ? `<tr><td>${esc(k.prochaine.label)}
+             <div style="font-size:12.5px;color:#5C6072">le ${
+               esc(jourFr(k.prochaine.le))}</div></td>
+             <td class="r">${fcfa(k.prochaine.montant)} F</td></tr>` : ""}
+           <tr><td>Reste sur l'année</td>
+               <td class="r">${fcfa(Math.abs(reste))} F</td></tr>`}
   </table>` : ""}
 </div>`;
   };
