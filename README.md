@@ -793,6 +793,51 @@ saisit quarante notes, le réseau tombe, tout est perdu. Ici :
 4. Sans JavaScript, le formulaire se poste normalement. Le hors-ligne est une
    amélioration, jamais une dépendance.
 
+### Un élève arrivé en janvier était « en retard » depuis octobre
+
+Trouvé en tirant le fil de la migration précédente. 0017 a donné un sens au mot
+« en retard » : ce qui était exigible d'après l'échéancier, et qui n'a pas été
+versé. Restait une question que personne ne posait — exigible **de qui**, et
+depuis quand ?
+
+`frais.ts` émet la facture de l'année entière et pose une tranche au début de
+chaque trimestre. Pour un élève inscrit à la rentrée, c'est juste. Pour un enfant
+arrivé en janvier — transfert, déménagement, une famille qui a mis trois mois à
+réunir les frais — la tranche d'octobre est exigible **avant son arrivée**.
+L'écran le compte « en retard », peint sa ligne en rouge, et le tableau de bord
+réclame, pour des mois où l'enfant n'était pas là. Ce n'est pas un cas rare au
+Burkina, et ce sont précisément les familles les plus fragiles.
+
+**Et la date d'arrivée était fausse.** `enrolments.enrolled_on` existe depuis le
+premier jour, avec `default current_date`. Aucune ligne de code ne l'écrivait ni
+ne la lisait : c'est le jour de l'**import** qui s'y inscrivait. Une école qui
+charge sa liste en novembre faisait de son effectif entier une cohorte d'arrivées
+tardives — et depuis 0017, chacune serait annoncée en retard sur les tranches
+d'octobre. Personne ne s'en apercevait, puisque rien ne lisait cette date.
+
+Ce qui change :
+
+* la date d'arrivée est **écrite**, et la règle tient en une ligne : un élève
+  inscrit avant l'ouverture de l'année arrive **avec l'année** ; un élève inscrit
+  alors qu'elle est commencée arrive aujourd'hui ;
+* un départ pose enfin une **date** (`left_on`) et non plus le seul statut : on
+  ne pouvait pas dire depuis quand une place était libre ;
+* `echeances_avant_arrivee(facture)` compte les tranches tombées avant l'arrivée,
+  et leur montant. Aucune ligne pour un élève présent dès la rentrée : le cas
+  ordinaire n'appelle aucune mention ;
+* l'écran de la scolarité et l'espace famille le **disent**, à côté du rouge.
+
+**Et le logiciel ne tranche pas.** Savoir si un enfant arrivé en janvier doit les
+tranches d'octobre, une seule, ou une somme négociée est une règle
+d'établissement : au Burkina elle varie d'une école à l'autre, et aucun texte
+consulté ne la fixe. Le retard n'est donc **pas** raboté — l'inventer reviendrait
+à décider, dans un logiciel, ce qu'une famille doit, alors que la ligne rouge
+décide déjà de qui on renvoie chez lui. La règle rejoint le tableau des règles à
+confirmer, qui en compte désormais **sept**.
+
+`tests/arrivee.e2e.mjs` : 16 assertions. Contrôle négatif fait — la mention
+retirée, la ligne rouge parle de nouveau toute seule.
+
 ### Un reçu réimprimé disait autre chose que le papier de la famille
 
 `receiptPage` fige bien le **montant reçu** — `receipts.amount_fcfa` — mais
@@ -1470,7 +1515,7 @@ Comptes de démonstration — le code s'affiche à l'écran, aucun SMS n'est env
 | `70000005` | Directeur |
 
 Vérifications : `npm run check:all` — typecheck strict, 60 tests unitaires, et
-**trente-neuf parcours**, chacun contre un vrai PostgreSQL et un vrai serveur.
+**quarante parcours**, chacun contre un vrai PostgreSQL et un vrai serveur.
 Le tableau ci-dessous en détaille une partie ; les autres sont décrits, avec ce
 qu'ils ont trouvé, dans les sections qui précèdent.
 
@@ -1488,6 +1533,7 @@ qu'ils ont trouvé, dans les sections qui précèdent.
 | `test:eleve` (35) | on retrouve un élève par le numéro de son tuteur, un tuteur partagé se corrige pour la fratrie, et voir n'est pas corriger |
 | `test:personnel` (29) | un établissement crée ses propres comptes ; le dernier chef ne peut être ni écarté ni rétrogradé ; écarter quelqu'un ferme ses sessions ouvertes |
 | `test:messages` (26) | un refus de l'opérateur est enregistré avec sa raison, remonte au tableau de bord, et ne se referme que par un geste humain tracé |
+| `test:arrivee` (16) | un élève arrivé en cours d'année n'est plus réputé en retard depuis la rentrée sans que l'écran le dise, et un départ porte une date |
 | `test:recu-fige` (20) | un reçu réimprimé six mois plus tard dit exactement ce que disait le papier remis à la famille, annulation comprise |
 | `test:echeancier` (26) | « en retard » veut dire en retard sur une échéance, pas « doit encore quelque chose sur l'année », et une facture sans échéancier ne bascule d'aucun côté |
 | `test:canal` (24) | le serveur refuse de démarrer sans canal SMS déclaré, le mode démonstration s'annonce partout, et un code que l'opérateur refuse n'est plus annoncé comme envoyé |
@@ -1511,7 +1557,7 @@ qu'ils ont trouvé, dans les sections qui précèdent.
 
 ---
 
-## Les six règles à confirmer
+## Les sept règles à confirmer
 
 Ces règles n'ont pas pu être établies depuis une source burkinabè publique.
 Elles sont livrées comme **données**, avec leur provenance dans `source_note`,
@@ -1525,8 +1571,9 @@ et il faut les faire confirmer par un censeur avant tout usage réel.
 | gabarit du bulletin | générique | aucun modèle officiel MENAPLN publié, aucun bulletin scanné trouvé |
 | pondération des trimestres | moyenne simple des trois | le T3 est plus court ; aucune règle nationale trouvée |
 | jours travaillés dans la semaine | lundi → vendredi | beaucoup d'établissements travaillent aussi le samedi matin ; se corrige dans l'écran **Calendrier** |
+| facturation d'une arrivée en cours d'année | aucune — l'échéancier reste entier et l'écran le signale | la pratique varie d'un établissement à l'autre ; aucun texte consulté ne la fixe |
 
-Une matinée avec un censeur coopératif et une photocopieuse ferme les six.
+Une matinée avec un censeur coopératif et une photocopieuse ferme les sept.
 
 ---
 

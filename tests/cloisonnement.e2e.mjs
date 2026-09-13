@@ -55,7 +55,7 @@ const MIGRATIONS = [
   "0010_calendrier", "0011_pieces_justificatives",
   "0012_bulletin_conseil", "0013_examens", "0014_garde_envois",
   "0015_bulletin_complet", "0016_famille_injoignable",
-  "0017_echeancier", "0018_recu_fige",
+  "0017_echeancier", "0018_recu_fige", "0019_arrivee_en_cours_annee",
 ];
 
 const BASE_SANS_0009 = `fasoschool_sans_0009_${process.pid}`;

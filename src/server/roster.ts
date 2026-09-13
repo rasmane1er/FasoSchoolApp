@@ -572,10 +572,25 @@ export async function runImport(
         studentId = ins.rows[0].id;
       }
 
+      /* LA DATE D'ARRIVÉE EST ÉCRITE, ET ELLE N'EST PAS « AUJOURD'HUI ».
+       *
+       * La colonne existait depuis le premier jour avec `default current_date`,
+       * et aucune ligne de code ne l'écrivait : c'est donc le jour de l'IMPORT
+       * qui s'y inscrivait. Une école qui charge sa liste en novembre faisait
+       * ainsi de son effectif entier une cohorte d'arrivées tardives — et
+       * depuis 0017, chacune serait annoncée « en retard » sur les tranches
+       * d'octobre.
+       *
+       * La règle juste tient en une ligne : un élève inscrit AVANT l'ouverture
+       * de l'année arrive avec l'année ; un élève inscrit alors qu'elle est
+       * déjà commencée arrive aujourd'hui. */
       await c.query(
         `insert into enrolments
-           (school_id, student_id, academic_year_id, class_id, status, is_redoublant)
-         values (current_school_id(), $1, $2, $3, $4, $5)
+           (school_id, student_id, academic_year_id, class_id, status,
+            is_redoublant, enrolled_on)
+         values (current_school_id(), $1, $2, $3, $4, $5,
+                 greatest(current_date,
+                          (select starts_on from academic_years where id = $2)))
          on conflict (student_id, academic_year_id) do update
            set class_id = coalesce(excluded.class_id, enrolments.class_id),
                is_redoublant = excluded.is_redoublant,

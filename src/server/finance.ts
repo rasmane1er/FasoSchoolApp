@@ -38,6 +38,8 @@ export interface InvoiceLine {
   retard: number | null;
   /** La prochaine tranche, pour dire à la famille ce qui vient. */
   prochaine: { label: string; montant: number; le: string } | null;
+  /** Élève arrivé après l'ouverture de l'année, et échéances antérieures. */
+  arrivee: { le: string; echeances: number; montant: number } | null;
 }
 
 export async function listInvoices(schoolId: string, filter: "tous" | "impayes") {
@@ -52,6 +54,11 @@ export async function listInvoices(schoolId: string, filter: "tous" | "impayes")
               retard_de(i.id, current_date) as retard,
               (select row_to_json(p) from prochaine_echeance(i.id, current_date) p)
                 as prochaine,
+              -- Ce qui était exigible AVANT que l'élève n'arrive. Le produit
+              -- ne décide pas si c'est dû ; il refuse seulement de le compter
+              -- « en retard » sans le dire.
+              (select row_to_json(a) from echeances_avant_arrivee(i.id) a)
+                as arrivee,
               -- Le filtre sur le numéro est dans le WHERE : sans lui, un
               -- tuteur PRINCIPAL sans numéro sort en tête et masque un second
               -- tuteur joignable du même dossier. Même défaut que celui trouvé
@@ -80,6 +87,11 @@ export async function listInvoices(schoolId: string, filter: "tous" | "impayes")
       prochaine: x.prochaine
         ? { label: x.prochaine.label, montant: Number(x.prochaine.amount_fcfa),
             le: String(x.prochaine.due_on).slice(0, 10) }
+        : null,
+      arrivee: x.arrivee
+        ? { le: String(x.arrivee.arrivee).slice(0, 10),
+            echeances: Number(x.arrivee.combien),
+            montant: Number(x.arrivee.montant) }
         : null,
     }));
     return filter === "impayes" ? rows.filter((x) => x.rest > 0) : rows;
@@ -116,6 +128,8 @@ export async function financePage(
    * C'est le mot sur lequel un établissement décide qui il renvoie chez lui. */
   const enRetard = rows.filter((r) => (r.retard ?? 0) > 0);
   const sansEcheancier = rows.filter((r) => r.retard === null && r.rest > 0);
+  const arriveesTardives = enRetard.filter(
+    (r) => r.arrivee !== null && r.arrivee.echeances > 0);
   const montantEnRetard = enRetard.reduce((a, r) => a + (r.retard ?? 0), 0);
 
   const body = rows.map((r) => {
@@ -137,7 +151,18 @@ export async function financePage(
           ? `<span class="dit">échéancier absent</span>`
           : enRetardCeJour
             ? `<b style="color:var(--laterite)" class="num">${fcfa(r.retard)} F</b>
-               <span class="dit">exigible, non versé</span>`
+               <span class="dit">exigible, non versé</span>${
+               /* UN ÉLÈVE ARRIVÉ EN JANVIER N'ÉTAIT PAS LÀ EN OCTOBRE.
+                  On ne retire pas ces tranches du retard — savoir si elles
+                  sont dues est une règle d'établissement, pas une règle de
+                  logiciel — mais on ne laisse pas non plus le rouge parler
+                  tout seul. */
+               r.arrivee && r.arrivee.echeances > 0
+                 ? `<span class="dit" style="color:var(--ochre)">arrivé le ${
+                     jour(r.arrivee.le)} — ${plural(r.arrivee.echeances,
+                     "échéance est antérieure", "échéances sont antérieures")}
+                     à son arrivée (${fcfa(r.arrivee.montant)} F)</span>`
+                 : ""}`
             : r.prochaine
               ? `<span class="pill p-ok">à jour</span>
                  <span class="dit">${esc(r.prochaine.label)} : ${
@@ -168,6 +193,18 @@ export async function financePage(
         <div class="n">${plural(enRetard.length, "famille", "familles")} — exigible et non versé</div></div>
       <div class="tile"><div class="k">Taux de recouvrement</div><div class="v">${attendu === 0 ? "—" : Math.round((encaisse / attendu) * 100)}<span style="font-size:15px;color:var(--faint)"> %</span></div></div>
     </div>
+
+    ${arriveesTardives.length === 0 ? "" : `<div class="note warn">
+      <b>${plural(arriveesTardives.length, "élève est arrivé", "élèves sont arrivés")}
+      en cours d'année, et ${arriveesTardives.length > 1 ? "leurs retards comptent"
+        : "son retard compte"} des échéances antérieures à
+      ${arriveesTardives.length > 1 ? "leur" : "son"} arrivée.</b>
+      Le logiciel ne décide pas si ces tranches sont dues : au Burkina la
+      facturation d'une arrivée tardive varie d'un établissement à l'autre, et
+      aucun texte consulté ne la fixe. C'est à la direction de trancher — et,
+      une fois tranché, de réémettre la facture depuis l'écran des frais.
+      <span class="hint">Règle à confirmer, comme les six autres du README.</span>
+    </div>`}
 
     ${sansEcheancier.length === 0 ? "" : `<div class="note">
       <b>${plural(sansEcheancier.length, "facture n'a pas d'échéancier",

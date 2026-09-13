@@ -113,6 +113,8 @@ export interface ChildView {
   retardFcfa: number | null;
   /** La tranche suivante, pour dire ce qui vient plutôt qu'une somme brute. */
   prochaine: { label: string; montant: number; le: string } | null;
+  /** Arrivé en cours d'année, avec des échéances antérieures à son arrivée. */
+  arrivee: { le: string; echeances: number; montant: number } | null;
   rulesUnverified: boolean;
   /** Date de remise du bulletin figé, si la famille en a reçu un. */
   publishedAt: Date | null;
@@ -168,6 +170,15 @@ export async function loadChildren(g: GuardianSession): Promise<ChildView[]> {
                 sum(retard_de(i.id, current_date)) as retard
            from invoices i
           where i.student_id = $1 and i.status <> 'annulee'`, [k.id]);
+      /* Les tranches tombées avant l'arrivée de l'enfant. La famille doit
+       * pouvoir lire, sur son propre écran, pourquoi on lui réclame des mois
+       * où son enfant n'était pas encore inscrit — et que ce n'est pas tranché. */
+      const avant = await c.query(
+        `select a.combien, a.montant, a.arrivee::text as arrivee
+           from invoices i
+           cross join lateral echeances_avant_arrivee(i.id) a
+          where i.student_id = $1 and i.status <> 'annulee'
+          order by a.combien desc limit 1`, [k.id]);
       const prochaine = await c.query(
         `select p.label, p.amount_fcfa, p.due_on::text as due_on
            from invoices i
@@ -190,6 +201,11 @@ export async function loadChildren(g: GuardianSession): Promise<ChildView[]> {
           ? { label: prochaine.rows[0].label as string,
               montant: Number(prochaine.rows[0].amount_fcfa),
               le: String(prochaine.rows[0].due_on).slice(0, 10) }
+          : null,
+        arrivee: avant.rows[0] && Number(avant.rows[0].combien) > 0
+          ? { le: String(avant.rows[0].arrivee).slice(0, 10),
+              echeances: Number(avant.rows[0].combien),
+              montant: Number(avant.rows[0].montant) }
           : null,
         termId: (term.rows[0]?.id as string) ?? null,
         termSequence: (term.rows[0]?.sequence as number) ?? null,
@@ -257,7 +273,7 @@ export async function loadChildren(g: GuardianSession): Promise<ChildView[]> {
       absences: k.absences, retards: k.retards, justifiees: k.justifiees,
       duFcfa: k.du, payeFcfa: k.paye,
       echuFcfa: k.echu, retardFcfa: k.retard, prochaine: k.prochaine,
-      rulesUnverified, publishedAt,
+      arrivee: k.arrivee, rulesUnverified, publishedAt,
     });
   }
   return views;
@@ -379,6 +395,15 @@ export function famillePage(
         ? `<tr><td><b>À verser maintenant</b><div style="font-size:12.5px;color:#5C6072">
                échéance dépassée</div></td>
              <td class="r"><b style="color:#A8402A">${fcfa(k.retardFcfa)} F</b></td></tr>
+           ${k.arrivee && k.arrivee.echeances > 0 ? `<tr><td colspan="2"
+             style="font-size:12.5px;color:#5C6072;line-height:1.45">
+             ${esc(k.fullName.split(" ")[0] ?? "Votre enfant")} est inscrit
+             depuis le ${esc(jourFr(k.arrivee.le))}, et ce montant comprend
+             ${k.arrivee.echeances > 1
+               ? `${k.arrivee.echeances} échéances antérieures`
+               : "une échéance antérieure"} à son arrivée
+             (${fcfa(k.arrivee.montant)} F). L'établissement décide de ce qui
+             est dû dans ce cas : demandez-le-lui.</td></tr>` : ""}
            <tr><td>Reste sur l'année</td>
                <td class="r">${fcfa(Math.abs(reste))} F</td></tr>`
         : `<tr><td><b>À verser maintenant</b></td>

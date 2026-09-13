@@ -138,7 +138,10 @@ export async function recordTransfer(
     // d'autre, l'inscription se fait par l'écran d'inscriptions.
     if (direction === "sortant") {
       await c.query(
-        `update enrolments set status = 'transfere_sortant'
+        // La date manquait : un départ ne posait qu'un statut, et on ne
+        // pouvait pas dire depuis quand la place était libre.
+        `update enrolments set status = 'transfere_sortant',
+                              left_on = current_date
           where student_id = $1 and status in ('inscrit', 'reinscrit')`, [studentId]);
     }
 
