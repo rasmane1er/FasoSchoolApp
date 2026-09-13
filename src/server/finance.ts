@@ -376,10 +376,20 @@ export async function collect(
     const year = new Date().getFullYear();
     const number = `R-${year}-${String(n).padStart(4, "0")}`;
 
+    /* L'ÉTAT DE LA FACTURE EST FIGÉ AVEC LE REÇU.
+     *
+     * Le cartouche « Total dû / Total payé / Reste » était calculé à
+     * l'impression : le même reçu, réimprimé après un versement ultérieur,
+     * affichait « SCOLARITÉ SOLDÉE » alors que le papier remis à la famille
+     * disait « Reste 68 000 F ». Deux papiers, un numéro, deux affirmations
+     * contradictoires. */
     await c.query(
-      `insert into receipts (school_id, payment_id, receipt_number, sequence, amount_fcfa)
-       values ($1,$2,$3,$4,$5)`,
-      [schoolId, pay.rows[0].id, number, n, montant]);
+      `insert into receipts (school_id, payment_id, receipt_number, sequence,
+                             amount_fcfa, total_du_fcfa, total_paye_fcfa)
+       values ($1,$2,$3,$4,$5,$6,$7)`,
+      [schoolId, pay.rows[0].id, number, n, montant,
+       Number(inv.rows[0].total_fcfa),
+       Number(inv.rows[0].paye) + montant]);
 
     const nouveauReste = rest - montant;
     await c.query(
@@ -593,16 +603,18 @@ export async function annulerPaiement(
         where id = $1 returning receipt_sequence`, [schoolId]);
     const n = Number(seq.rows[0].receipt_sequence);
     const numero = `R-${new Date().getFullYear()}-${String(n).padStart(4, "0")}`;
-    await c.query(
-      `insert into receipts (school_id, payment_id, receipt_number, sequence,
-                             amount_fcfa)
-       values ($1,$2,$3,$4,$5)`,
-      [schoolId, contre.rows[0].id, numero, n, pay.amount_fcfa]);
-
-    // La facture retrouve son état réel.
+    // La facture retrouve son état réel — on le lit AVANT d'écrire le reçu de
+    // contrepartie, qui doit porter ce que ce papier-là affirme.
     const i = await c.query(
       `select total_fcfa, montant_regle(id) as paye from invoices where id = $1`,
       [pay.invoice_id]);
+
+    await c.query(
+      `insert into receipts (school_id, payment_id, receipt_number, sequence,
+                             amount_fcfa, total_du_fcfa, total_paye_fcfa)
+       values ($1,$2,$3,$4,$5,$6,$7)`,
+      [schoolId, contre.rows[0].id, numero, n, pay.amount_fcfa,
+       Number(i.rows[0].total_fcfa), Number(i.rows[0].paye)]);
     const reste = Number(i.rows[0].total_fcfa) - Number(i.rows[0].paye);
     await c.query(
       `update invoices set status = $2 where id = $1`,
@@ -625,6 +637,9 @@ export async function receiptPage(schoolId: string, number: string): Promise<str
   const d = await withSchool(schoolId, async (c) => {
     const r = await c.query(
       `select rc.receipt_number, rc.amount_fcfa, rc.issued_at,
+              -- L'état de la facture AU MOMENT DE CE REÇU, figé. Null pour un
+              -- reçu antérieur à la migration 0018 : l'impression le dit.
+              rc.total_du_fcfa as fige_du, rc.total_paye_fcfa as fige_paye,
               p.method, p.provider_ref, p.reverses_payment_id,
               p.reversal_reason,
               -- Le reçu qu'annule celui-ci, ou celui qui l'annule : un
@@ -653,7 +668,15 @@ export async function receiptPage(schoolId: string, number: string): Promise<str
   });
   if (!d) return null;
 
-  const reste = Number(d.total_fcfa) - Number(d.paye);
+  /* CE QUE LE PAPIER AFFIRME NE BOUGE PAS.
+   *
+   * On lit ce qui a été figé à l'émission, jamais l'état actuel de la facture.
+   * Sans cela, un reçu de 10 000 F réimprimé après le solde annonçait
+   * « SCOLARITÉ SOLDÉE » sous le même numéro que le papier de la famille. */
+  const restituable = d.fige_du !== null && d.fige_paye !== null;
+  const totalDu = restituable ? Number(d.fige_du) : null;
+  const totalPaye = restituable ? Number(d.fige_paye) : null;
+  const reste = restituable ? (totalDu as number) - (totalPaye as number) : null;
   const methodes: Record<string, string> = {
     especes: "Espèces", virement: "Virement bancaire", cheque: "Chèque",
     orange_money: "Orange Money", moov_money: "Moov Money",
@@ -729,13 +752,23 @@ export async function receiptPage(schoolId: string, number: string): Promise<str
         fcfa(d.amount_fcfa)} <span style="font-size:14pt">FCFA</span></div>
     </div>
     <div style="width:38%;border:1px solid #DCD8CF;padding:14px 18px;display:flex;flex-direction:column;gap:7px">
+      ${restituable ? `
       <div style="display:flex;justify-content:space-between;font-size:9.5pt">
-        <span style="color:#4E5265">Total dû</span><span class="num">${fcfa(d.total_fcfa)} F</span></div>
+        <span style="color:#4E5265">Total dû</span><span class="num">${fcfa(totalDu)} F</span></div>
       <div style="display:flex;justify-content:space-between;font-size:9.5pt">
-        <span style="color:#4E5265">Total payé</span><span class="num">${fcfa(d.paye)} F</span></div>
+        <span style="color:#4E5265">Total payé</span><span class="num">${fcfa(totalPaye)} F</span></div>
       <div style="display:flex;justify-content:space-between;font-size:11pt;font-weight:600;
                   padding-top:7px;border-top:1px solid #DCD8CF">
         <span>Reste</span><span class="num">${fcfa(reste)} F</span></div>
+      <div style="font-size:7pt;color:#6B6F80;line-height:1.35">
+        Situation au jour de ce reçu. Elle ne change pas si la facture bouge
+        ensuite.</div>`
+      : `
+      <div style="font-size:8.5pt;color:#4E5265;line-height:1.4">
+        <b>Solde non restituable.</b><br>
+        Ce reçu est antérieur à la mise à jour qui fige la situation du compte.
+        Le montant reçu ci-contre fait foi ; pour le solde, voyez
+        l'établissement.</div>`}
     </div>
   </div>
 

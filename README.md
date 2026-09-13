@@ -793,6 +793,51 @@ saisit quarante notes, le réseau tombe, tout est perdu. Ici :
 4. Sans JavaScript, le formulaire se poste normalement. Le hors-ligne est une
    amélioration, jamais une dépendance.
 
+### Un reçu réimprimé disait autre chose que le papier de la famille
+
+`receiptPage` fige bien le **montant reçu** — `receipts.amount_fcfa` — mais
+calculait le cartouche de droite, « Total dû / Total payé / Reste », au moment
+de l'impression :
+
+```ts
+montant_regle(i.id) as paye
+const reste = Number(d.total_fcfa) - Number(d.paye);
+```
+
+Éprouvé, dans cet ordre :
+
+1. une famille verse 10 000 F. Le reçu N°1 sort : « Total payé 10 000, Reste
+   68 000 ». Elle le range dans un cahier, comme on fait ;
+2. trois semaines plus tard elle verse le solde ;
+3. l'économe réimprime **le même reçu N°1** — il affiche **« SCOLARITÉ
+   SOLDÉE »**.
+
+Deux papiers, un seul numéro, deux affirmations contradictoires sur ce qu'une
+famille a payé. Et l'écart va dans les deux sens : qu'un paiement antérieur soit
+annulé, et la réimpression montre un reste **plus grand** que celui que la
+famille détient — le papier de la famille devient la pièce qui accuse l'école,
+ou celle qui l'innocente, selon le jour où on l'imprime.
+
+Le dépôt porte déjà cette règle pour les bulletins — « le bulletin remis ne
+bouge pas », figé à la publication. Elle vaut pour tout ce qu'un papier affirme,
+et un reçu est le document le plus opposable du produit.
+
+Ce qui change :
+
+* `receipts.total_du_fcfa` et `receipts.total_paye_fcfa`, écrits **une fois** à
+  l'émission. Le reste s'en déduit et n'est donc pas stocké : un troisième
+  nombre ne pourrait que contredire les deux autres ;
+* le reçu de **contrepartie** d'une annulation porte l'état d'**après**
+  l'annulation, et le reçu annulé garde le sien — un document annulé reste la
+  preuve de ce qu'il affirmait ;
+* un reçu **antérieur à la migration** ne restitue pas un solde inventé : il
+  écrit « Solde non restituable », laisse le montant reçu faire foi, et renvoie
+  à l'établissement. `montant_regle()` aujourd'hui ne dit pas ce que le papier
+  disait à l'époque, et c'est exactement le défaut qu'on répare.
+
+`tests/recu-fige.e2e.mjs` : 20 assertions. Contrôle négatif fait — le calcul
+d'impression remis, le même reçu passe de « Reste 68 000 F » à « Reste 0 F ».
+
 ### « En retard » voulait dire « doit quelque chose »
 
 Dans `finance.ts`, une ligne :
@@ -1425,7 +1470,7 @@ Comptes de démonstration — le code s'affiche à l'écran, aucun SMS n'est env
 | `70000005` | Directeur |
 
 Vérifications : `npm run check:all` — typecheck strict, 60 tests unitaires, et
-**trente-huit parcours**, chacun contre un vrai PostgreSQL et un vrai serveur.
+**trente-neuf parcours**, chacun contre un vrai PostgreSQL et un vrai serveur.
 Le tableau ci-dessous en détaille une partie ; les autres sont décrits, avec ce
 qu'ils ont trouvé, dans les sections qui précèdent.
 
@@ -1443,6 +1488,7 @@ qu'ils ont trouvé, dans les sections qui précèdent.
 | `test:eleve` (35) | on retrouve un élève par le numéro de son tuteur, un tuteur partagé se corrige pour la fratrie, et voir n'est pas corriger |
 | `test:personnel` (29) | un établissement crée ses propres comptes ; le dernier chef ne peut être ni écarté ni rétrogradé ; écarter quelqu'un ferme ses sessions ouvertes |
 | `test:messages` (26) | un refus de l'opérateur est enregistré avec sa raison, remonte au tableau de bord, et ne se referme que par un geste humain tracé |
+| `test:recu-fige` (20) | un reçu réimprimé six mois plus tard dit exactement ce que disait le papier remis à la famille, annulation comprise |
 | `test:echeancier` (26) | « en retard » veut dire en retard sur une échéance, pas « doit encore quelque chose sur l'année », et une facture sans échéancier ne bascule d'aucun côté |
 | `test:canal` (24) | le serveur refuse de démarrer sans canal SMS déclaré, le mode démonstration s'annonce partout, et un code que l'opérateur refuse n'est plus annoncé comme envoyé |
 | `test:recurrence` (18) | « quatre faits, quatre convocations » et « quatre faits, aucune suite » ne sont plus le même chiffre au conseil de classe, et le registre ouvre sur ce qui revient |
