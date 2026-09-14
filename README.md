@@ -793,6 +793,65 @@ saisit quarante notes, le réseau tombe, tout est perdu. Ici :
 4. Sans JavaScript, le formulaire se poste normalement. Le hors-ligne est une
    amélioration, jamais une dépendance.
 
+### La démonstration était datée, et les fêtes légales expiraient en 2028
+
+Trouvé en regardant ce que `npm run demo` montre **aujourd'hui**. Tout le script
+était écrit sur l'année 2026-2027, en dur. Le jour de la relecture on était le
+14 septembre 2026 — dix-sept jours avant l'ouverture de cette année-là — et le
+produit affichait donc, à qui le découvrait :
+
+> Pas d'appel ce jour-là. Cette date est hors de l'année scolaire 2026-2027.
+
+L'écran le plus démontrable de la deuxième promesse du produit, inutilisable. Et
+sur la scolarité : **« En retard aujourd'hui : 0 F, 0 famille »** — aucune
+échéance n'étant tombée, la distinction construite deux commits plus tôt n'avait
+rien à montrer. Le produit avait raison chaque fois ; c'est la démonstration qui
+était datée, et qui le serait davantage chaque année.
+
+**Et la démonstration avait aussi pris du retard sur le produit** : ses factures
+n'avaient pas d'échéancier (« 12 factures n'ont pas d'échéancier », et l'espace
+famille retombait sur « vous devez 78 000 F »), et ses reçus ne portaient pas
+l'état figé de leur facture — chacun s'imprimait donc **« Solde non
+restituable »**, la branche dégradée, sur le document le plus soigné du produit.
+
+Ce qui change :
+
+* une seule ancre, `DEBUT`, et toutes les dates en découlent par un décalage en
+  jours. Par défaut la dernière vraie rentrée ; avec `--aujourdhui`, l'année est
+  placée pour que ce jour tombe au 75e jour du premier trimestre — l'appel
+  s'ouvre, des familles sont réellement en retard d'une tranche, d'autres
+  réellement en avance — et **le script le dit** quand son calendrier est
+  synthétique ;
+* la démonstration sème l'échéancier et fige l'état de ses reçus, comme le
+  produit le fait ;
+* **le témoin de fixture ne compte plus seulement des lignes.** Il vérifie que
+  la démonstration *exerce* encore ce qu'elle montre : trois tranches par
+  facture, l'état figé sur chaque reçu, aucun élève arrivé après l'ouverture,
+  et des fêtes nationales dans l'année.
+
+**Et, un étage plus bas, un vrai défaut du produit.** La migration 0010 semait
+les onze jours chômés de la loi du 9 janvier 2026 pour `array[2026, 2027, 2028]`
+— trois années, écrites en 2026. Invisible, parce que la démonstration était
+elle aussi épinglée à l'intérieur de la fenêtre. Une école qui ouvre FasoSchool
+à la rentrée **2029** n'a donc aucune fête légale au calendrier : l'appel du
+matin s'ouvre le 25 décembre, le surveillant coche les absents d'une classe
+vide, et quarante familles reçoivent « votre enfant est absent aujourd'hui » le
+jour de Noël. Exactement le défaut que 0010 avait été écrite pour empêcher,
+revenu par la porte du temps qui passe.
+
+0020 prolonge la liste jusqu'en 2060 — on projette une loi de 2026 sur
+trente-quatre ans, et `source_note` le dit, pour qu'un directeur de 2041 sache
+sur quoi repose la ligne qu'il lit. Le choix est assumé : une liste qui s'arrête
+ne se lit pas « ces dates sont inconnues », elle se lit « l'école travaille ce
+jour-là ». Un silence qui affirme. Et parce qu'une liste finie finira toujours
+par finir, le tableau de bord porte désormais un point **bloquant** quand
+l'année en cours ne contient aucune fête nationale.
+
+**Les suites ont suivi.** Six d'entre elles portaient les dates de 2026-2027 :
+elles demandent désormais à la base un jour d'école libre, ou dérivent leurs
+dates de l'année de démonstration — même règle que pour les heures de silence,
+une suite possède ce dont dépendent ses assertions.
+
 ### Un élève arrivé en janvier était « en retard » depuis octobre
 
 Trouvé en tirant le fil de la migration précédente. 0017 a donné un sens au mot
@@ -1538,7 +1597,7 @@ qu'ils ont trouvé, dans les sections qui précèdent.
 | `test:echeancier` (26) | « en retard » veut dire en retard sur une échéance, pas « doit encore quelque chose sur l'année », et une facture sans échéancier ne bascule d'aucun côté |
 | `test:canal` (24) | le serveur refuse de démarrer sans canal SMS déclaré, le mode démonstration s'annonce partout, et un code que l'opérateur refuse n'est plus annoncé comme envoyé |
 | `test:recurrence` (18) | « quatre faits, quatre convocations » et « quatre faits, aucune suite » ne sont plus le même chiffre au conseil de classe, et le registre ouvre sur ce qui revient |
-| `test:fixture` (16) | le jeu de démonstration sort de `check:all` exactement comme il y est entré : une suite qui emporte ce qui n'est pas à elle est nommée, avec la table et le nombre |
+| `test:fixture` (21) | le jeu de démonstration sort de `check:all` exactement comme il y est entré : une suite qui emporte ce qui n'est pas à elle est nommée, avec la table et le nombre |
 | `test:injoignable` (31) | un absent dont la famille n'a aucun numéro laisse une tâche nommée au lieu d'un silence, et un tuteur principal sans numéro ne masque plus un second tuteur joignable |
 | `test:evaluations` (22) | un enseignant ouvre un devoir pour sa matière ; une composition ne s'ouvre que par le censeur, et pour tout le niveau |
 | `test:transferts` (23) | un parcours déclaré est accepté et étiqueté, une moyenne inventée est refusée, le certificat porte sa réserve |
@@ -1694,6 +1753,9 @@ l'appel, sur le poste de l'enseignant. Ni l'administration ni la comptabilité :
 ces utilisateurs sont à un bureau.
 
 **Une suite de tests possède les réglages dont dépendent ses assertions.**
+Cela vaut aussi pour le calendrier : six suites portaient les dates de l'année
+2026-2027 du jeu de démonstration. Elles demandent désormais à la base un jour
+d'école libre, ou dérivent leurs dates de l'année en cours.
 Trois suites affirmaient que des messages partent, sans neutraliser la garde des
 heures de silence : elles passaient en journée et échouaient le soir, sur des
 assertions dont le message ne parlait pas d'horaire. Découvert en lançant

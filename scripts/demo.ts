@@ -48,10 +48,127 @@ function makeRng(seed: number) {
   };
 }
 
+/* ---------------------------------------------------------------------------
+ * LA DÉMONSTRATION SE SITUE PAR RAPPORT À AUJOURD'HUI.
+ *
+ * CE QUI ÉTAIT FIGÉ. Toutes les dates de ce script étaient écrites en dur sur
+ * l'année scolaire 2026-2027. Le jour où cette démonstration a été relue, on
+ * était le 14 septembre 2026 — dix-sept jours AVANT l'ouverture de cette
+ * année-là — et le produit montrait donc, à qui le découvrait :
+ *
+ *   * l'appel du matin REFUSÉ, mot pour mot : « Pas d'appel ce jour-là. Cette
+ *     date est hors de l'année scolaire 2026-2027. » L'écran le plus
+ *     démontrable de la deuxième promesse du produit, inutilisable ;
+ *   * l'écran de la scolarité annonçant « En retard aujourd'hui : 0 F,
+ *     0 famille » — aucune échéance n'étant encore tombée, la distinction
+ *     construite pour cet écran n'avait rien à montrer.
+ *
+ * Le produit avait raison chaque fois. C'est la démonstration qui était datée,
+ * et qui le serait davantage chaque année : en 2028, elle raconterait une année
+ * scolaire révolue.
+ *
+ * CE QUI EST FAIT. Une seule ancre, `DEBUT` : le premier jour de l'année
+ * scolaire, placé soixante-quinze jours avant aujourd'hui. Toutes les autres
+ * dates en découlent par un décalage en jours — les mêmes décalages
+ * qu'auparavant, relevés sur l'année 2026-2027 d'origine.
+ *
+ * Soixante-quinze jours, parce que c'est le point où la démonstration montre le
+ * plus : le premier trimestre est presque au bout (il ferme dans cinq jours),
+ * ses trois évaluations et ses douze appels sont derrière, la première tranche
+ * de scolarité est échue depuis longtemps — donc les familles qui n'ont rien
+ * versé sont RÉELLEMENT en retard et celles qui ont versé 40 000 F sont
+ * RÉELLEMENT en avance — et l'appel du matin s'ouvre aujourd'hui.
+ * ------------------------------------------------------------------------- */
+
+/* DEUX POSITIONS POSSIBLES, ET ON NE CHOISIT PAS À LA PLACE DE L'UTILISATEUR.
+ *
+ * Le calendrier burkinabè va d'octobre à juillet. Une démonstration lancée en
+ * août ou en septembre tombe donc dans les vacances, et le produit refuse
+ * l'appel du matin — à juste titre : il n'y a pas école. Mais celui qui montre
+ * le produit ce jour-là n'a rien à montrer.
+ *
+ *   défaut          l'année scolaire RÉELLE : celle qui contient aujourd'hui,
+ *                   ou la dernière achevée si l'on est en vacances. Les mois
+ *                   sont ceux du Burkina, et les écrans disent la vérité de la
+ *                   saison — vacances comprises ;
+ *
+ *   --aujourdhui    l'année est placée pour que CE JOUR tombe au 75e jour du
+ *                   premier trimestre. Tout est démontrable : l'appel s'ouvre,
+ *                   des familles sont réellement en retard d'une tranche,
+ *                   d'autres réellement en avance. En échange, les mois ne
+ *                   sont plus ceux du calendrier réel, et le script le DIT.
+ */
+const iso = (a: number, m: number, j: number) => new Date(Date.UTC(a, m, j));
+
+/** La première année civile que le calendrier légal du produit couvre. */
+const PREMIERE_ANNEE_COUVERTE = 2026;
+
+/** Le 1er octobre le plus récent qui soit déjà passé. */
+const derniereRentree = (): Date => {
+  const a = new Date();
+  const an = a.getUTCFullYear();
+  return a >= iso(an, 9, 1) ? iso(an, 9, 1) : iso(an - 1, 9, 1);
+};
+
+/* Le mode « placé » est demandé, OU imposé quand le calendrier réel ne peut
+   pas servir : les fêtes légales inscrites dans le produit commencent en 2026
+   (loi du 9 janvier 2026), et une démonstration sur une année antérieure
+   ouvrirait l'appel du matin le jour de Noël — le défaut même que ce produit
+   s'emploie à empêcher. */
+const REEL_UTILISABLE =
+  derniereRentree().getUTCFullYear() >= PREMIERE_ANNEE_COUVERTE;
+const PLACER_AUJOURDHUI =
+  process.argv.includes("--aujourdhui") || !REEL_UTILISABLE;
+
+/** Le premier jour de l'année scolaire de démonstration. */
+const DEBUT = (() => {
+  if (PLACER_AUJOURDHUI) {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() - 75);
+    return iso(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  }
+  return derniereRentree();
+})();
+
+/** Une date de la démonstration : `DEBUT` + n jours, en ISO. */
+const jour = (n: number): string => {
+  const d = new Date(DEBUT);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+};
+
+/* Les décalages, relevés sur l'année 2026-2027 écrite en dur à l'origine. */
+const T1 = [0, 80], T2 = [96, 178], T3 = [187, 241];
+const FIN_ANNEE = 287;
+const EVALUATIONS = [19, 47, 68];        // deux devoirs et une composition
+const PREMIER_APPEL = 4, PAS_APPEL = 5;  // douze appels, tous les cinq jours
+
+/** « 2026-2027 », dérivé de l'ancre. */
+const LIBELLE_ANNEE = `${DEBUT.getUTCFullYear()}-${DEBUT.getUTCFullYear() + 1}`;
+/** L'année civile qui sert aux matricules et aux références. */
+const AN = DEBUT.getUTCFullYear();
+
 async function main() {
   const rng = makeRng(20261116);
 
   console.log("Création de l'établissement de démonstration…");
+  if (PLACER_AUJOURDHUI) {
+    console.log(
+      "\n  L'année scolaire est placée pour que la démonstration soit\n"
+      + "  utilisable AUJOURD'HUI : ses mois ne suivent donc pas le calendrier\n"
+      + `  burkinabè réel (1er octobre → 15 juillet). Elle court du ${jour(0)}\n`
+      + `  au ${jour(FIN_ANNEE)}.`
+      + (REEL_UTILISABLE ? "\n"
+         : `\n  (Imposé : le calendrier légal du produit commence en `
+           + `${PREMIERE_ANNEE_COUVERTE}, et la dernière rentrée réelle lui est\n`
+           + `  antérieure.)\n`));
+  } else if (new Date().toISOString().slice(0, 10) > jour(FIN_ANNEE)) {
+    console.log(
+      `\n  L'année ${LIBELLE_ANNEE} est ACHEVÉE (${jour(0)} → ${jour(FIN_ANNEE)}) :\n`
+      + "  nous sommes dans les vacances, et le produit refusera l'appel du\n"
+      + "  matin — il n'y a pas école. Pour une démonstration utilisable\n"
+      + "  aujourd'hui : npm run demo -- --aujourdhui\n");
+  }
 
   // provision_school() est le seul chemin : un INSERT direct dans schools est
   // refusé par le row-level security, faute de contexte d'établissement.
@@ -59,7 +176,7 @@ async function main() {
     const r = await c.query(
       `select provision_school($1,$2,$3,$4,$5,$6) as id`,
       ["Collège Privé Wend-Panga", "prive_laic", "ouaga_bobo",
-       "Ouagadougou", "Centre", "2026-10-01"],
+       "Ouagadougou", "Centre", jour(0)],
     );
     return r.rows[0].id as string;
   });
@@ -67,19 +184,20 @@ async function main() {
   const { classId, termId } = await withSchool(schoolId, async (c) => {
     const year = await c.query(
       `insert into academic_years (school_id, label, starts_on, ends_on, status)
-       values ($1, '2026-2027', '2026-10-01', '2027-07-15', 'en_cours') returning id`,
-      [schoolId],
+       values ($1, $2, $3::date, $4::date, 'en_cours') returning id`,
+      [schoolId, LIBELLE_ANNEE, jour(T1[0]), jour(FIN_ANNEE)],
     );
     const yearId = year.rows[0].id;
 
     // Trimestres inégaux : le T3 est tronqué par la session d'examens.
     const t1 = await c.query(
       `insert into terms (school_id, academic_year_id, sequence, starts_on, ends_on, status)
-       values ($1, $2, 1, '2026-10-01', '2026-12-20', 'ouvert'),
-              ($1, $2, 2, '2027-01-05', '2027-03-28', 'ouvert'),
-              ($1, $2, 3, '2027-04-06', '2027-05-30', 'ouvert')
+       values ($1, $2, 1, $3::date, $4::date, 'ouvert'),
+              ($1, $2, 2, $5::date, $6::date, 'ouvert'),
+              ($1, $2, 3, $7::date, $8::date, 'ouvert')
        returning id, sequence`,
-      [schoolId, yearId],
+      [schoolId, yearId, jour(T1[0]), jour(T1[1]), jour(T2[0]), jour(T2[1]),
+       jour(T3[0]), jour(T3[1])],
     );
     const termId = t1.rows.find((r) => r.sequence === 1)!.id;
 
@@ -124,12 +242,20 @@ async function main() {
         `insert into students (school_id, matricule, last_name, first_names, sex,
                                date_of_birth, place_of_birth)
          values ($1, $2, $3, $4, $5, $6, $7) returning id`,
-        [schoolId, `WP-2026-${String(i + 1).padStart(4, "0")}`, nom, prenoms, sexe, ddn, lieu],
+        [schoolId, `WP-${AN}-${String(i + 1).padStart(4, "0")}`, nom, prenoms, sexe, ddn, lieu],
       );
       studentIds.push(s.rows[0].id);
       await c.query(
-        `insert into enrolments (school_id, student_id, academic_year_id, class_id, status)
-         values ($1, $2, $3, $4, 'inscrit')`,
+        /* LES DOUZE ÉLÈVES SONT INSCRITS À LA RENTRÉE.
+           C'est ce que la démonstration raconte, et la date doit le dire :
+           `enrolled_on` était laissé au défaut de la colonne — le jour où le
+           script tourne — ce qui faisait de l'effectif entier une cohorte
+           d'arrivées en cours d'année, et l'écran de la scolarité les
+           annonçait toutes comme telles. */
+        `insert into enrolments (school_id, student_id, academic_year_id,
+                                 class_id, status, enrolled_on)
+         values ($1, $2, $3, $4, 'inscrit',
+                 (select starts_on from academic_years where id = $3))`,
         [schoolId, s.rows[0].id, yearId, classId],
       );
 
@@ -152,8 +278,8 @@ async function main() {
     // Scolarité : grille conforme au plafond catégorie 2 en zone Ouaga/Bobo.
     const fs = await c.query(
       `insert into fee_schedules (school_id, academic_year_id, level_code, label)
-       values ($1,$2,'6E','Grille 6e — 2026-2027') returning id`,
-      [schoolId, yearId],
+       values ($1,$2,'6E',$3) returning id`,
+      [schoolId, yearId, `Grille 6e — ${LIBELLE_ANNEE}`],
     );
     const lignes: Array<[string, number, string]> = [
       ["Inscription",           15000, "plafonne"],
@@ -169,13 +295,43 @@ async function main() {
       );
     }
 
+    /* L'ÉCHÉANCIER, COMME `frais.ts` LE POSE.
+     *
+     * Une démonstration doit montrer le produit dans l'état où il sera. Ces
+     * factures étaient insérées sans échéancier : l'écran de la scolarité
+     * annonçait donc « 12 factures n'ont pas d'échéancier », et l'espace
+     * famille retombait sur « vous devez 78 000 F » — c'est-à-dire que la
+     * démonstration montrait la troisième promesse du produit ÉTEINTE.
+     *
+     * Les tranches suivent les trimestres, comme à l'émission réelle, et le
+     * reste de la division va sur la première : c'est l'usage. */
+    const trimestres = await c.query(
+      `select sequence, starts_on from terms where academic_year_id = $1
+        order by sequence`, [yearId]);
+    const TOTAL_FACTURE = 78000;
+
     for (let i = 0; i < studentIds.length; i += 1) {
       const inv = await c.query(
         `insert into invoices (school_id, student_id, academic_year_id, fee_schedule_id,
                                reference, total_fcfa, status)
-         values ($1,$2,$3,$4,$5,78000,'ouverte') returning id`,
-        [schoolId, studentIds[i], yearId, fs.rows[0].id, `F-2026-${String(i + 1).padStart(4, "0")}`],
+         values ($1,$2,$3,$4,$5,$6,'ouverte') returning id`,
+        [schoolId, studentIds[i], yearId, fs.rows[0].id,
+         `F-${AN}-${String(i + 1).padStart(4, "0")}`, TOTAL_FACTURE],
       );
+
+      const n = Math.max(1, trimestres.rowCount ?? 1);
+      const tranche = Math.floor(TOTAL_FACTURE / n);
+      const reste = TOTAL_FACTURE - tranche * n;
+      for (const [k, t] of trimestres.rows.entries()) {
+        await c.query(
+          `insert into invoice_instalments (school_id, invoice_id, label,
+                                            amount_fcfa, due_on, sort_order)
+           values ($1,$2,$3,$4,$5::date,$6)`,
+          [schoolId, inv.rows[0].id, `Tranche ${t.sequence}`,
+           tranche + (k === 0 ? reste : 0), t.starts_on, k],
+        );
+      }
+
       // Deux tiers des familles ont payé une partie ou la totalité.
       const part = i % 3 === 0 ? 0 : i % 3 === 1 ? 40000 : 78000;
       if (part > 0) {
@@ -185,10 +341,16 @@ async function main() {
            values ($1,$2,$3,'especes','confirme',$4, now()) returning id`,
           [schoolId, inv.rows[0].id, part, `demo-${i}`],
         );
+        /* Le reçu porte l'état de la facture AU MOMENT DE SON ÉMISSION.
+           Sans ces deux nombres, chaque reçu de la démonstration s'imprimait
+           « Solde non restituable » — la branche dégradée, sur le document le
+           plus soigné du produit. */
         await c.query(
-          `insert into receipts (school_id, payment_id, receipt_number, sequence, amount_fcfa)
-           values ($1,$2,$3,$4,$5)`,
-          [schoolId, p.rows[0].id, `R-2026-${String(i + 1).padStart(4, "0")}`, i + 1, part],
+          `insert into receipts (school_id, payment_id, receipt_number, sequence,
+                                 amount_fcfa, total_du_fcfa, total_paye_fcfa)
+           values ($1,$2,$3,$4,$5,$6,$7)`,
+          [schoolId, p.rows[0].id, `R-${AN}-${String(i + 1).padStart(4, "0")}`,
+           i + 1, part, TOTAL_FACTURE, part],
         );
       }
     }
@@ -271,7 +433,7 @@ async function main() {
          on conflict do nothing`,
         [schoolId, crit.rows[0].id,
          code === "BATI" ? "Photo du bâtiment principal.pdf"
-                         : "Résultats au BEPC 2025-2026.pdf",
+                         : `Résultats au BEPC ${AN - 1}-${AN}.pdf`,
          octets, octets.length]);
     }
 
@@ -296,9 +458,9 @@ async function main() {
 
     for (const sub of subs.rows) {
       const evals: Array<[string, string]> = [
-        ["devoir", "2026-10-20"],
-        ["devoir", "2026-11-17"],
-        ["composition", "2026-12-08"],
+        ["devoir", jour(EVALUATIONS[0])],
+        ["devoir", jour(EVALUATIONS[1])],
+        ["composition", jour(EVALUATIONS[2])],
       ];
       for (const [type, date] of evals) {
         const ev = await c.query(
@@ -334,7 +496,7 @@ async function main() {
 
     // Un peu d'assiduité, pour la colonne du bulletin.
     for (let d = 0; d < 12; d += 1) {
-      const date = new Date(2026, 9, 5 + d * 5).toISOString().slice(0, 10);
+      const date = jour(PREMIER_APPEL + d * PAS_APPEL);
       const sess = await c.query(
         `insert into attendance_sessions (school_id, class_id, session_date, session_slot, recorded_by)
          values ($1,$2,$3,'matin',$4) returning id`,

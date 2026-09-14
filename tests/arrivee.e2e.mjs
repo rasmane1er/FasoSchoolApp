@@ -62,6 +62,8 @@ const MARQUE = "EPREUVE ARRIVEE";
 /* Ce que cette suite déplace dans le jeu de démonstration : la date d'arrivée
  * d'UN élève, et l'échéancier d'UNE facture. Les deux sont remis à la fin. */
 let arriveeInitiale = null;   // { studentId, enrolledOn, leftOn, status }
+/** Les tranches de démonstration mises de côté, à rendre telles quelles. */
+let tranchesEmpruntees = [];
 
 const purger = async () => {
   await client.query(
@@ -144,6 +146,15 @@ try {
     [CIBLE.student_id, ANNEE.id]);
   arriveeInitiale = { studentId: CIBLE.student_id, enrolledOn: av0[0].j,
                       leftOn: av0[0].sortie, status: av0[0].status };
+
+  /* LA DÉMONSTRATION SÈME DÉSORMAIS TROIS TRANCHES PAR FACTURE. Cette suite
+     pose les siennes, calculées par rapport à aujourd'hui : il faut donc
+     d'abord mettre celles de la démonstration de côté, sans quoi la facture en
+     porterait six et tous les comptes seraient faux. */
+  ({ rows: tranchesEmpruntees } = await client.query(
+    `select * from invoice_instalments where invoice_id = $1`, [CIBLE.id]));
+  await client.query(
+    `delete from invoice_instalments where invoice_id = $1`, [CIBLE.id]);
 
   const poser = async (invoiceId) => {
     const part = Math.floor(Number(CIBLE.total_fcfa) / 3);
@@ -294,6 +305,14 @@ try {
   }
   await c2.query(
     `delete from invoice_instalments where label like $1`, ["%" + MARQUE + "%"]);
+  for (const t of tranchesEmpruntees) {
+    await c2.query(
+      `insert into invoice_instalments (id, school_id, invoice_id, label,
+                                        amount_fcfa, due_on, sort_order)
+       values ($1,$2,$3,$4,$5,$6,$7) on conflict (id) do nothing`,
+      [t.id, t.school_id, t.invoice_id, t.label, t.amount_fcfa, t.due_on,
+       t.sort_order]).catch(() => {});
+  }
   await c2.query(
     `delete from student_transfers where school_name like $1`, ["%" + MARQUE + "%"])
     .catch(() => {});

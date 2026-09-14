@@ -64,9 +64,12 @@ await client.query(`select set_config('fasoschool.school_id', $1, false)`, [SCHO
 
 const MARQUE = "EPREUVE ECHEANCIER";
 
-/* La démonstration ne sème AUCUN échéancier : ses factures sont insérées
- * directement. Tout `invoice_instalments` présent appartient donc à une suite —
- * celle-ci pose les siens et les retire, sans toucher aux factures. */
+/* LA DÉMONSTRATION SÈME DÉSORMAIS UN ÉCHÉANCIER — trois tranches par facture,
+ * aux débuts de trimestre, comme `frais.ts` les pose. Cette suite avait été
+ * écrite quand elle n'en semait aucun : elle doit donc METTRE DE CÔTÉ les
+ * tranches de démonstration des factures qu'elle utilise, poser les siennes,
+ * et les rendre à la fin. C'est la règle habituelle, appliquée à une fixture
+ * qui a grandi : on ne supprime que ce qu'on a mis, et on rend ce qu'on a pris. */
 const purger = async () => {
   await client.query(
     `delete from invoice_instalments where label like $1`, ["%" + MARQUE + "%"]);
@@ -82,6 +85,8 @@ await purger();
  * append-only : on ne le supprime jamais dans le produit, mais une épreuve doit
  * rendre la base telle qu'elle l'a trouvée, et ces lignes-ci sont les siennes. */
 const paiementsPoses = [];
+/** Les tranches de démonstration mises de côté, à rendre telles quelles. */
+let tranchesEmpruntees = [];
 
 const server = spawn(process.execPath, ["--experimental-strip-types", "src/server/app.ts"], {
   env: { ...process.env, PORT: String(PORT), SMS_PROVIDER: "mock" },
@@ -168,6 +173,18 @@ try {
     Boolean(AJOUR && RIEN && SANS),
     "une famille ayant versé une partie, deux n'ayant rien versé");
 
+  /* On emprunte les tranches de démonstration des trois factures utilisées :
+     celles d'AJOUR et de RIEN sont remplacées par les nôtres, celle de SANS
+     est simplement retirée — c'est ainsi qu'on obtient une facture « sans
+     échéancier » maintenant que la démonstration en pose partout. */
+  const EMPRUNTEES = [AJOUR.id, RIEN.id, SANS.id];
+  ({ rows: tranchesEmpruntees } = await client.query(
+    `select * from invoice_instalments where invoice_id = any($1::uuid[])`,
+    [EMPRUNTEES]));
+  await client.query(
+    `delete from invoice_instalments where invoice_id = any($1::uuid[])`,
+    [EMPRUNTEES]);
+
   /* AJOUR : 40 000 versés ; tranche 1 échue = 26 000 → à jour, et il lui
    * reste 38 000 sur l'année. C'est EXACTEMENT le cas que l'ancien filtre
    * comptait « en retard ».
@@ -214,9 +231,19 @@ try {
     const i = sco.indexOf("En retard aujourd");
     return i < 0 ? "" : nu(sco.slice(i, i + 400));
   })();
-  check("ET ELLE EN COMPTE UNE SEULE", /\b1 famille\b/.test(tuile),
-    `« ${tuile.slice(0, 120)} » — neuf familles doivent encore de l'argent sur `
-      + `l'année ; une seule a dépassé une échéance`);
+  /* Combien de familles la démonstration met-elle en retard à elle seule ?
+     On le DEMANDE : la réponse dépend du jour où l'année de démonstration est
+     placée, et l'écrire ici la figerait de nouveau. */
+  const { rows: base } = await client.query(
+    `select count(*)::int as n from invoices i
+      where i.status <> 'annulee'
+        and not (i.id = any($1::uuid[]))
+        and coalesce(retard_de(i.id, current_date), 0) > 0`, [EMPRUNTEES]);
+  const attendu = base[0].n + 1;   // + RIEN, que cette suite met en retard
+  check(`ET ELLE EN COMPTE ${attendu}`,
+    new RegExp(`\\b${attendu} famille`).test(tuile),
+    `« ${tuile.slice(0, 140)} » — les autres doivent encore de l'argent sur `
+      + `l'année sans avoir dépassé d'échéance`);
   check("et « reste à recouvrer » dit qu'il porte sur l'année",
     /sur l(?:'|&#39;)année entière/.test(sco));
 
@@ -251,9 +278,9 @@ try {
   check("il annonce les familles qui ont dépassé une échéance",
     /dépassé une échéance/.test(board), nu(board).slice(0, 250));
   check("et il ne compte QUE celles-là",
-    /1 famille a dépassé/.test(board),
-    "une seule famille a un échéancier dépassé ; les autres doivent encore "
-      + "de l'argent sans être en retard : " + nu(board).slice(0, 250));
+    new RegExp(`${attendu} famille`).test(board),
+    `${attendu} attendu — les autres doivent encore de l'argent sans avoir `
+      + `dépassé d'échéance : ` + nu(board).slice(0, 250));
 
   /* === Ce que voit la famille ========================================== */
   console.log("\nCe que voit la famille");
@@ -333,6 +360,14 @@ try {
   await c2.query(`delete from audit_log where action like 'payment.%'`);
   await c2.query(
     `delete from invoice_instalments where label like $1`, ["%" + MARQUE + "%"]);
+  for (const t of tranchesEmpruntees) {
+    await c2.query(
+      `insert into invoice_instalments (id, school_id, invoice_id, label,
+                                        amount_fcfa, due_on, sort_order)
+       values ($1,$2,$3,$4,$5,$6,$7) on conflict (id) do nothing`,
+      [t.id, t.school_id, t.invoice_id, t.label, t.amount_fcfa, t.due_on,
+       t.sort_order]).catch(() => {});
+  }
   await c2.query(
     `delete from sms_messages where body like '%Recu%' or body like '%a jour%'`);
   await c2.query(`delete from sms_credit_ledger where note = 'Confirmation de paiement'`);

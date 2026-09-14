@@ -49,13 +49,45 @@ const { rows: sc } = await client.query(
   `select school_id from auth_lookup_user('70000001')`);
 const SCHOOL = sc[0].school_id;
 await client.query(`select set_config('fasoschool.school_id', $1, false)`, [SCHOOL]);
+/* UN JOUR D'ÉCOLE CHOISI DANS L'ANNÉE, PAS ÉCRIT EN DUR.
+ *
+ * Ces dates étaient fixées sur l'année 2026-2027 du jeu de démonstration, qui
+ * était elle-même écrite en dur. La démonstration se place désormais sur une
+ * vraie année scolaire relative à aujourd'hui : une date d'octobre 2026 en dur
+ * tomberait hors année, et le produit refuserait l'appel — à juste titre.
+ *
+ * On demande donc à la base un jour qui soit : dans l'année, ouvert selon la
+ * semaine de l'école, hors congés, et SANS séance d'appel déjà semée. Le
+ * décalage (`offset`) diffère d'une suite à l'autre pour qu'elles ne se
+ * marchent pas dessus — c'est la même règle que pour les purges : un jour
+ * n'est à soi que si personne d'autre ne le prend. */
+const jourLibre = async (rang) => {
+  const { rows } = await client.query(
+    `select d::date::text as j
+       from academic_years ay,
+            lateral generate_series(ay.starts_on + 8, ay.starts_on + 60,
+                                    interval '1 day') d
+      where extract(isodow from d)::smallint = any(
+              (select school_days from schools limit 1)::smallint[])
+        and not exists (
+              select 1 from calendar_events ce
+               where ce.closes_school
+                 and d::date between ce.starts_on
+                                 and coalesce(ce.ends_on, ce.starts_on))
+        and not exists (
+              select 1 from attendance_sessions s where s.session_date = d::date)
+      order by d offset $1 limit 1`, [rang]);
+  if (!rows[0]) {
+    console.error("Aucun jour d'école libre dans l'année de démonstration.");
+    process.exit(1);
+  }
+  return rows[0].j;
+};
+
+const JOUR_ECOLE = await jourLibre(2);
+
 
 const MARQUE = "EPREUVE ENVOIS";
-/* UN JOUR QUE LA DÉMONSTRATION N'OCCUPE PAS. Le 20 octobre en était un :
- * `npm run demo` sème l'assiduité tous les cinq jours à partir du 5 octobre,
- * et la purge de cette suite emportait donc une séance et douze présences du
- * jeu de démonstration à chaque exécution. Le 16 est un vendredi libre. */
-const JOUR_ECOLE = "2026-10-16";           // un vendredi, dans l'année scolaire
 const { rows: fenetre } = await client.query(
   `select sms_quiet_from, sms_quiet_to from schools limit 1`);
 

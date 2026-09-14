@@ -117,7 +117,8 @@ psql "$CIBLE" -v ON_ERROR_STOP=1 -q \
   -f db/migrations/0016_famille_injoignable.sql \
   -f db/migrations/0017_echeancier.sql \
   -f db/migrations/0018_recu_fige.sql \
-  -f db/migrations/0019_arrivee_en_cours_annee.sql
+  -f db/migrations/0019_arrivee_en_cours_annee.sql \
+  -f db/migrations/0020_fetes_au_dela_de_2028.sql
 echo "migrations appliquées"
 
 echo

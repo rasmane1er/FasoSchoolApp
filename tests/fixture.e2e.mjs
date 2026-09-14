@@ -62,6 +62,9 @@ const ATTENDU = [
   ["documents",            2, "la photo du bâtiment et les résultats au BEPC, "
                             + "de vrais PDF dans la base"],
   ["invoices",            12, "une facture par élève"],
+  ["invoice_instalments", 36, "trois tranches par facture, aux débuts de "
+                            + "trimestre — sans elles, l'écran de la scolarité "
+                            + "annonce « 12 factures n'ont pas d'échéancier »"],
 ];
 
 const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
@@ -93,11 +96,19 @@ try {
   }
 
   /* Les deux cas nommés plus haut, vérifiés par leur contenu et pas seulement
-   * par leur nombre : c'est la forme exacte que prenait l'érosion. */
+   * par leur nombre : c'est la forme exacte que prenait l'érosion.
+   *
+   * Les DEUX PREMIERS appels de la démonstration sont ceux que la purge de
+   * `calendrier.e2e.mjs` emportait. On les désigne par leur rang et non par
+   * leur date : l'année de démonstration se place désormais par rapport à
+   * aujourd'hui, et une date écrite ici retomberait dans le défaut même que ce
+   * témoin surveille. */
   const { rows: oct } = await client.query(
-    `select session_date::text as d from attendance_sessions
-      where session_date in ('2026-10-05','2026-10-10') order by session_date`);
-  check("les appels du 5 et du 10 octobre sont toujours là", oct.length === 2,
+    `select s.session_date::text as d, ay.starts_on::text as debut
+       from attendance_sessions s, academic_years ay
+      order by s.session_date limit 2`);
+  check("les deux premiers appels de la démonstration sont toujours là",
+    oct.length === 2 && oct[0].d > oct[0].debut,
     `${oct.map((x) => x.d).join(", ") || "aucun"} — c'est exactement ce que la `
       + "purge de `calendrier.e2e.mjs` emportait");
 
@@ -129,6 +140,60 @@ try {
       `select count(*)::int as n from ${table}`)).rows[0].n);
     check(`${table} = 0`, n === 0, `${n} — ${quoi}`);
   }
+
+  /* ---------------------------------------------------------------------
+   * LA DÉMONSTRATION DÉMONTRE-T-ELLE ENCORE ?
+   *
+   * Compter les lignes ne suffit pas. Deux fonctionnalités ont été construites
+   * et la démonstration ne les montrait pas — non parce qu'il lui manquait des
+   * lignes, mais parce que les siennes étaient dans le mauvais état :
+   *
+   *   * ses factures n'avaient pas d'échéancier, alors l'écran de la scolarité
+   *     affichait « 12 factures n'ont pas d'échéancier » et l'espace famille
+   *     retombait sur « vous devez 78 000 F » ;
+   *   * ses reçus ne portaient pas l'état figé de la facture, alors chacun
+   *     s'imprimait « Solde non restituable » — la branche dégradée, sur le
+   *     document le plus soigné du produit.
+   *
+   * Un témoin qui ne compte que des lignes ne voit pas cela. Celui-ci vérifie
+   * donc aussi que la démonstration EXERCE ce qu'elle est censée montrer. */
+  console.log("\nEt démontre-t-elle encore ?");
+
+  const { rows: figes } = await client.query(
+    `select count(*) filter (where total_du_fcfa is not null)::int as figes,
+            count(*)::int as total from receipts`);
+  check("chaque reçu porte l'état figé de sa facture",
+    figes[0].total > 0 && figes[0].figes === figes[0].total,
+    `${figes[0].figes}/${figes[0].total} — sans ces nombres, la démonstration `
+      + `imprime « Solde non restituable » sur tous ses reçus`);
+
+  const { rows: ech } = await client.query(
+    `select count(*) filter (where n = 3)::int as ok, count(*)::int as total
+       from (select invoice_id, count(*)::int as n
+               from invoice_instalments group by invoice_id) x`);
+  check("chaque facture porte ses trois tranches",
+    ech[0].total > 0 && ech[0].ok === ech[0].total,
+    `${ech[0].ok}/${ech[0].total}`);
+
+  const { rows: an } = await client.query(
+    `select starts_on::text as debut, ends_on::text as fin,
+            (select min(enrolled_on)::text from enrolments) as premiere_arrivee
+       from academic_years order by (status = 'en_cours') desc, starts_on desc
+      limit 1`);
+  check("aucun élève n'arrive après l'ouverture de l'année",
+    an[0].premiere_arrivee <= an[0].debut,
+    `premier inscrit le ${an[0].premiere_arrivee}, année ouverte le `
+      + `${an[0].debut} — une démonstration semée en novembre inscrivait `
+      + `toute l'école « en novembre », et l'écran annonçait douze arrivées `
+      + `tardives`);
+
+  const { rows: fetes } = await client.query(
+    `select annee_sans_fetes_legales(ay.id) as vide
+       from academic_years ay
+      order by (ay.status = 'en_cours') desc, ay.starts_on desc limit 1`);
+  check("l'année de démonstration porte ses fêtes nationales",
+    fetes[0].vide === false,
+    "sans elles, l'appel du matin s'ouvre le 25 décembre");
 
   if (manques.length > 0) {
     console.log(

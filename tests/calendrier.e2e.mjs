@@ -71,15 +71,62 @@ await client.query(`select set_config('fasoschool.school_id', $1, false)`, [SCHO
  * La borne « hors année scolaire » est retirée : ces appels-là sont refusés,
  * donc ils n'écrivent rien — il n'y avait jamais rien à purger, seulement un
  * risque d'emporter les séances d'une autre année. */
-const JOURS = [
-  "2026-12-25",   // Noël, fermé
-  "2026-10-04",   // un dimanche
-  "2026-10-12",   // un lundi ordinaire, hors semis de démonstration
-  "2026-10-06",   // le jour d'une composition : ouvert
-  "2026-10-17",   // un samedi, hors semis de démonstration
-  "2027-01-05", "2027-01-06",   // les congés saisis par l'école
-  "2027-05-27",   // Tabaski, saisie par l'école
-];
+/* LES DATES SONT CELLES DE L'ANNÉE DE DÉMONSTRATION, PAS D'UNE ANNÉE ÉCRITE
+ * EN DUR.
+ *
+ * Cette suite portait les dates de l'année 2026-2027, parce que la
+ * démonstration les portait aussi. La démonstration se place désormais sur une
+ * vraie année scolaire relative à aujourd'hui : ces dates-là tomberaient hors
+ * année, et le produit refuserait tout — à juste titre, mais pour la mauvaise
+ * raison.
+ *
+ * On les dérive donc : les fêtes fixes à partir de l'année civile d'ouverture,
+ * et les jours ouvrés en DEMANDANT à la base un lundi, un samedi, un dimanche
+ * libres de séance. */
+const { rows: annee } = await client.query(
+  `select starts_on::text as debut, ends_on::text as fin,
+          extract(year from starts_on)::int as an
+     from academic_years order by (status = 'en_cours') desc, starts_on desc
+     limit 1`);
+const AN = annee[0].an;              // l'année civile d'ouverture : octobre
+const SUIVANTE = AN + 1;             // celle où tombent janvier → juillet
+
+/** Le premier jour de la semaine demandée, dans l'année, sans séance d'appel. */
+const jourDeSemaine = async (isodow, rang = 0) => {
+  const { rows } = await client.query(
+    `select d::date::text as j
+       from academic_years ay,
+            lateral generate_series(ay.starts_on + 2, ay.starts_on + 60,
+                                    interval '1 day') d
+      where extract(isodow from d)::smallint = $1
+        and not exists (
+              select 1 from attendance_sessions s where s.session_date = d::date)
+      order by d offset $2 limit 1`, [isodow, rang]);
+  if (!rows[0]) { console.error("Aucun jour libre trouvé."); process.exit(1); }
+  return rows[0].j;
+};
+
+const NOEL = `${AN}-12-25`;
+const DIMANCHE = await jourDeSemaine(7);
+const LUNDI = await jourDeSemaine(1, 1);
+const COMPO = await jourDeSemaine(2, 1);      // un mardi, pour la composition
+const SAMEDI = await jourDeSemaine(6, 1);
+const CONGES = [`${SUIVANTE}-01-05`, `${SUIVANTE}-01-06`];
+/* Tabaski est mobile : sa date dépend de l'observation de la lune, et le
+ * produit la réclame plutôt que de la deviner. Pour l'éprouver il faut un jour
+ * DANS l'année de démonstration et qui ne soit pas déjà une fête — on le
+ * demande, on ne l'écrit pas. */
+const TABASKI = (await client.query(
+  `select d::date::text as j
+     from academic_years ay,
+          lateral generate_series(ay.starts_on + 100, ay.ends_on - 1,
+                                  interval '1 day') d
+    where not exists (
+            select 1 from calendar_events ce
+             where ce.starts_on = d::date and ce.school_id is null)
+    order by d limit 1`)).rows[0].j;
+
+const JOURS = [NOEL, DIMANCHE, LUNDI, COMPO, SAMEDI, ...CONGES, TABASKI];
 
 const purger = async () => {
   await client.query(`delete from calendar_events where label like $1`, [TEMOIN + "%"]);
@@ -176,13 +223,28 @@ try {
   console.log("\nLe calendrier existe, et il dit ce qui manque");
   const page = await (await fetch(`${BASE}/calendrier`, { headers: { cookie } })).text();
   check("l'écran répond", page.includes("Calendrier"));
-  /* Pas l'Assomption : le 15 août tombe hors de l'année scolaire, et l'écran
-     n'affiche que l'année en cours. Choisir une fête qui n'y est jamais aurait
-     fait échouer le test pour la seule raison qu'il regardait au mauvais
-     endroit. */
-  check("les fêtes légales fixes de l'année y sont",
-    /Noël/.test(page) && /Jour de l/.test(page) && /coutumes/.test(page),
-    "Noël, le Jour de l'An et le 15 mai tombent tous dans l'année scolaire");
+  /* QUELLES FÊTES ATTENDRE ? On le DEMANDE à la base plutôt que de le
+     supposer : l'écran n'affiche que l'année en cours, et l'année de
+     démonstration se place désormais par rapport à aujourd'hui — écrire ici
+     « Noël, le Jour de l'An et le 15 mai » présumerait une année d'octobre à
+     juillet, et l'assertion échouerait pour la seule raison qu'elle regarde au
+     mauvais endroit. */
+  const { rows: attendues } = await client.query(
+    `select ce.label from calendar_events ce, academic_years ay
+      where ce.school_id is null and ce.closes_school
+        and ce.starts_on between ay.starts_on and ay.ends_on
+        and ay.id = (select id from academic_years
+                      order by (status = 'en_cours') desc, starts_on desc limit 1)
+      order by ce.starts_on`);
+  check("l'année de démonstration porte des fêtes légales", attendues.length > 0,
+    "sans elles, l'appel du matin s'ouvrirait un jour chômé");
+  /* La page échappe les apostrophes (`Jour de l&#39;An`) : on compare sur un
+     texte décodé, sinon l'assertion échoue sur la mise en forme. */
+  const pageNue = page.replace(/&#39;/g, "'").replace(/&amp;/g, "&");
+  const absentes = attendues.filter((f) => !pageNue.includes(f.label));
+  check("LES FÊTES LÉGALES DE L'ANNÉE SONT TOUTES À L'ÉCRAN",
+    absentes.length === 0,
+    `manquent : ${absentes.map((f) => f.label).join(", ")}`);
   check("IL RÉCLAME LES QUATRE FÊTES MOBILES",
     /Tabaski/.test(page) && /Ma[o]?uloud/.test(page) && /manque/.test(page),
     "leurs dates dépendent de l'observation de la lune : les deviner serait pire");
@@ -196,17 +258,17 @@ try {
       where starts_on = $1::date and school_id is null
       order by closes_school desc limit 1`, [jour])).rows[0] ?? null;
 
-  const noel = await ferme("2026-12-25");
+  const noel = await ferme(NOEL);
   check("Noël ferme l'école", noel?.closes_school === true, JSON.stringify(noel));
-  const coutumes = await ferme("2027-05-15");
+  const coutumes = await ferme(`${SUIVANTE}-05-15`);
   check("LE 15 MAI FERME L'ÉCOLE", coutumes?.closes_school === true,
     "Journée des coutumes et traditions — chômée depuis la loi de 2026 ; "
       + "absente de toute liste antérieure");
-  const aout = await ferme("2027-08-05");
+  const aout = await ferme(`${SUIVANTE}-08-05`);
   check("LE 5 AOÛT NE FERME PLUS", aout && aout.closes_school === false,
     "la proclamation de l'Indépendance est devenue commémorative en 2026 — "
       + `trouvé : ${JSON.stringify(aout)}`);
-  const toussaint = await ferme("2026-11-01");
+  const toussaint = await ferme(`${AN}-11-01`);
   check("LE 1ER NOVEMBRE NE FERME PLUS", toussaint && toussaint.closes_school === false,
     `trouvé : ${JSON.stringify(toussaint)}`);
   check("mais les deux restent inscrits au calendrier",
@@ -230,9 +292,9 @@ try {
 
   for (const [date, quoi] of [
     ["1999-01-01", "vingt-sept ans avant l'année scolaire"],
-    ["2027-12-25", "six mois après sa fin"],
-    ["2026-12-25", "le jour de Noël"],
-    ["2026-10-04", "un dimanche"],
+    [`${SUIVANTE + 1}-12-25`, "dix-sept mois après sa fin"],
+    [NOEL, "le jour de Noël"],
+    [DIMANCHE, "un dimanche"],
   ]) {
     const a = await appel(date);
     check(`${date} — ${quoi} : refusé`,
@@ -257,37 +319,37 @@ try {
 
   /* === 4. Un jour ouvert reste ouvert ===================================== */
   console.log("\nUn jour d'école ordinaire marche toujours");
-  const lundi = "2026-10-12";
+  const lundi = LUNDI;
   const ouvert = await poster(`/absences?classe=${classe}&date=${lundi}`, cookie, {});
   const corpsOuvert = await ouvert.text();
-  check("le lundi 12 octobre est accepté", /Appel enregistré/.test(corpsOuvert),
+  check(`le lundi ${LUNDI} est accepté`, /Appel enregistré/.test(corpsOuvert),
     corpsOuvert.slice(0, 160));
 
   /* === 5. Ce que l'école ajoute ========================================== */
   console.log("\nL'établissement pose ses propres congés");
   const conges = await poster("/calendrier", cookie, {
     label: `${TEMOIN} congés du 1er trimestre`, type: "conges",
-    debut: "2027-01-05", fin: "2027-01-06" });
+    debut: CONGES[0], fin: CONGES[1] });
   check("les congés sont enregistrés", /enregistré/.test(await conges.text()));
 
-  const pendant = await appel("2027-01-05");
+  const pendant = await appel(CONGES[0]);
   check("PENDANT LES CONGÉS, L'APPEL EST REFUSÉ", !pendant.ecrit,
     "c'est la période saisie par l'école, pas une fête nationale");
   check("et aucun SMS ne part", pendant.sms === 0);
-  const finConges = await appel("2027-01-06");
+  const finConges = await appel(CONGES[1]);
   check("le dernier jour de la période compte aussi", !finConges.ecrit,
     "un intervalle qui exclut sa borne de fin est un piège classique");
 
   console.log("\nUne composition ne ferme pas l'école");
   await poster("/calendrier", cookie, {
-    label: `${TEMOIN} composition`, type: "composition", debut: "2026-10-06" });
-  const compo = await appel("2026-10-06");
+    label: `${TEMOIN} composition`, type: "composition", debut: COMPO });
+  const compo = await appel(COMPO);
   check("l'appel a bien lieu le jour d'une composition", compo.ecrit,
     "c'est `closes_school` qui décide, pas le fait d'être au calendrier");
 
   /* === 6. La semaine de l'établissement ================================== */
   console.log("\nLa semaine est une donnée, pas une constante du code");
-  const samedi = "2026-10-17";
+  const samedi = SAMEDI;
   const avant = await appel(samedi);
   check("par défaut, pas d'école le samedi", !avant.ecrit);
   await poster("/calendrier/semaine", cookie, { jour: ["1", "2", "3", "4", "5", "6"] });
@@ -303,7 +365,7 @@ try {
   console.log("\nCe qu'une école ne peut pas toucher");
   const { rows: nat } = await client.query(
     `select id, label from calendar_events where school_id is null
-      and starts_on = '2026-12-25' limit 1`);
+      and starts_on = $1::date limit 1`, [NOEL]);
   const tentative = await poster("/calendrier/retirer", cookie, { id: nat[0].id });
   const dit = await tentative.text();
   check("elle ne retire pas une fête légale nationale",
@@ -322,16 +384,16 @@ try {
   /* === 8. Les fêtes mobiles saisies disparaissent de la réclamation ====== */
   console.log("\nQuand l'école saisit Tabaski, on cesse de la réclamer");
   const avantSaisie = (await client.query(
-    `select count(*)::int as n from fetes_mobiles_manquantes('2026-10-01','2027-07-15')`
-  )).rows[0].n;
+    `select count(*)::int as n from fetes_mobiles_manquantes($1::date, $2::date)`,
+    [annee[0].debut, annee[0].fin])).rows[0].n;
   await poster("/calendrier", cookie, {
-    label: `${TEMOIN} Tabaski`, type: "fete", debut: "2027-05-27" });
+    label: `${TEMOIN} Tabaski`, type: "fete", debut: TABASKI });
   const apresSaisie = (await client.query(
-    `select count(*)::int as n from fetes_mobiles_manquantes('2026-10-01','2027-07-15')`
-  )).rows[0].n;
+    `select count(*)::int as n from fetes_mobiles_manquantes($1::date, $2::date)`,
+    [annee[0].debut, annee[0].fin])).rows[0].n;
   check("la liste des manquantes rétrécit", apresSaisie === avantSaisie - 1,
     `${avantSaisie} → ${apresSaisie}`);
-  const jourTabaski = await appel("2027-05-27");
+  const jourTabaski = await appel(TABASKI);
   check("et ce jour-là l'école est fermée", !jourTabaski.ecrit);
 
   console.log("\nErreurs serveur :",

@@ -136,6 +136,28 @@ export async function pointsDAttention(
       });
     }
 
+    /* LE CALENDRIER LÉGAL COUVRE-T-IL L'ANNÉE EN COURS ?
+     *
+     * Les fêtes nationales étaient semées pour trois années seulement, écrites
+     * en 2026. Passé 2028, une école n'en avait plus AUCUNE : l'appel du matin
+     * s'ouvrait le 25 décembre, et quarante familles recevaient « votre enfant
+     * est absent aujourd'hui » le jour de Noël. 0020 prolonge la liste, mais
+     * une liste finie finit toujours par finir — alors on surveille. */
+    if (yearId) {
+      const sansFetes = await un(
+        `select case when annee_sans_fetes_legales($1) then 1 else 0 end as n`,
+        [yearId]);
+      if (sansFetes > 0) {
+        points.push({
+          gravite: "bloquant",
+          texte: "Aucune fête nationale n'est inscrite pour cette année "
+            + "scolaire : l'appel s'ouvrirait un 25 décembre, et les familles "
+            + "recevraient un SMS d'absence un jour sans école.",
+          action: "Voir", lien: "/calendrier", droit: "faire_appel",
+        });
+      }
+    }
+
     /* L'INSTALLATION SAIT-ELLE ENVOYER UN SMS ?
      *
      * En mode démonstration, rien ne part : ni absence, ni communiqué, ni
