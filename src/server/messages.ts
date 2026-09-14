@@ -42,6 +42,20 @@ export const RESOLUTIONS: Array<[Resolution, string, string]> = [
   ["abandonne", "Abandonné", "renoncement assumé, tracé"],
 ];
 
+/* `sans_objet` N'EST PAS DANS LA LISTE CI-DESSUS, ET C'EST VOULU.
+ *
+ * `RESOLUTIONS` sert à deux choses : dessiner les boutons de l'écran, et
+ * valider ce qu'un POST a le droit de demander. `sans_objet` n'est ni l'un ni
+ * l'autre — ce n'est pas un geste humain, c'est une constatation que le
+ * logiciel fait tout seul quand l'absence annoncée a été corrigée. L'y mettre
+ * donnerait à un agent le pouvoir de déclarer « il n'y avait rien à dire » sur
+ * n'importe quelle tâche, ce qui est exactement la case cochée que ce registre
+ * existe pour empêcher. Il lui faut donc un libellé, et rien d'autre. */
+const LIBELLES: Record<string, string> = Object.fromEntries([
+  ...RESOLUTIONS.map(([c, l]) => [c, l]),
+  ["sans_objet", "Sans objet"],
+]);
+
 /** Les états qui demandent un geste. Un message `injoignable` n'a pas échoué
  *  chez l'opérateur : il n'a jamais eu de numéro à composer. */
 export const EN_SOUFFRANCE = new Set(["echoue", "injoignable"]);
@@ -58,9 +72,15 @@ export interface Ligne {
   status: string;
   raison: string | null;
   quand: string;
-  resolution: Resolution | null;
+  resolution: Resolution | "sans_objet" | null;
   resoluLe: string | null;
   resoluPar: string | null;
+  /** Ce message en dément un autre : voici l'heure de celui qu'il corrige. */
+  corrige: string | null;
+  /** Ce message a été démenti : voici l'heure du démenti. */
+  dementiLe: string | null;
+  /** …et si ce démenti est bien arrivé. Faux = la famille croit encore. */
+  dementiRemis: boolean;
 }
 
 export interface Registre {
@@ -95,8 +115,24 @@ export async function loadRegistre(
               m.resolution, m.resolved_at, m.student_id,
               st.first_names || ' ' || st.last_name as eleve,
               g.full_name as tuteur,
-              rs.full_name as resolu_par
+              rs.full_name as resolu_par,
+              -- Les deux sens du démenti. Une école à qui l'on reproche
+              -- d'avoir accusé un élève à tort doit pouvoir montrer les deux
+              -- messages côte à côte, dans l'ordre, avec leurs heures.
+              --
+              -- dementi_de() et non une jointure : un démenti peut avoir
+              -- été TENTÉ plusieurs fois (refusé, puis renvoyé), et une
+              -- jointure dupliquerait alors la ligne d'origine dans le
+              -- registre. La fonction rend celui qui est passé, sinon la
+              -- dernière tentative — d'où le statut, qui décide entre
+              -- « démenti à 08h10 » et « démenti NON remis ».
+              orig.queued_at as corrige_le,
+              (select d.queued_at from sms_messages d
+                where d.id = dementi_de(m.id)) as dementi_le,
+              (select d.status from sms_messages d
+                where d.id = dementi_de(m.id)) as dementi_statut
          from sms_messages m
+         left join sms_messages orig on orig.id = m.corrige_message_id
          left join students st on st.id = m.student_id
          left join guardians g on g.id = m.guardian_id
          left join staff sf on sf.id = m.resolved_by
@@ -131,6 +167,9 @@ export async function loadRegistre(
         quand: heure(x.queued_at), resolution: x.resolution,
         resoluLe: x.resolved_at ? heure(x.resolved_at) : null,
         resoluPar: x.resolu_par,
+        corrige: x.corrige_le ? heure(x.corrige_le) : null,
+        dementiLe: x.dementi_le ? heure(x.dementi_le) : null,
+        dementiRemis: ["envoye", "livre"].includes(x.dementi_statut ?? ""),
       })),
     };
   });
@@ -192,7 +231,7 @@ export async function renvoyer(user: SessionUser, messageId: string): Promise<Is
   const cible = await withSchool(schoolId, async (c) => {
     const m = await c.query(
       `select id, to_phone, body, segments, student_id, guardian_id, status,
-              resolution
+              resolution, attendance_record_id, corrige_message_id
          from sms_messages where id = $1`, [messageId]);
     return m.rows[0] ?? null;
   });
@@ -223,15 +262,23 @@ export async function renvoyer(user: SessionUser, messageId: string): Promise<Is
       `select id from staff where user_id = $1 limit 1`, [user.userId]);
 
     await c.query(
+      /* LA SECONDE TENTATIVE EST LE MÊME MESSAGE, donc elle porte les mêmes
+       * attaches : la ligne d'appel qui l'a provoquée, et — s'il s'agit d'un
+       * démenti — ce qu'il dément. Sans ce report, renvoyer un démenti
+       * fabriquait un message orphelin : l'écran cessait de dire que
+       * l'annonce d'origine avait été corrigée, au moment précis où elle
+       * venait enfin de l'être. */
       `insert into sms_messages (school_id, student_id, guardian_id, to_phone,
                                  body, segments, cost_fcfa, status, provider,
-                                 provider_ref, error_detail, sent_at)
+                                 provider_ref, error_detail, sent_at,
+                                 attendance_record_id, corrige_message_id)
        values (current_school_id(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-               case when $7 = 'envoye' then now() end)`,
+               case when $7 = 'envoye' then now() end, $11, $12)`,
       [cible.student_id, cible.guardian_id, cible.to_phone, cible.body,
        cible.segments, r.ok ? r.costFcfa : 0, r.ok ? "envoye" : "echoue",
        sms.name, r.providerRef ?? null,
-       r.ok ? null : (r.error ?? "Refus de l'opérateur, sans détail")]);
+       r.ok ? null : (r.error ?? "Refus de l'opérateur, sans détail"),
+       cible.attendance_record_id, cible.corrige_message_id]);
 
     // La tentative ratée garde sa raison et son heure ; elle porte seulement
     // la trace qu'on s'en est occupé.
@@ -272,15 +319,37 @@ const FILTRES: Array<[Filtre, string]> = [
 ];
 
 const etat = (l: Ligne): string => {
-  if (!EN_SOUFFRANCE.has(l.status)) return `<span class="pill p-ok">Parti</span>`;
+  if (!EN_SOUFFRANCE.has(l.status)) {
+    /* UN MESSAGE DÉMENTI RESTE « PARTI ». Il l'est : il a bien été remis, et
+     * c'est tout le problème. On ne réécrit pas son état — le registre est
+     * append-only — on dit à côté qu'un second message l'a corrigé. */
+    if (l.dementiLe) {
+      /* « Démenti à 08h10 » et « démenti NON remis » décrivent des situations
+       * opposées : dans la première la famille sait, dans la seconde elle
+       * croit encore son enfant absent. Écrire l'une pour l'autre serait pire
+       * que de ne rien écrire. */
+      return `<span class="pill p-ok">Parti</span>`
+        + (l.dementiRemis
+          ? `<span class="hint">démenti à ${esc(l.dementiLe)}</span>`
+          : `<span class="hint" style="color:var(--laterite)">démenti NON remis`
+            + ` — la famille croit encore</span>`);
+    }
+    if (l.corrige) {
+      return `<span class="pill p-info">Démenti</span>`
+        + `<span class="hint">corrige celui de ${esc(l.corrige)}</span>`;
+    }
+    return `<span class="pill p-ok">Parti</span>`;
+  }
   if (!l.resolution) {
     // Deux mots différents, parce que ce sont deux gestes différents.
     return l.status === "injoignable"
       ? `<span class="pill p-bad">Sans numéro</span>`
       : `<span class="pill p-bad">Non remis</span>`;
   }
-  const libelle = RESOLUTIONS.find(([c]) => c === l.resolution)?.[1] ?? l.resolution;
-  return `<span class="pill p-info">${esc(libelle)}</span>`;
+  const libelle = LIBELLES[l.resolution] ?? l.resolution;
+  return `<span class="pill p-info">${esc(libelle)}</span>`
+    + (l.resolution === "sans_objet"
+      ? `<span class="hint">l'absence a été corrigée</span>` : "");
 };
 
 export async function messagesPage(
@@ -359,7 +428,11 @@ ${r.lignes.length === 0 ? `
         <td>${etat(l)}</td>
         <td>${l.raison ? esc(l.raison) : ""}${
           l.resolution && l.resoluLe
-            ? `<span class="hint">${esc(l.resoluPar ?? "")} — ${
+            // `sans_objet` n'a pas d'auteur humain : le dire, plutôt que de
+            // laisser un tiret flotter devant une heure.
+            ? `<span class="hint">${esc(l.resoluPar
+                ?? (l.resolution === "sans_objet"
+                  ? "close par la correction de l'appel" : ""))} — ${
                 esc(l.resoluLe)}</span>` : ""}</td>
         <td class="gestes">${EN_SOUFFRANCE.has(l.status) && !l.resolution ? `
           ${l.status === "injoignable" ? "" : `

@@ -793,6 +793,75 @@ saisit quarante notes, le réseau tombe, tout est perdu. Ici :
 4. Sans JavaScript, le formulaire se poste normalement. Le hors-ligne est une
    amélioration, jamais une dépendance.
 
+### On corrigeait l'appel ; on ne corrigeait pas la famille
+
+Trouvé en faisant deux fois le même appel, ce que fait tout surveillant qui
+s'est trompé.
+
+**07h45.** Alizèta est marquée absente. L'écran répond : *« Appel enregistré :
+1 absence, 1 SMS envoyé pour 8 F. »* Sa mère reçoit *« Alizèta absent(e) le
+27/07 »*.
+
+**08h10.** Alizèta est là — elle était aux latrines. Le surveillant la repasse
+présente et valide. L'écran répond : *« Appel enregistré : 0 absence, 0 SMS
+envoyé pour 0 F. »*
+
+Le registre disait maintenant « présente ». Le téléphone de sa mère disait
+toujours « absente », et rien ne partirait jamais pour le contredire. La mère
+était sur la route de l'école.
+
+La phrase affichée était le pire des deux maux. *« 0 absence, 0 SMS »* ne
+décrit pas une correction : elle décrit une journée où il ne s'est rien passé.
+Elle était lue par l'homme qui venait précisément de réparer son erreur, et
+elle lui disait que l'affaire était close.
+
+Pour une famille **sans numéro**, c'était pire encore. Une absence injoignable
+laisse une tâche dans le suivi des messages : *« appelez cette famille, voici
+ce qu'il fallait lui dire »*. Après la correction, la tâche restait ouverte
+avec son texte devenu faux. Quelqu'un aurait décroché pour annoncer une absence
+qui n'avait pas eu lieu — en suivant le logiciel.
+
+**La règle : un message parti ne se reprend pas, il se dément.** C'est la
+doctrine des reçus, mot pour mot — un paiement annulé produit un reçu inverse,
+jamais une suppression. Le registre des messages reste *append-only* : la
+première annonce demeure, avec son heure, à côté du démenti qui la corrige. Une
+école à qui l'on reproche d'avoir accusé un élève à tort peut montrer les deux,
+dans l'ordre.
+
+Ce qui change à l'écran :
+
+1. corriger une absence déjà annoncée **envoie un démenti**, tout de suite, au
+   même numéro. Cela coûte 16 F — deux segments, parce qu'un nom
+   d'établissement accentué fait basculer le SMS en UCS-2 et ramène la limite
+   de 160 caractères à 70. Le prix est dit dans la confirmation plutôt que
+   découvert sur un relevé ;
+2. la tâche « famille injoignable » devenue fausse est **close**, avec le motif
+   `sans_objet`. Ce motif n'est pas un bouton : il n'appartient pas aux gestes
+   qu'un agent peut poser, sinon ce serait exactement la case cochée que ce
+   registre existe pour empêcher. Le POST fabriqué à la main est refusé ;
+3. l'écran d'appel dit, **avant le clic**, « Famille prévenue à 07h45 — la
+   repasser présente enverra un démenti ». C'est `attendance_records.sms_sent_at`
+   qui le permet : la colonne existait depuis le premier schéma et personne ne
+   l'écrivait ;
+4. un démenti que l'opérateur refuse est **annoncé** — *« cette famille croit
+   toujours son enfant absent, appelez-la »* — et se rattrape depuis le
+   registre, la seconde tentative gardant le lien vers ce qu'elle dément.
+
+Deux choses sont apparues en éprouvant le correctif lui-même, et méritent
+d'être dites parce qu'elles étaient toutes deux silencieuses :
+
+- un démenti raté porte la **même ligne d'appel** que l'annonce qu'il corrige.
+  Sans un filtre explicite, la fermeture des tâches « sans objet » fermait
+  aussi celle du démenti qui venait d'échouer — c'est-à-dire précisément la
+  famille que personne n'irait plus rappeler ;
+- un index unique sur le lien de démenti interdisait le **renvoi** d'un démenti
+  refusé. Ce qu'il fallait empêcher — qu'un second enregistrement de l'appel
+  parte en double — l'était déjà par la requête qui cherche ce qu'il reste à
+  démentir.
+
+`db/migrations/0021_dementi_absence.sql`, `tests/dementi.e2e.mjs` (47
+assertions).
+
 ### La démonstration était datée, et les fêtes légales expiraient en 2028
 
 Trouvé en regardant ce que `npm run demo` montre **aujourd'hui**. Tout le script
@@ -1574,12 +1643,14 @@ Comptes de démonstration — le code s'affiche à l'écran, aucun SMS n'est env
 | `70000005` | Directeur |
 
 Vérifications : `npm run check:all` — typecheck strict, 60 tests unitaires, et
-**quarante parcours**, chacun contre un vrai PostgreSQL et un vrai serveur.
+**quarante et un parcours**, chacun contre un vrai PostgreSQL et un vrai
+serveur.
 Le tableau ci-dessous en détaille une partie ; les autres sont décrits, avec ce
 qu'ils ont trouvé, dans les sections qui précèdent.
 
 | suite | ce qu'elle prouve |
 |---|---|
+| `test:dementi` (47) | corriger une absence déjà annoncée envoie un démenti à la même famille, le registre garde les deux messages, et la tâche devenue fausse est close au lieu d'être suivie |
 | `test:cookies` (13) | les deux cookies de session portent `Secure` derrière https et pas en local, et on refuse d'inviter une famille sur une adresse en http |
 | `test:cloisonnement` (16) | l'épreuve d'isolation passe sur un schéma complet, **échoue** sur un schéma auquel il manque la migration 0009, et ne touche à aucune base réelle |
 | `test:installation` (17) | le chemin du premier jour marche du disque nu à la première connexion, et aucune table portant `school_id` n'échappe au RLS |
@@ -1737,6 +1808,13 @@ ne renvoie aucune ligne. L'utilisateur PostgreSQL applicatif ne doit jamais
 **Les règles pédagogiques sont des données datées.** Le ministère a modifié
 les coefficients ET la règle de redoublement en 2026. Un `if` dans le code
 serait faux avant la fin de l'année scolaire.
+
+**Ce qui est sorti de l'établissement ne se rature pas.** Un reçu annulé
+produit un reçu inverse ; un SMS démenti produit un second SMS. Dans les deux
+cas la trace d'origine demeure, avec son heure, parce que c'est elle que
+l'établissement devra montrer le jour où on lui reprochera ce qu'il a envoyé.
+Corollaire moins évident : corriger une donnée ne suffit pas quand elle a déjà
+été communiquée — il faut aussi corriger celui à qui on l'a dite.
 
 **Une note ne dépend jamais du paiement.** Le module évaluation n'importe
 rien du module scolarité. Le jour où un directeur demande de masquer les

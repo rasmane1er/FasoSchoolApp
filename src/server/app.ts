@@ -765,7 +765,9 @@ async function absencesPage(user: SessionUser, url: URL, flash?: string,
             where academic_year_id = $1 and id = any($2::uuid[]) order by label`,
       perimetre.classIds === null
         ? [period.year_id] : [period.year_id, perimetre.classIds]);
-    if (!classId) return { classes: classes.rows, students: [], marks: new Map() };
+    if (!classId) return { classes: classes.rows, students: [],
+                           marks: new Map<string, string>(),
+                           prevenues: new Map<string, Date>() };
 
     /* LE NUMÉRO AFFICHÉ EST CELUI QU'ON COMPOSERA.
      *
@@ -786,15 +788,26 @@ async function absencesPage(user: SessionUser, url: URL, flash?: string,
         where e.class_id = $1 order by st.last_name, st.first_names`,
       [classId]);
 
+    /* `sms_sent_at` EST LU ICI, et c'est tout son intérêt.
+     *
+     * La colonne existait depuis le premier schéma sans que personne ne
+     * l'écrive. Elle sert à prévenir le surveillant AVANT qu'il ne clique :
+     * cet élève-là, sa famille a déjà reçu « absent ». Repasser la ligne à
+     * « présent » enverra donc un démenti, et coûtera un second SMS. Ce n'est
+     * pas une raison de ne pas le faire — c'est une raison de le savoir. */
     const existing = await c.query(
-      `select ar.student_id, ar.status from attendance_records ar
+      `select ar.student_id, ar.status, ar.sms_sent_at from attendance_records ar
          join attendance_sessions s on s.id = ar.attendance_session_id
         where s.class_id = $1 and s.session_date = $2 and s.session_slot = 'matin'`,
       [classId, date]);
 
     const marks = new Map<string, string>();
-    for (const r of existing.rows) marks.set(r.student_id, r.status);
-    return { classes: classes.rows, students: students.rows, marks };
+    const prevenues = new Map<string, Date>();
+    for (const r of existing.rows) {
+      marks.set(r.student_id, r.status);
+      if (r.sms_sent_at) prevenues.set(r.student_id, r.sms_sent_at);
+    }
+    return { classes: classes.rows, students: students.rows, marks, prevenues };
   });
 
   const selector = `
@@ -840,8 +853,12 @@ async function absencesPage(user: SessionUser, url: URL, flash?: string,
        ${alerte}`);
   }
 
+  const heureFr = (t: Date) =>
+    `${String(t.getHours()).padStart(2, "0")}h${String(t.getMinutes()).padStart(2, "0")}`;
+
   const rows = d.students.map((st: any) => {
     const cur = d.marks.get(st.id) ?? "present";
+    const prevenue = d.prevenues.get(st.id) ?? null;
     const opt = (v: string, label: string, colour: string) => `
       <label style="display:inline-flex;align-items:center;gap:6px;height:40px;padding:0 12px;
         border:1px solid ${cur === v ? colour : "var(--line)"};border-radius:5px;cursor:pointer;
@@ -852,7 +869,9 @@ async function absencesPage(user: SessionUser, url: URL, flash?: string,
     return `<tr${cur === "absent" ? ' class="bad"' : cur === "retard" ? ' class="warn"' : ""}>
       <td><b>${esc(st.last_name)}</b> ${esc(st.first_names)}
         ${st.tuteur_phone ? `<div style="font-size:12px;color:var(--faint)" class="num">${esc(st.tuteur_phone)}</div>`
-                          : `<div style="font-size:12px;color:var(--laterite)">Aucun tuteur joignable</div>`}</td>
+                          : `<div style="font-size:12px;color:var(--laterite)">Aucun tuteur joignable</div>`}
+        ${prevenue ? `<div style="font-size:12px;color:var(--ochre)">Famille prévenue à ${
+          esc(heureFr(prevenue))} — la repasser présente enverra un démenti</div>` : ""}</td>
       <td class="r"><div class="row" style="justify-content:flex-end;gap:6px">
         ${opt("present", "Présent", "var(--verdant)")}
         ${opt("absent", "Absent", "var(--laterite)")}
@@ -881,7 +900,8 @@ async function absencesPage(user: SessionUser, url: URL, flash?: string,
 }
 
 async function saveAbsences(user: SessionUser, url: URL, form: URLSearchParams):
-  Promise<{ absents: number; queued: number; cost: number; injoignables: number }
+  Promise<{ absents: number; queued: number; cost: number; injoignables: number;
+            dementis: number; dementisRates: number; sansObjet: number }
          | { refus: string } | null> {
   // Comme pour les notes : le contrôle est à l'écriture, pas à l'affichage.
   const perimetreAppel = await perimetreDe(user);
@@ -918,8 +938,14 @@ async function saveAbsences(user: SessionUser, url: URL, form: URLSearchParams):
     const school = await c.query(`select name from schools limit 1`);
     const tpl = await c.query(`select body from sms_templates where code = 'ABSENCE' limit 1`);
     const template = tpl.rows[0]?.body ?? "{{ecole}}: {{eleve}} absent(e) le {{date}}.";
+    const tplDem = await c.query(
+      `select body from sms_templates where code = 'ABSENCE_DEMENTI' limit 1`);
+    const templateDementi = tplDem.rows[0]?.body
+      ?? "{{ecole}}: erreur de notre part, {{eleve}} etait bien a l'ecole le "
+       + "{{date}}. Message precedent annule.";
 
     let absents = 0, queued = 0, cost = 0, injoignables = 0;
+    let dementis = 0, dementisRates = 0, sansObjet = 0;
 
     for (const [name, status] of form) {
       if (!name.startsWith("s_")) continue;
@@ -932,12 +958,83 @@ async function saveAbsences(user: SessionUser, url: URL, form: URLSearchParams):
         [sessionId, studentId]);
       const wasAbsent = prev.rows[0]?.status === "absent";
 
-      await c.query(
+      const rec = await c.query(
         `insert into attendance_records (school_id, attendance_session_id, student_id, status, updated_at)
          values ($1,$2,$3,$4, now())
          on conflict (attendance_session_id, student_id) do update
-           set status = excluded.status, updated_at = now()`,
+           set status = excluded.status, updated_at = now()
+         returning id`,
         [schoolId, sessionId, studentId, status]);
+      const recordId = rec.rows[0].id;
+
+      /* ON CORRIGE L'APPEL : ON DOIT CORRIGER LA FAMILLE.
+       *
+       * Un élève marqué absent puis repassé présent laissait, avant, un
+       * registre juste et un téléphone faux. La mère avait reçu « absente »
+       * et rien ne partait pour la contredire — elle était déjà sur la route.
+       *
+       * Un SMS parti ne se reprend pas : on en envoie un second. C'est la
+       * doctrine des reçus appliquée aux messages, et le registre reste
+       * append-only — la première annonce demeure, avec son heure, à côté du
+       * démenti qui la corrige. */
+      if (wasAbsent && status !== "absent") {
+        const aDementir = (await c.query(
+          `select message_a_dementir($1) as id`, [recordId])).rows[0].id;
+
+        if (aDementir) {
+          const orig = (await c.query(
+            `select to_phone, guardian_id from sms_messages where id = $1`,
+            [aDementir])).rows[0];
+          const el = await c.query(
+            `select first_names from students where id = $1`, [studentId]);
+          const texte = renderTemplate(templateDementi, {
+            ecole: school.rows[0]?.name ?? "",
+            eleve: el.rows[0]?.first_names ?? "",
+            date: new Date(date).toLocaleDateString("fr-FR"),
+          });
+          const seg = countSegments(texte);
+          const env = await sms.send(
+            { to: orig.to_phone, body: texte, schoolId, studentId });
+
+          await c.query(
+            `insert into sms_messages (school_id, student_id, guardian_id, to_phone,
+                                       body, segments, cost_fcfa, status, provider,
+                                       provider_ref, error_detail, sent_at,
+                                       attendance_record_id, corrige_message_id)
+             values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,
+                     case when $8 = 'envoye' then now() end, $12, $13)`,
+            [schoolId, studentId, orig.guardian_id, orig.to_phone, texte, seg,
+             env.costFcfa, env.ok ? "envoye" : "echoue", sms.name,
+             env.providerRef ?? null,
+             env.ok ? null
+               : `Démenti non remis : ${env.error ?? "refus de l'opérateur"}. `
+                 + `La famille croit toujours son enfant absent.`,
+             recordId, aDementir]);
+
+          if (env.ok) { dementis += 1; cost += env.costFcfa; queued += 1; }
+          else dementisRates += 1;
+        }
+
+        /* LA TÂCHE DEVENUE FAUSSE. Une absence sans numéro laisse dans le
+         * registre une consigne : « appelez cette famille, voici ce qu'il
+         * fallait lui dire ». Après correction, suivre cette consigne revient
+         * à annoncer de vive voix une absence qui n'a pas eu lieu. On ferme
+         * la tâche — on ne l'efface pas : le registre garde ce qui a été
+         * tenté, et pourquoi on a cessé. */
+        const mortes = await c.query(
+          `select t as id from taches_sans_objet($1) t`, [recordId]);
+        for (const t of mortes.rows) {
+          await c.query(
+            `update sms_messages
+                set resolution = 'sans_objet', resolved_at = now()
+              where id = $1`, [t.id]);
+          sansObjet += 1;
+        }
+
+        await c.query(
+          `update attendance_records set sms_sent_at = null where id = $1`,
+          [recordId]);
+      }
 
       if (status !== "absent") continue;
       absents += 1;
@@ -985,10 +1082,12 @@ async function saveAbsences(user: SessionUser, url: URL, form: URLSearchParams):
         injoignables += 1;
         await c.query(
           `insert into sms_messages (school_id, student_id, to_phone, body,
-                                     segments, cost_fcfa, status, error_detail)
-           values ($1,$2,'',$3,$4,0,'injoignable',$5)`,
+                                     segments, cost_fcfa, status, error_detail,
+                                     attendance_record_id)
+           values ($1,$2,'',$3,$4,0,'injoignable',$5,$6)`,
           [schoolId, studentId, body, countSegments(body),
-           "Aucun numéro de tuteur au dossier : rien n'a pu être composé."]);
+           "Aucun numéro de tuteur au dossier : rien n'a pu être composé.",
+           recordId]);
         continue;
       }
 
@@ -998,32 +1097,48 @@ async function saveAbsences(user: SessionUser, url: URL, form: URLSearchParams):
       await c.query(
         `insert into sms_messages (school_id, student_id, guardian_id, to_phone, body,
                                    segments, cost_fcfa, status, provider, provider_ref,
-                                   error_detail, sent_at)
+                                   error_detail, sent_at, attendance_record_id)
          values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,
-                 case when $8 = 'envoye' then now() end)`,
+                 case when $8 = 'envoye' then now() end, $12)`,
         [schoolId, studentId, row.guardian_id, row.phone, body, segments,
          result.costFcfa, result.ok ? "envoye" : "echoue", sms.name,
          result.providerRef ?? null,
          // Sans la raison, « échoué » ne dit pas s'il faut rappeler la famille
          // ou corriger un chiffre du numéro.
-         result.ok ? null : (result.error ?? "Refus de l'opérateur, sans détail")]);
+         result.ok ? null : (result.error ?? "Refus de l'opérateur, sans détail"),
+         recordId]);
 
-      if (result.ok) { queued += 1; cost += result.costFcfa; }
+      if (result.ok) {
+        queued += 1; cost += result.costFcfa;
+        /* L'HEURE OÙ LA FAMILLE A SU. Écrite seulement quand le message est
+         * réellement parti : un envoi refusé n'a prévenu personne, et une
+         * heure inscrite là pour un message échoué serait une preuve fausse. */
+        await c.query(
+          `update attendance_records set sms_sent_at = now() where id = $1`,
+          [recordId]);
+      }
     }
 
     if (queued > 0) {
       await c.query(
         `insert into sms_credit_ledger (school_id, direction, messages, amount_fcfa, note)
-         values ($1,'consommation',$2,$3,'Alertes absence')`,
-        [schoolId, queued, cost]);
+         values ($1,'consommation',$2,$3,$4)`,
+        [schoolId, queued, cost,
+         // Le libellé du débit dit ce qui a été payé. « Alertes absence »
+         // devant une ligne qui contient des démentis ferait chercher long
+         // à l'économe le jour où il rapproche le crédit.
+         dementis > 0 ? "Alertes absence et démentis" : "Alertes absence"]);
     }
     await c.query(
       `insert into audit_log (school_id, actor_id, action, target_type, detail)
        values ($1,$2,'attendance.save','class',$3)`,
       [schoolId, user.userId, JSON.stringify({ classe: classId, date, absents,
-                                               sms: queued, injoignables })]);
+                                               sms: queued, injoignables,
+                                               dementis, dementisRates,
+                                               sansObjet })]);
 
-    return { absents, queued, cost, injoignables };
+    return { absents, queued, cost, injoignables, dementis, dementisRates,
+             sansObjet };
   });
 }
 
@@ -1278,8 +1393,34 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
         : ` ${r.injoignables} familles n'ont aucun numéro au dossier :`
           + " prévenez-les autrement, et corrigez les numéros dans les fiches"
           + " des élèves. Elles sont listées dans le suivi des messages.";
+      /* UNE CORRECTION N'EST PAS UNE JOURNÉE SANS RIEN.
+       *
+       * « Appel enregistré : 0 absence, 0 SMS envoyé pour 0 F » était la
+       * phrase que lisait le surveillant qui venait de repasser un élève en
+       * présent. Elle décrit une journée où il ne s'est rien passé, alors
+       * qu'il vient d'arriver la seule chose qui compte : une famille avait
+       * été prévenue à tort, et on la détrompe. Le geste se dit. */
+      const repris = [
+        r.dementis === 0 ? "" : r.dementis === 1
+          ? " Une famille avait déjà été prévenue de cette absence : un démenti"
+            + " vient de lui partir."
+          : ` ${r.dementis} familles avaient déjà été prévenues : autant de`
+            + " démentis viennent de partir.",
+        r.dementisRates === 0 ? "" : r.dementisRates === 1
+          ? " Un démenti n'a PAS pu être remis : cette famille croit toujours"
+            + " son enfant absent. Appelez-la — elle est en tête du suivi des"
+            + " messages."
+          : ` ${r.dementisRates} démentis n'ont PAS pu être remis : ces`
+            + " familles croient toujours leur enfant absent. Appelez-les —"
+            + " elles sont en tête du suivi des messages.",
+        r.sansObjet === 0 ? "" : r.sansObjet === 1
+          ? " Une tâche du suivi des messages annonçait cette absence : elle"
+            + " est close, personne n'appellera pour rien."
+          : ` ${r.sansObjet} tâches du suivi des messages annonçaient ces`
+            + " absences : elles sont closes.",
+      ].join("");
       return html(res, await absencesPage(user, url,
-        `Appel enregistré : ${plural(r.absents, "absence")}, ${plural(r.queued, "SMS envoyé", "SMS envoyés")} pour ${r.cost} F.${manque}`));
+        `Appel enregistré : ${plural(r.absents, "absence")}, ${plural(r.queued, "SMS envoyé", "SMS envoyés")} pour ${r.cost} F.${repris}${manque}`));
     }
 
     if (path === "/api/sync/notes" && req.method === "POST") {
