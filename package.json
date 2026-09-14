@@ -8,7 +8,7 @@
     "node": ">=22.6"
   },
   "scripts": {
-    "db:migrate": "psql \"$DATABASE_URL\" -v ON_ERROR_STOP=1 -f db/migrations/0001_initial.sql -f db/migrations/0002_reference_data.sql -f db/migrations/0003_guardian_access.sql -f db/migrations/0004_message_suivi.sql -f db/migrations/0005_personnel.sql -f db/migrations/0006_annulation_paiement.sql -f db/migrations/0007_discipline.sql -f db/migrations/0008_justifications.sql -f db/migrations/0009_auth_sessions_rls.sql -f db/migrations/0010_calendrier.sql -f db/migrations/0011_pieces_justificatives.sql -f db/migrations/0012_bulletin_conseil.sql -f db/migrations/0013_examens.sql -f db/migrations/0014_garde_envois.sql -f db/migrations/0015_bulletin_complet.sql -f db/migrations/0016_famille_injoignable.sql -f db/migrations/0017_echeancier.sql -f db/migrations/0018_recu_fige.sql -f db/migrations/0019_arrivee_en_cours_annee.sql -f db/migrations/0020_fetes_au_dela_de_2028.sql -f db/migrations/0021_dementi_absence.sql",
+    "db:migrate": "psql \"$DATABASE_URL\" -v ON_ERROR_STOP=1 -f db/migrations/0001_initial.sql -f db/migrations/0002_reference_data.sql -f db/migrations/0003_guardian_access.sql -f db/migrations/0004_message_suivi.sql -f db/migrations/0005_personnel.sql -f db/migrations/0006_annulation_paiement.sql -f db/migrations/0007_discipline.sql -f db/migrations/0008_justifications.sql -f db/migrations/0009_auth_sessions_rls.sql -f db/migrations/0010_calendrier.sql -f db/migrations/0011_pieces_justificatives.sql -f db/migrations/0012_bulletin_conseil.sql -f db/migrations/0013_examens.sql -f db/migrations/0014_garde_envois.sql -f db/migrations/0015_bulletin_complet.sql -f db/migrations/0016_famille_injoignable.sql -f db/migrations/0017_echeancier.sql -f db/migrations/0018_recu_fige.sql -f db/migrations/0019_arrivee_en_cours_annee.sql -f db/migrations/0020_fetes_au_dela_de_2028.sql -f db/migrations/0021_dementi_absence.sql -f db/migrations/0022_regle_de_passage_datee.sql",
     "db:test:rls": "./scripts/epreuve-cloisonnement.sh",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
     "test:bulletin": "node --experimental-strip-types --test tests/bulletin.test.ts",
@@ -18,7 +18,7 @@
     "start": "node --experimental-strip-types src/server/app.ts",
     "test:e2e": "node tests/app.e2e.mjs",
     "test:offline": "node tests/offline.e2e.mjs",
-    "check:all": "npm run typecheck && npm test && npm run test:rentree && npm run test:e2e && npm run test:offline && npm run test:evaluations && npm run test:messages && npm run test:personnel && npm run test:eleve && npm run test:annulation && npm run test:installer && npm run test:discipline && npm run test:justifications && npm run test:bareme && npm run test:sauvegarde && npm run test:installation && npm run test:cloisonnement && npm run test:cookies && npm run test:pwa && npm run test:calendrier && npm run test:pieces && npm run test:conseil-bulletin && npm run test:examens && npm run test:envois && npm run test:bulletin-complet && npm run test:injoignable && npm run test:import && npm run test:conseil && npm run test:famille && npm run test:categorisation && npm run test:services && npm run test:cloture && npm run test:frais && npm run test:communiques && npm run test:transferts && npm run test:bourses && npm run test:recurrence && npm run test:canal && npm run test:echeancier && npm run test:recu-fige && npm run test:arrivee && npm run test:dementi && npm run test:fixture",
+    "check:all": "npm run typecheck && npm test && npm run test:rentree && npm run test:e2e && npm run test:offline && npm run test:evaluations && npm run test:messages && npm run test:personnel && npm run test:eleve && npm run test:annulation && npm run test:installer && npm run test:discipline && npm run test:justifications && npm run test:bareme && npm run test:sauvegarde && npm run test:installation && npm run test:cloisonnement && npm run test:cookies && npm run test:pwa && npm run test:calendrier && npm run test:pieces && npm run test:conseil-bulletin && npm run test:examens && npm run test:envois && npm run test:bulletin-complet && npm run test:injoignable && npm run test:import && npm run test:conseil && npm run test:famille && npm run test:categorisation && npm run test:services && npm run test:cloture && npm run test:frais && npm run test:communiques && npm run test:transferts && npm run test:bourses && npm run test:recurrence && npm run test:canal && npm run test:echeancier && npm run test:recu-fige && npm run test:arrivee && npm run test:dementi && npm run test:regle-passage && npm run test:fixture",
     "test:import": "node tests/import.e2e.mjs",
     "test:rentree": "node tests/rentree.e2e.mjs",
     "test:conseil": "node tests/conseil.e2e.mjs",
@@ -59,6 +59,7 @@
     "test:recu-fige": "node tests/recu-fige.e2e.mjs",
     "test:arrivee": "node tests/arrivee.e2e.mjs",
     "test:dementi": "node tests/dementi.e2e.mjs",
+    "test:regle-passage": "node tests/regle-passage.e2e.mjs",
     "test:fixture": "node tests/fixture.e2e.mjs"
   },
   "dependencies": {

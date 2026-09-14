@@ -26,6 +26,13 @@ import { loadBulletinInputs } from "../lib/repository.ts";
 import { page, esc, fr, plural, type PageChrome } from "./html.ts";
 import type { SessionUser } from "./session.ts";
 
+/** « 2026-07-01 » -> « 01/07/2026 ». `fr()` formate des nombres, pas des
+ *  dates : une règle datée doit s'afficher comme une date. */
+const jourFr = (iso: string): string => {
+  const [a, m, j] = iso.split("-");
+  return `${j}/${m}/${a}`;
+};
+
 /**
  * Le seuil au-delà duquel l'assiduité est SIGNALÉE — pas sanctionnée.
  *
@@ -83,6 +90,29 @@ export interface Deliberation {
   seuilAbsences: number;
   rows: DeliberationRow[];
   ruleNote: string | null;
+  /** La règle EN VIGUEUR aujourd'hui, ou `null` s'il n'y en a aucune. */
+  regle: RegleDePassage | null;
+  /** Celle qui prendra effet plus tard, s'il en existe une. */
+  regleAVenir: RegleAVenir | null;
+  /** L'interdiction nationale, telle que `levels` l'encode (arrêté 2019). */
+  interditParTexte: boolean;
+  /** La date à laquelle la règle a été demandée. Affichée, pas devinée. */
+  auJour: string;
+}
+
+export interface RegleDePassage {
+  levelCode: string | null;
+  effectiveFrom: string;
+  redoublementAllowed: boolean;
+  minAverageToPass: number | null;
+  sourceNote: string | null;
+}
+
+export interface RegleAVenir {
+  effectiveFrom: string;
+  redoublementAllowed: boolean;
+  minAverageToPass: number | null;
+  sourceNote: string | null;
 }
 
 /**
@@ -110,12 +140,30 @@ export async function loadDeliberation(
     const terms = await c.query(
       `select id, sequence from terms where academic_year_id = $1 order by sequence`,
       [k.rows[0].academic_year_id]);
+    /* LA RÈGLE EN VIGUEUR AUJOURD'HUI — et le mot « aujourd'hui » est tout le
+     * correctif.
+     *
+     * Cette requête n'avait pas de borne de date. Une réforme saisie d'avance,
+     * à effet dans trois cents jours, gouvernait la délibération EN COURS :
+     * éprouvé sur la démonstration, les douze options « redouble »
+     * disparaissaient et la barre passait de 10 à 12. Le README dit depuis le
+     * premier jour que les règles pédagogiques sont des données datées ;
+     * `repository.ts` l'applique pour les coefficients et la notation ; le
+     * seul écran qui décide de l'année d'un enfant ne le faisait pas.
+     *
+     * La règle à venir est demandée elle aussi — non pour l'appliquer, mais
+     * pour l'ANNONCER. Saisir la réforme de l'an prochain est une bonne
+     * pratique ; la cacher était le défaut. */
     const rule = await c.query(
-      `select redoublement_allowed, min_average_to_pass, source_note
-         from promotion_rules
-        where (level_code = $1 or level_code is null)
-        order by level_code nulls last, effective_from desc limit 1`,
+      `select r.*, r.effective_from::text as depuis
+         from regle_de_passage($1, current_date) r`, [k.rows[0].level_code]);
+    const aVenir = await c.query(
+      `select r.*, r.effective_from::text as depuis
+         from regle_de_passage_a_venir($1, current_date) r`,
       [k.rows[0].level_code]);
+    const texte = await c.query(
+      `select redoublement_interdit_par_texte($1) as interdit,
+              current_date::text as jour`, [k.rows[0].level_code]);
     const prior = await c.query(
       `select student_id, decision, appreciation from conseil_decisions
         where academic_year_id = $1`, [k.rows[0].academic_year_id]);
@@ -173,6 +221,9 @@ export async function loadDeliberation(
       yearLabel: k.rows[0].year_label as string,
       termIds: terms.rows.map((t) => t.id as string),
       rule: rule.rows[0] ?? null,
+      aVenir: aVenir.rows[0] ?? null,
+      interditParTexte: texte.rows[0].interdit as boolean,
+      auJour: texte.rows[0].jour as string,
       prior: new Map(prior.rows.map((p) => [p.student_id as string, p])),
       vie: new Map(vie.rows.map((v: any) => [v.student_id as string, v])),
       conduite: new Map(conduite.rows.map((v: any) => [v.student_id as string, v])),
@@ -212,7 +263,21 @@ export async function loadDeliberation(
     }
   }
 
-  const redoublementAllowed = ctx.rule?.redoublement_allowed ?? true;
+  /* EN L'ABSENCE DE RÈGLE, ON N'AUTORISE PAS : ON NE SAIT PAS.
+   *
+   * La ligne d'avant disait `ctx.rule?.redoublement_allowed ?? true`. Supprimez
+   * la ligne `promotion_rules` du CP1 — un niveau où l'arrêté de 2019 INTERDIT
+   * le redoublement — et les douze options réapparaissaient ; le POST était
+   * accepté ; la base portait `redouble` pour un élève de CP1 et l'écran
+   * annonçait « 1 décision enregistrée ». Éprouvé.
+   *
+   * Désormais, faute de règle, aucune décision n'est enregistrable du tout :
+   * `regle === null` retire le formulaire et fait refuser l'écriture. Et tant
+   * qu'à choisir un défaut pour l'affichage, on prend celui du texte national
+   * plutôt que son contraire. */
+  const redoublementAllowed = ctx.rule
+    ? ctx.rule.redoublement_allowed as boolean
+    : !ctx.interditParTexte;
   const rows: DeliberationRow[] = identites.map((s) => {
     const parTrimestre = parEleve.get(s.id)
       ?? Array.from({ length: ctx.termIds.length }, () => null);
@@ -256,6 +321,23 @@ export async function loadDeliberation(
     termCount: ctx.termIds.length, termsWithData, rows,
     seuilAbsences: SEUIL_ABSENCES,
     ruleNote: ctx.rule?.source_note ?? null,
+    regle: ctx.rule ? {
+      levelCode: ctx.rule.level_code ?? null,
+      effectiveFrom: ctx.rule.depuis as string,
+      redoublementAllowed: ctx.rule.redoublement_allowed as boolean,
+      minAverageToPass: ctx.rule.min_average_to_pass === null
+        ? null : Number(ctx.rule.min_average_to_pass),
+      sourceNote: ctx.rule.source_note ?? null,
+    } : null,
+    regleAVenir: ctx.aVenir ? {
+      effectiveFrom: ctx.aVenir.depuis as string,
+      redoublementAllowed: ctx.aVenir.redoublement_allowed as boolean,
+      minAverageToPass: ctx.aVenir.min_average_to_pass === null
+        ? null : Number(ctx.aVenir.min_average_to_pass),
+      sourceNote: ctx.aVenir.source_note ?? null,
+    } : null,
+    interditParTexte: ctx.interditParTexte,
+    auJour: ctx.auJour,
   };
 }
 
@@ -286,6 +368,23 @@ export async function saveDeliberation(
   const valid = new Set(DECISIONS.map(([code]) => code as string));
   const out: SaveOutcome = { saved: 0, refused: [] };
 
+  /* SANS RÈGLE EN VIGUEUR, ON NE DÉLIBÈRE PAS.
+   *
+   * `repository.ts` refuse de calculer un bulletin sans politique de notation
+   * en vigueur — « Aucune politique de notation en vigueur » — et c'est la
+   * bonne réaction : mieux vaut un écran qui s'arrête qu'un calcul d'apparence
+   * sérieuse. Le conseil de classe, lui, se contentait d'un `?? true` et
+   * enregistrait `redouble` pour un élève de CP1.
+   *
+   * L'écran retire déjà le formulaire ; ceci est le vrai verrou, parce qu'un
+   * écran n'est jamais la protection. */
+  if (!deliberation.regle) {
+    return { saved: 0, refused: [
+      `Aucune règle de passage n'est en vigueur au ${jourFr(deliberation.auJour)} `
+      + `pour le niveau ${deliberation.levelCode}. Rien n'a été enregistré : `
+      + `délibérer sans règle reviendrait à en inventer une.`] };
+  }
+
   await withSchool(schoolId, async (c) => {
     const staff = await c.query(
       `select id from staff where user_id = $1 limit 1`, [user.userId]);
@@ -298,9 +397,17 @@ export async function saveDeliberation(
       if (!raw) continue;
       if (!valid.has(raw)) { out.refused.push(`${r.lastName} : décision inconnue.`); continue; }
       if (raw === "redouble" && !r.redoublementAllowed) {
+        /* Le motif cite la règle QUI S'APPLIQUE, pas un arrêté choisi
+         * d'avance. Citer l'arrêté de 2019 devant une classe de 6e — ce que
+         * faisait l'écran — donne au chef d'établissement une phrase fausse à
+         * répéter à une famille qui conteste. */
         out.refused.push(
           `${r.lastName} ${r.firstNames} : le redoublement est interdit en `
-          + `${deliberation.levelCode} (arrêté 2019). Décision non enregistrée.`);
+          + `${deliberation.levelCode} ${deliberation.interditParTexte
+            ? "(arrêté 2019, première année de sous-cycle du primaire)"
+            : `par la règle en vigueur depuis le ${
+                jourFr(deliberation.regle!.effectiveFrom)}`}. `
+          + `Décision non enregistrée.`);
         continue;
       }
       const appreciation = (form.get(`a_${r.studentId}`) ?? "").trim() || null;
@@ -449,9 +556,17 @@ export async function conseilPage(
           esc(r.proposition)}</span>
         <span class="dit" style="color:var(--muted)">${esc(r.motif)}</span>
       </td>
+      ${d.regle ? `
       <td><select name="d_${r.studentId}" style="min-width:200px">${choix}</select></td>
       <td><input type="text" name="a_${r.studentId}" style="min-width:180px"
-                 value="${esc(r.appreciation ?? "")}" placeholder="Appréciation"></td>
+                 value="${esc(r.appreciation ?? "")}" placeholder="Appréciation"></td>`
+      /* SANS RÈGLE, PAS DE CHOIX À OFFRIR. Laisser les listes déroulantes
+       * affichées hors de tout formulaire donnerait un écran où l'on choisit
+       * sans que rien ne s'enregistre — la pire des deux situations. */
+      : `<td colspan="2" style="color:var(--muted)">${r.decision
+          ? `Décision déjà au dossier : <b>${esc(r.decision)}</b>. Elle n'est
+             pas modifiable tant qu'aucune règle n'est en vigueur.`
+          : "Aucune règle de passage en vigueur : rien à prononcer."}</td>`}
     </tr>`;
   };
 
@@ -495,14 +610,65 @@ ${d.termsWithData < d.termCount ? `<div class="note bad">
   moins. À confirmer avec le censeur avant tout usage officiel.
 </div>
 
-${!d.rows[0]?.redoublementAllowed ? `<div class="note">
-  <b>Passage automatique en ${esc(d.levelCode)}.</b> Le redoublement est interdit
-  en première année de chaque sous-cycle du primaire (arrêté 2019) : l'option
-  n'est pas proposée. Mesure contestée par le SYNAPEC ; elle est enregistrée
-  comme une règle datée, pas comme une constante du programme.
+${!d.regle ? `<div class="note bad">
+  <b>Aucune règle de passage en vigueur au ${esc(jourFr(d.auJour))} pour le niveau
+  ${esc(d.levelCode)}.</b>
+  Le conseil ne peut pas délibérer : la barre d'admission et l'autorisation de
+  redoubler sont inconnues, et aucune décision n'est enregistrable — un POST
+  fabriqué à la main est refusé lui aussi.
+  <div style="margin-top:6px;font-size:13.5px">Avant, l'absence de règle était
+  lue comme une permission : les douze options « redouble » s'affichaient, y
+  compris en CP1 où l'arrêté de 2019 l'interdit, et la décision partait en base.
+  ${d.interditParTexte ? `<b>Ce niveau est justement de ceux-là.</b> ` : ""}
+  Installez la règle — <code>promotion_rules</code>, avec sa date d'effet et sa
+  provenance — puis revenez.</div>
+</div>` : !d.rows[0]?.redoublementAllowed ? `<div class="note">
+  <b>Passage automatique en ${esc(d.levelCode)}.</b>
+  ${d.interditParTexte
+    // La phrase n'est vraie qu'au primaire, et l'écran la servait pour
+    // n'importe quel niveau dès que la règle interdisait le redoublement.
+    ? `Le redoublement est interdit en première année de chaque sous-cycle du
+       primaire (arrêté 2019) : l'option n'est pas proposée. Mesure contestée
+       par le SYNAPEC ; elle est enregistrée comme une règle datée, pas comme
+       une constante du programme.`
+    : `L'option n'est pas proposée parce que la règle en vigueur dans cet
+       établissement depuis le ${esc(jourFr(d.regle.effectiveFrom))} l'interdit à ce
+       niveau. Ce n'est PAS l'arrêté de 2019, qui ne vise que la première année
+       de chaque sous-cycle du primaire.`}
 </div>` : ""}
 
-<form method="post" action="/conseil?classe=${esc(classId)}">
+${d.regle ? `<div class="note">
+  <b>La règle appliquée.</b>
+  ${d.regle.levelCode
+    ? `Propre au niveau ${esc(d.regle.levelCode)}` : `Règle générale de l'établissement`},
+  en vigueur depuis le <b>${esc(jourFr(d.regle.effectiveFrom))}</b>.
+  Admission à partir de ${d.regle.minAverageToPass === null
+    ? "— (non fixée)"
+    : `<b class="num">${esc(fr(d.regle.minAverageToPass))}/20</b>`} ;
+  redoublement ${d.regle.redoublementAllowed ? "autorisé" : "interdit"}.
+  ${d.regle.sourceNote
+    // La provenance était calculée et jamais affichée. Une règle qui décide de
+    // l'année d'un enfant doit dire d'où elle sort, sur l'écran où elle sert.
+    ? `<div style="margin-top:6px;font-size:13.5px"><i>${esc(d.regle.sourceNote)}</i></div>`
+    : `<div style="margin-top:6px;font-size:13.5px;color:var(--muted)">Cette
+       règle ne porte aucune note de provenance : personne ne sait d'où elle
+       sort. C'est à renseigner.</div>`}
+</div>` : ""}
+
+${d.regleAVenir ? `<div class="note warn">
+  <b>Une autre règle prend effet le ${esc(jourFr(d.regleAVenir.effectiveFrom))}.</b>
+  Elle ne s'applique pas à cette délibération — celle-ci suit la règle en
+  vigueur aujourd'hui.
+  <div style="margin-top:6px;font-size:13.5px">Ce qu'elle changera :
+  admission à partir de ${d.regleAVenir.minAverageToPass === null
+    ? "— (non fixée)" : esc(fr(d.regleAVenir.minAverageToPass)) + "/20"},
+  redoublement ${d.regleAVenir.redoublementAllowed ? "autorisé" : "interdit"}.
+  ${d.regleAVenir.sourceNote ? esc(d.regleAVenir.sourceNote) : ""}
+  <br>Avant, une règle saisie d'avance gouvernait l'année en cours sans le
+  dire : la barre changeait le jour de la saisie, pas le jour de son effet.</div>
+</div>` : ""}
+
+${d.regle ? `<form method="post" action="/conseil?classe=${esc(classId)}">` : ""}
   <div class="card">
     <header>
       <b>${esc(d.classLabel)}</b>
@@ -522,12 +688,17 @@ ${!d.rows[0]?.redoublementAllowed ? `<div class="note">
         <tbody>${d.rows.map(ligne).join("\n")}</tbody>
       </table>
     </div>
-    <div class="body row" style="border-top:1px solid var(--rule)">
+    ${d.regle ? `<div class="body row" style="border-top:1px solid var(--rule)">
       <div class="grow"></div>
       <button type="submit" class="btn">Enregistrer les décisions</button>
-    </div>
+    </div>` : `<div class="body" style="border-top:1px solid var(--rule)">
+      <span style="color:var(--laterite)">Les décisions ne sont pas
+      enregistrables tant qu'aucune règle de passage n'est en vigueur. Le
+      tableau reste lisible : la délibération se prépare, elle ne se
+      prononce pas.</span>
+    </div>`}
   </div>
-</form>`;
+${d.regle ? `</form>` : ""}`;
 
   return page(chrome, "Conseil de classe", body);
 }

@@ -158,6 +158,44 @@ export async function pointsDAttention(
       }
     }
 
+    /* LES NIVEAUX ENSEIGNÉS ONT-ILS UNE RÈGLE DE PASSAGE EN VIGUEUR ?
+     *
+     * L'absence de règle était lue comme une permission : `?? true`. Le conseil
+     * de classe affichait « redouble » en CP1 — où l'arrêté de 2019 l'interdit
+     * — et l'enregistrait. On le dit désormais AVANT la séance, sur le tableau
+     * de bord, et pas au milieu d'une délibération. */
+    const sansRegle = await un(
+      `select count(*)::int as n from niveaux_sans_regle_de_passage()`);
+    if (sansRegle > 0) {
+      points.push({
+        gravite: "bloquant",
+        texte: `${sansRegle === 1 ? "Un niveau enseigné cette année n'a"
+                                  : sansRegle + " niveaux enseignés cette année n'ont"} `
+          + "aucune règle de passage en vigueur : le conseil de classe ne "
+          + "pourra rien y prononcer.",
+        action: "Voir", lien: "/conseil", droit: "publier_bulletins",
+      });
+    }
+
+    /* ET DISENT-ELLES LA MÊME CHOSE QUE LE TEXTE NATIONAL ?
+     *
+     * L'arrêté de 2019 est encodé deux fois : en donnée nationale
+     * (`levels.sub_cycle_position`) et par école (`promotion_rules`). Rien ne
+     * les comparait. Une règle d'école mal saisie laissait l'interdiction sans
+     * effet, en silence, sur l'écran qui décide de l'année d'un enfant. */
+    const incoherents = await un(
+      `select count(*)::int as n from ban_redoublement_incoherent()`);
+    if (incoherents > 0) {
+      points.push({
+        gravite: "important",
+        texte: `${incoherents === 1 ? "Un niveau autorise" : incoherents + " niveaux autorisent"} `
+          + "le redoublement alors que l'arrêté de 2019 l'interdit en première "
+          + "année de sous-cycle du primaire. La règle de l'établissement et le "
+          + "texte national ne disent pas la même chose.",
+        action: "Voir", lien: "/conseil", droit: "publier_bulletins",
+      });
+    }
+
     /* L'INSTALLATION SAIT-ELLE ENVOYER UN SMS ?
      *
      * En mode démonstration, rien ne part : ni absence, ni communiqué, ni

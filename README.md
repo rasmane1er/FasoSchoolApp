@@ -793,6 +793,87 @@ saisit quarante notes, le réseau tombe, tout est perdu. Ici :
 4. Sans JavaScript, le formulaire se poste normalement. Le hors-ligne est une
    amélioration, jamais une dépendance.
 
+### La règle de passage était datée ; l'écran qui décide de l'année d'un enfant ne lisait pas la date
+
+La première règle d'ingénierie de ce dépôt, écrite plus bas depuis le premier
+jour : *« les règles pédagogiques sont des données datées. Un `if` dans le code
+serait faux avant la fin de l'année scolaire. »* `src/lib/repository.ts`
+l'applique à la lettre pour les coefficients et la politique de notation —
+`where effective_from <= $1`, et une **erreur** quand rien n'est en vigueur.
+
+`src/server/conseil.ts` — le conseil de classe, le seul écran qui prononce
+redoublement ou passage — lisait la même famille de table ainsi :
+
+```sql
+select redoublement_allowed, min_average_to_pass, source_note
+  from promotion_rules
+ where (level_code = $1 or level_code is null)
+ order by level_code nulls last, effective_from desc limit 1
+```
+
+Pas de borne de date. Pas d'erreur quand il n'y a rien. Quatre défauts en
+sortent, tous éprouvés sur la démonstration.
+
+**1. Une règle de l'an prochain gouvernait aujourd'hui.** On saisit une réforme
+annoncée, à effet dans trois cents jours — barre d'admission à 12/20,
+redoublement interdit. La délibération **en cours** bascule immédiatement : les
+douze options « redouble » disparaissent de l'écran et la barre passe à 12. Un
+censeur qui prépare l'année suivante change l'année en cours, sans un mot.
+Saisir la réforme d'avance est pourtant exactement ce pour quoi
+`effective_from` existe.
+
+**2. Et l'écran expliquait ce basculement par un texte qui ne s'applique pas.**
+Mot pour mot, devant une classe de 6e :
+
+> **Passage automatique en 6E.** Le redoublement est interdit en première année
+> de chaque sous-cycle du primaire (arrêté 2019).
+
+La 6e n'est pas au primaire. L'arrêté de 2019 ne la concerne pas. Le produit
+n'appliquait pas seulement la mauvaise règle : il lui inventait une
+justification légale — et c'est celle-là qu'un chef d'établissement répète à
+une famille qui conteste.
+
+**3. La provenance n'était pas affichée.** `source_note` était calculée, portée
+jusqu'à l'objet `Deliberation`… et rendue nulle part. La colonne qui existe pour
+qu'on sache d'où sort une règle ne s'affichait pas sur l'écran qui s'en sert.
+
+**4. Et l'absence de règle autorisait le redoublement.** Une ligne :
+
+```ts
+const redoublementAllowed = ctx.rule?.redoublement_allowed ?? true;
+```
+
+On supprime la ligne `promotion_rules` du CP1 — un niveau où l'arrêté de 2019
+**interdit** le redoublement — et les douze options réapparaissent. Le POST est
+accepté. La base porte `redouble` pour un élève de CP1, et l'écran annonce
+« 1 décision enregistrée ». C'est le défaut typé *« une configuration
+dangereuse n'a pas de valeur par défaut »*, à l'endroit du produit où le défaut
+se paie en année scolaire perdue.
+
+Ce qui change :
+
+- `regle_de_passage(niveau, date)` rend la règle **en vigueur à cette date**, et
+  rien d'autre — même forme que `repository.ts` ;
+- `regle_de_passage_a_venir(niveau, date)` existe pour être **dite** : l'écran
+  annonce désormais « une autre règle prend effet le 01/07/2027 ; elle ne
+  s'applique pas à cette délibération », avec ce qu'elle changera ;
+- sans règle en vigueur, **on ne délibère pas** : les listes de décision
+  disparaissent, une note rouge nomme le niveau et la date, et l'écriture est
+  refusée — y compris « admis », parce que c'est la délibération entière qui est
+  impossible quand la barre est inconnue ;
+- la justification citée est celle **qui s'applique** : l'arrêté de 2019 au
+  primaire, la règle de l'établissement et sa date ailleurs — avec, dans ce
+  second cas, la mention explicite que ce n'est *pas* l'arrêté ;
+- la note de provenance s'affiche, et son absence se dit ;
+- `ban_redoublement_incoherent()` compare les **deux écritures du même arrêté** :
+  la donnée nationale (`levels.sub_cycle_position`) et la règle par école
+  (`promotion_rules.redoublement_allowed`). Rien ne les comparait, et une règle
+  mal saisie laissait l'interdiction sans effet, en silence ;
+- le tableau de bord signale les deux cas **avant** la séance.
+
+`db/migrations/0022_regle_de_passage_datee.sql`, `tests/regle-passage.e2e.mjs`
+(32 assertions).
+
 ### On corrigeait l'appel ; on ne corrigeait pas la famille
 
 Trouvé en faisant deux fois le même appel, ce que fait tout surveillant qui
@@ -1643,13 +1724,14 @@ Comptes de démonstration — le code s'affiche à l'écran, aucun SMS n'est env
 | `70000005` | Directeur |
 
 Vérifications : `npm run check:all` — typecheck strict, 60 tests unitaires, et
-**quarante et un parcours**, chacun contre un vrai PostgreSQL et un vrai
+**quarante-deux parcours**, chacun contre un vrai PostgreSQL et un vrai
 serveur.
 Le tableau ci-dessous en détaille une partie ; les autres sont décrits, avec ce
 qu'ils ont trouvé, dans les sections qui précèdent.
 
 | suite | ce qu'elle prouve |
 |---|---|
+| `test:regle-passage` (32) | une règle de passage saisie pour l'an prochain ne gouverne pas cette année, son absence n'autorise rien, et l'arrêté de 2019 n'est cité que là où il s'applique |
 | `test:dementi` (47) | corriger une absence déjà annoncée envoie un démenti à la même famille, le registre garde les deux messages, et la tâche devenue fausse est close au lieu d'être suivie |
 | `test:cookies` (13) | les deux cookies de session portent `Secure` derrière https et pas en local, et on refuse d'inviter une famille sur une adresse en http |
 | `test:cloisonnement` (16) | l'épreuve d'isolation passe sur un schéma complet, **échoue** sur un schéma auquel il manque la migration 0009, et ne touche à aucune base réelle |
@@ -1805,9 +1887,14 @@ applicative passe par `withSchool()`. Sans `fasoschool.school_id` posé, le RLS
 ne renvoie aucune ligne. L'utilisateur PostgreSQL applicatif ne doit jamais
 être superutilisateur — un superutilisateur contourne le RLS entièrement.
 
-**Les règles pédagogiques sont des données datées.** Le ministère a modifié
-les coefficients ET la règle de redoublement en 2026. Un `if` dans le code
-serait faux avant la fin de l'année scolaire.
+**Les règles pédagogiques sont des données datées** — et « datées » veut dire
+que la date se LIT. Le ministère a modifié les coefficients ET la règle de
+redoublement en 2026 ; un `if` dans le code serait faux avant la fin de l'année
+scolaire. Mais écrire `effective_from` dans la table ne suffit pas : le conseil
+de classe interrogeait `promotion_rules` sans borne de date, et une réforme
+saisie pour l'an prochain gouvernait la délibération du jour. Toute lecture
+d'une règle datée porte donc `where effective_from <= <la date>`, et l'écran
+annonce la règle à venir au lieu de l'appliquer en avance.
 
 **Ce qui est sorti de l'établissement ne se rature pas.** Un reçu annulé
 produit un reçu inverse ; un SMS démenti produit un second SMS. Dans les deux
