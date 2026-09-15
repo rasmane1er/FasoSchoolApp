@@ -171,20 +171,148 @@ async function chromeFor(user: SessionUser, active: string, context?: string): P
   });
 }
 
-/** Année et trimestre en cours, socle de presque toutes les pages. */
-async function currentPeriod(schoolId: string) {
+/**
+ * Année et trimestre en cours, socle de presque toutes les pages.
+ *
+ * CE QUI NE VA PAS DANS LA VERSION PRÉCÉDENTE — et elle a servi tout le
+ * produit pendant tout ce temps :
+ *
+ *     order by (current_date between t.starts_on and t.ends_on) desc, t.sequence
+ *     limit 1
+ *
+ * Le tri est juste : le trimestre qui contient aujourd'hui passe devant. Mais
+ * quand AUCUN ne le contient, le `limit 1` prend la première ligne du second
+ * critère — `t.sequence` — c'est-à-dire LE TRIMESTRE 1, en toute saison.
+ *
+ * Une année scolaire n'est pas une suite continue de trimestres : il y a des
+ * congés entre chacun, et le dernier finit des semaines avant la clôture de
+ * l'année. Soixante-neuf jours, dans le jeu de démonstration. Éprouvé :
+ * pendant les congés d'octobre, l'en-tête annonçait « Trimestre 1 » et le
+ * tableau de bord « trimestre 1, clôture le 10/09/2026 » — une date passée.
+ * Après le dernier trimestre : « Trimestre 1, clôture le 27/02/2026 », sept
+ * mois en arrière. Et `period.term_id` commande la saisie des notes : une
+ * colonne saisie ces jours-là entrait dans le trimestre dont les bulletins
+ * étaient déjà chez les familles.
+ *
+ * Désormais : `term_id` vaut `null` quand aujourd'hui n'est dans aucun
+ * trimestre, `etat` nomme la situation, et l'écran qui a besoin d'un trimestre
+ * le fait CHOISIR au lieu d'en deviner un.
+ */
+async function currentPeriod(schoolId: string, url?: URL) {
+  const choisi = url?.searchParams.get("trimestre") ?? null;
   return withSchool(schoolId, async (c) => {
-    const r = await c.query(
-      `select ay.id as year_id, ay.label as year_label,
-              t.id as term_id, t.sequence, t.starts_on, t.ends_on
-         from academic_years ay
-         join terms t on t.academic_year_id = ay.id
-        where ay.status = 'en_cours'
-        order by (current_date between t.starts_on and t.ends_on) desc, t.sequence
-        limit 1`,
-    );
-    return r.rows[0] ?? null;
+    const s = await c.query(`select * from situation_de_l_annee()`);
+    const etat = s.rows[0]?.etat as string | undefined;
+    if (!etat || etat === "aucune_annee") return null;
+
+    const an = await c.query(
+      `select id as year_id, label as year_label, starts_on, ends_on
+         from academic_years where id = $1`, [s.rows[0].year_id]);
+    if (an.rowCount === 0) return null;
+
+    /* LE TRIMESTRE CHOISI EXPLICITEMENT L'EMPORTE — et il est vérifié contre
+     * l'année en cours, parce qu'un identifiant de trimestre arrive par l'URL
+     * et qu'une URL se fabrique à la main. */
+    const t = await c.query(
+      `select id as term_id, sequence, starts_on, ends_on, status
+         from terms
+        where academic_year_id = $1
+          and id = coalesce($2::uuid, $3::uuid)`,
+      [s.rows[0].year_id, choisi, s.rows[0].term_id]);
+
+    return {
+      ...an.rows[0],
+      etat,
+      /* `null` se lit « nous ne sommes dans aucun trimestre ». Jamais
+       * « prenez le premier ». */
+      term_id: t.rows[0]?.term_id ?? null,
+      sequence: t.rows[0]?.sequence ?? null,
+      starts_on: t.rows[0]?.starts_on ?? an.rows[0].starts_on,
+      ends_on: t.rows[0]?.ends_on ?? an.rows[0].ends_on,
+      /** Vrai quand le trimestre utilisé a été choisi, pas observé. */
+      choisi: Boolean(choisi) && t.rowCount! > 0,
+      precedentId: s.rows[0].precedent_id,
+      suivantId: s.rows[0].suivant_id,
+      precedenteSequence: s.rows[0].precedente_sequence,
+      precedenteFin: s.rows[0].precedente_fin,
+      suivanteSequence: s.rows[0].suivante_sequence,
+      suivantDebut: s.rows[0].suivant_debut,
+      anneeFin: an.rows[0].ends_on,
+    };
   });
+}
+
+/** Ce que l'en-tête de page annonce. Une phrase vraie, ou rien. */
+function etiquettePeriode(p: any): string {
+  if (!p) return "";
+  if (p.term_id) {
+    return `Année ${p.year_label} — Trimestre ${p.sequence}${
+      p.choisi ? " (choisi)" : ""}`;
+  }
+  const quoi = p.etat === "entre_trimestres" ? "entre deux trimestres"
+    : p.etat === "apres_le_dernier" ? "après le dernier trimestre"
+    : p.etat === "avant_le_premier" ? "avant le premier trimestre"
+    : "hors de l'année";
+  return `Année ${p.year_label} — ${quoi}`;
+}
+
+const jourFrCourt = (d: any): string =>
+  d ? new Date(d).toLocaleDateString("fr-FR") : "";
+
+/** « 1er », « 2e », « 3e ». Un trimestre se nomme par son rang, en français. */
+const rang = (n: any): string =>
+  n === null || n === undefined ? "—"
+    : `${n}<sup>${Number(n) === 1 ? "er" : "e"}</sup>`;
+
+/**
+ * L'écran a besoin d'un trimestre et aujourd'hui n'en désigne aucun.
+ *
+ * On ne choisit pas à la place de l'utilisateur : on nomme la situation, on
+ * dit ce qui vient de finir et ce qui va commencer, et on propose les
+ * trimestres de l'année. Un clic, et l'écran reprend son cours — en sachant
+ * dans quel trimestre il écrit.
+ */
+async function choisirTrimestre(
+  schoolId: string, p: any, chemin: string, url: URL,
+): Promise<string> {
+  const termes = await withSchool(schoolId, async (c) => (await c.query(
+    `select id, sequence, starts_on, ends_on, status from terms
+      where academic_year_id = $1 order by sequence`, [p.year_id])).rows);
+
+  const phrase = p.etat === "entre_trimestres"
+    ? `Nous sommes entre deux trimestres : le ${rang(p.precedenteSequence)}
+       s'est terminé le ${esc(jourFrCourt(p.precedenteFin))}, le ${
+       rang(p.suivanteSequence)} commence le ${
+       esc(jourFrCourt(p.suivantDebut))}.`
+    : p.etat === "apres_le_dernier"
+    ? `Le dernier trimestre s'est terminé le ${esc(jourFrCourt(p.precedenteFin))}.
+       L'année reste ouverte jusqu'au ${esc(jourFrCourt(p.anneeFin))} — c'est le
+       temps du conseil de classe et de la clôture.`
+    : p.etat === "avant_le_premier"
+    ? `Le premier trimestre commence le ${esc(jourFrCourt(p.suivantDebut))}.`
+    : `Nous sommes hors des bornes de l'année ${esc(p.year_label)}.`;
+
+  const params = (id: string) => {
+    const u = new URLSearchParams(url.searchParams);
+    u.set("trimestre", id);
+    return `${chemin}?${u.toString()}`;
+  };
+
+  return `
+<div class="note warn">
+  <b>Aucun trimestre en cours aujourd'hui.</b> ${phrase}
+  <div style="margin-top:8px;font-size:13.5px">Cet écran écrit DANS un
+    trimestre : il faut donc dire lequel. Avant, le produit prenait le premier
+    sans le dire — une note saisie pendant les congés entrait dans le trimestre
+    dont les bulletins étaient déjà chez les familles.</div>
+  <div class="row" style="margin-top:12px;gap:8px;flex-wrap:wrap">
+    ${termes.map((t: any) => `<a class="btn ghost" href="${esc(params(t.id))}">
+      Trimestre ${t.sequence}
+      <span style="color:var(--muted);font-size:12px">${
+        esc(jourFrCourt(t.starts_on))} → ${esc(jourFrCourt(t.ends_on))}${
+        t.status === "clos" ? " · clos" : ""}</span></a>`).join("")}
+  </div>
+</div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -194,8 +322,7 @@ async function currentPeriod(schoolId: string) {
 async function dashboard(user: SessionUser): Promise<string> {
   const schoolId = user.schoolId!;
   const period = await currentPeriod(schoolId);
-  const chrome = await chromeFor(user, "dashboard",
-    period ? `Année ${period.year_label} — Trimestre ${period.sequence}` : undefined);
+  const chrome = await chromeFor(user, "dashboard", etiquettePeriode(period));
 
   if (!period) {
     return page(chrome, "Tableau de bord", `
@@ -204,6 +331,14 @@ async function dashboard(user: SessionUser): Promise<string> {
         <a href="/annee"><b>Ouvrez-en une</b></a> pour commencer : c'est elle qui
         porte les trimestres, les classes et tout le reste.</div>`);
   }
+
+  /* LE TABLEAU DE BORD RAPPORTE, IL N'ÉCRIT PAS. Quand aujourd'hui n'est dans
+   * aucun trimestre, ses résumés portent donc sur celui qui vient de finir —
+   * et l'écran le DIT. « Bulletins prêts » sur un trimestre qui n'a pas
+   * commencé n'apprendrait rien à personne ; sur celui qui s'achève, tout. */
+  const termeLu = period.term_id ?? period.precedentId ?? period.suivantId ?? null;
+  const termeLuSequence = period.sequence ?? period.precedenteSequence
+    ?? period.suivanteSequence ?? null;
 
   const data = await withSchool(schoolId, async (c) => {
     const classes = await c.query(
@@ -219,7 +354,7 @@ async function dashboard(user: SessionUser): Promise<string> {
          from classes cl
         where cl.academic_year_id = $2
         order by cl.label`,
-      [period.term_id, period.year_id],
+      [termeLu, period.year_id],
     );
 
     const absToday = await c.query(
@@ -283,12 +418,33 @@ async function dashboard(user: SessionUser): Promise<string> {
   // Ce qui demande une action passe AVANT les indicateurs : un tableau de bord
   // se lit de haut en bas, et personne ne descend jusqu'aux tableaux.
   const attention = attentionCard(
-    await pointsDAttention(user, period.year_id, Number(period.sequence)));
+    await pointsDAttention(user, period.year_id,
+      period.sequence === null ? null : Number(period.sequence)));
 
   return page(chrome, "Tableau de bord", `
     <div>
       <h1>Bonjour ${esc(user.fullName.split(" ").slice(-1)[0])}</h1>
-      <p style="margin:0;color:var(--muted)">${plural(data.classes.length, "classe")} — trimestre ${period.sequence}, clôture le ${new Date(period.ends_on).toLocaleDateString("fr-FR")}.</p>
+      <p style="margin:0;color:var(--muted)">${plural(data.classes.length, "classe")}${
+        /* « trimestre 1, clôture le 10/09/2026 » — une date déjà passée —
+           était la phrase affichée pendant les congés. Un tableau de bord qui
+           annonce une échéance révolue comme l'échéance en cours apprend à ne
+           plus lire les échéances. */
+        period.term_id
+          ? ` — trimestre ${period.sequence}, clôture le ${jourFrCourt(period.ends_on)}.`
+          : period.etat === "entre_trimestres"
+          ? ` — entre deux trimestres. Le ${rang(period.precedenteSequence)}
+              s'est terminé le ${esc(jourFrCourt(period.precedenteFin))}, le ${
+              rang(period.suivanteSequence)} commence le ${
+              esc(jourFrCourt(period.suivantDebut))}.`
+          : period.etat === "apres_le_dernier"
+          ? ` — le dernier trimestre s'est terminé le ${
+              esc(jourFrCourt(period.precedenteFin))}. L'année court jusqu'au ${
+              esc(jourFrCourt(period.anneeFin))} : c'est le temps du conseil de
+              classe et de la clôture.`
+          : period.etat === "avant_le_premier"
+          ? ` — le premier trimestre commence le ${
+              esc(jourFrCourt(period.suivantDebut))}.`
+          : ` — aujourd'hui est hors des bornes de l'année ${esc(period.year_label)}.`}</p>
     </div>
 
     ${attention}
@@ -309,7 +465,8 @@ async function dashboard(user: SessionUser): Promise<string> {
     </div>
 
     <div class="card">
-      <header><h2>Saisie des notes — trimestre ${period.sequence}</h2></header>
+      <header><h2>Saisie des notes — trimestre ${termeLuSequence ?? "—"}${
+        period.term_id ? "" : " (terminé)"}</h2></header>
       <div class="scroll"><table>
         <thead><tr><th>Classe</th><th>Effectif</th><th>Matières saisies</th><th class="r">État</th></tr></thead>
         <tbody>${rows || `<tr><td colspan="4" style="color:var(--muted)">Aucune classe.</td></tr>`}</tbody>
@@ -319,10 +476,16 @@ async function dashboard(user: SessionUser): Promise<string> {
 
 async function notesPage(user: SessionUser, url: URL, flash?: string): Promise<string> {
   const schoolId = user.schoolId!;
-  const period = await currentPeriod(schoolId);
-  const chrome = await chromeFor(user, "notes",
-    period ? `Trimestre ${period.sequence}` : undefined);
-  if (!period) return page(chrome, "Notes", `<h1>Notes</h1><div class="note warn">Aucun trimestre en cours.</div>`);
+  const period = await currentPeriod(schoolId, url);
+  const chrome = await chromeFor(user, "notes", etiquettePeriode(period));
+  if (!period) return page(chrome, "Notes", `<h1>Notes</h1><div class="note warn">Aucune année scolaire en cours.</div>`);
+  /* On écrit DANS un trimestre : s'il n'y en a pas aujourd'hui, on le fait
+     choisir. Deviner revenait à écrire dans le trimestre 1 pendant les
+     congés — celui dont les bulletins sont chez les familles. */
+  if (!period.term_id) {
+    return page(chrome, "Notes", `<h1>Saisie des notes</h1>
+      ${await choisirTrimestre(schoolId, period, "/notes", url)}`);
+  }
 
   const classId = url.searchParams.get("classe");
   const subjectId = url.searchParams.get("matiere");
@@ -601,9 +764,13 @@ async function saveNotes(
 async function bulletinsPage(user: SessionUser, url: URL, flash?: string,
                              refus?: string, forcable = false): Promise<string> {
   const schoolId = user.schoolId!;
-  const period = await currentPeriod(schoolId);
-  const chrome = await chromeFor(user, "bulletins", period ? `Trimestre ${period.sequence}` : undefined);
-  if (!period) return page(chrome, "Bulletins", `<h1>Bulletins</h1><div class="note warn">Aucun trimestre en cours.</div>`);
+  const period = await currentPeriod(schoolId, url);
+  const chrome = await chromeFor(user, "bulletins", etiquettePeriode(period));
+  if (!period) return page(chrome, "Bulletins", `<h1>Bulletins</h1><div class="note warn">Aucune année scolaire en cours.</div>`);
+  if (!period.term_id) {
+    return page(chrome, "Bulletins", `<h1>Bulletins</h1>
+      ${await choisirTrimestre(schoolId, period, "/bulletins", url)}`);
+  }
 
   const classId = url.searchParams.get("classe");
   const classes = await withSchool(schoolId, async (c) =>
@@ -735,9 +902,13 @@ async function bulletinsPage(user: SessionUser, url: URL, flash?: string,
 async function absencesPage(user: SessionUser, url: URL, flash?: string,
                             refus?: string): Promise<string> {
   const schoolId = user.schoolId!;
-  const period = await currentPeriod(schoolId);
-  const chrome = await chromeFor(user, "absences", period ? `Trimestre ${period.sequence}` : undefined);
-  if (!period) return page(chrome, "Absences", `<h1>Absences</h1><div class="note warn">Aucun trimestre en cours.</div>`);
+  /* L'APPEL NE S'ÉCRIT PAS DANS UN TRIMESTRE, IL S'ÉCRIT À UNE DATE.
+     Il n'a donc pas besoin qu'on en choisisse un — `jourEcole()` décide seul
+     si l'école était ouverte ce jour-là, et c'est la bonne question. On se
+     sert de la période pour l'en-tête et pour la liste des classes. */
+  const period = await currentPeriod(schoolId, url);
+  const chrome = await chromeFor(user, "absences", etiquettePeriode(period));
+  if (!period) return page(chrome, "Absences", `<h1>Absences</h1><div class="note warn">Aucune année scolaire en cours.</div>`);
 
   const classId = url.searchParams.get("classe");
   const dateBrute = url.searchParams.get("date") ?? new Date().toISOString().slice(0, 10);
@@ -1346,9 +1517,12 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     }
     if (path === "/bulletins/imprimer" && req.method === "GET") {
       if (!can(user, "voir_notes")) return html(res, "Accès refusé.", 403);
-      const period = await currentPeriod(user.schoolId);
+      const period = await currentPeriod(user.schoolId, url);
       const classId = url.searchParams.get("classe");
-      if (!period || !classId) return redirect(res, "/bulletins");
+      /* Sans trimestre désigné, on ne devine pas : on renvoie à l'écran qui
+         fait choisir. Imprimer un bulletin du « trimestre 1 » pendant les
+         congés produirait un double qui ne correspond à rien. */
+      if (!period || !classId || !period.term_id) return redirect(res, "/bulletins");
       const inputs = await loadBulletinInputs(user.schoolId, classId, period.term_id);
       /* On réimprime la copie PUBLIÉE quand elle existe. Sans cela, le double
          ressorti en juin pour un dossier de transfert ne serait pas la feuille

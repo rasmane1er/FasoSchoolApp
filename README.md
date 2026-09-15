@@ -793,6 +793,67 @@ saisit quarante notes, le réseau tombe, tout est perdu. Ici :
 4. Sans JavaScript, le formulaire se poste normalement. Le hors-ligne est une
    amélioration, jamais une dépendance.
 
+### Entre deux trimestres, le produit disait « Trimestre 1 »
+
+Trouvé en déplaçant les dates des trimestres. Le socle de presque toutes les
+pages était cette requête, dont le commentaire dit ce qu'elle croit faire —
+*« Année et trimestre en cours »* :
+
+```sql
+order by (current_date between t.starts_on and t.ends_on) desc, t.sequence
+limit 1
+```
+
+Le tri est juste : le trimestre qui contient aujourd'hui passe devant. Mais
+quand **aucun** ne le contient, le `limit 1` prend la première ligne du second
+critère — `t.sequence` — c'est-à-dire le trimestre 1, en toute saison.
+
+Or une année scolaire n'est pas une suite continue de trimestres : il y a des
+congés entre chacun, et le dernier finit des semaines avant la clôture de
+l'année. **Soixante-neuf jours** dans le jeu de démonstration —
+`jours_hors_trimestre()` les compte. Plus de deux mois par an, tous les ans,
+pour toutes les écoles.
+
+Éprouvé trois fois :
+
+- pendant les congés entre T1 et T2 : l'en-tête annonce « Trimestre 1 » et le
+  tableau de bord écrit *« trimestre 1, clôture le 10/09/2026 »* — une date
+  **déjà passée**. L'écran imprime une échéance révolue et l'appelle l'échéance
+  en cours ;
+- après le dernier trimestre, l'année n'étant pas close : *« Trimestre 1,
+  clôture le 27/02/2026 »*, sept mois en arrière, et le **premier** trimestre,
+  pas le troisième ;
+- et même trimestre 1 **clos**, l'écran de saisie s'ouvrait dessus : le refus
+  n'arrivait qu'à l'enregistrement, après que l'enseignant avait saisi sa
+  colonne.
+
+Ce que cela coûtait : `period.term_id` commande la saisie des notes, les
+évaluations, les bulletins et l'en-tête de chaque page. Une colonne de notes
+saisie pendant les congés d'octobre entrait dans le trimestre 1 — celui dont le
+bulletin est figé et distribué. Personne n'a menti, personne n'a cliqué de
+travers, et le carnet est faux.
+
+**La règle : le produit ne devine pas un trimestre.** `trimestre_du_jour()` rend
+`null` quand il n'y en a pas — aucun repli. `situation_de_l_annee()` nomme
+l'état (`en_trimestre`, `entre_trimestres`, `avant_le_premier`,
+`apres_le_dernier`, `hors_annee`) avec ce qui vient de finir et ce qui va
+commencer. Alors :
+
+- l'en-tête dit « Année 2026-2027 — entre deux trimestres », jamais un numéro
+  faux ;
+- le tableau de bord, qui **rapporte**, parle du trimestre qui vient de finir et
+  l'écrit — « Saisie des notes — trimestre 3 (terminé) » ;
+- l'écran qui **écrit** — notes, bulletins — fait choisir, en disant pourquoi, et
+  le trimestre choisi est vérifié contre l'année en cours : une URL se fabrique
+  à la main. L'en-tête porte alors « (choisi) », parce que la différence entre
+  « nous sommes au trimestre 2 » et « vous avez demandé le trimestre 2 » n'est
+  pas décorative ;
+- l'appel du matin, lui, ne demande rien : une séance porte une **date**, et
+  c'est `jourEcole()` qui décide si l'école était ouverte.
+
+`db/migrations/0025_entre_deux_trimestres.sql`,
+`tests/entre-trimestres.e2e.mjs` (30 assertions).
+
 ### Le registre disait « cette année » et imprimait 2024
 
 0023 a borné l'assiduité là où on l'avait cherchée. Une relecture systématique
@@ -1828,7 +1889,7 @@ Comptes de démonstration — le code s'affiche à l'écran, aucun SMS n'est env
 | `70000005` | Directeur |
 
 Vérifications : `npm run check:all` — typecheck strict, 60 tests unitaires, et
-**quarante-cinq parcours**, chacun contre un vrai PostgreSQL et un vrai
+**quarante-six parcours**, chacun contre un vrai PostgreSQL et un vrai
 serveur — sauf deux témoins qui n'écrivent rien : l'un compte le jeu de
 démonstration, l'autre relit le code source.
 Le tableau ci-dessous en détaille une partie ; les autres sont décrits, avec ce
@@ -1836,6 +1897,7 @@ qu'ils ont trouvé, dans les sections qui précèdent.
 
 | suite | ce qu'elle prouve |
 |---|---|
+| `test:entre-trimestres` (30) | aux quatre coins du calendrier, aucun écran n'annonce un trimestre qui n'a pas cours ; celui qui écrit fait choisir, celui qui rapporte nomme le trimestre qu'il lit |
 | `test:bornes` (7) | aucune requête du dépôt ne prend un `ON` de jointure externe pour une borne d'année, ne lit une table datée sans période, ni une règle datée sans date — et le témoin sait encore mordre |
 | `test:clos` (13) | un fait de discipline d'une année close n'entre pas dans « ce qui revient cette année », et un point bloquant s'éteint quand le geste est fait |
 | `test:annee-courante` (21) | une année scolaire close n'entre plus dans les chiffres d'aujourd'hui — conseil, fiche, espace famille — et le passé s'affiche daté au lieu d'être additionné |
@@ -2020,6 +2082,13 @@ additionnées au présent. Ce défaut a été trouvé deux fois, dans deux modul
 `tests/bornes.e2e.mjs` relit désormais le code source du dépôt pour qu'il n'y
 ait pas de troisième fois, et une requête volontairement cumulative doit écrire
 `-- borne:` suivi de sa raison.
+
+**Le produit ne devine jamais une période.** Un trimestre s'observe — la date
+d'aujourd'hui tombe dedans — ou se choisit, et l'écran dit lequel des deux. Il
+ne se déduit pas d'un `order by` dont le second critère devient le premier
+quand personne ne regarde. Corollaire : un écran qui RAPPORTE peut parler d'une
+période révolue à condition de la nommer ; un écran qui ÉCRIT doit avoir une
+période explicite ou refuser.
 
 **Un point d'attention doit pouvoir s'éteindre.** Un indicateur rouge qu'aucun
 geste offert par l'écran ne peut faire disparaître est pire qu'une absence
