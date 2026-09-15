@@ -793,6 +793,56 @@ saisit quarante notes, le réseau tombe, tout est perdu. Ici :
 4. Sans JavaScript, le formulaire se poste normalement. Le hors-ligne est une
    amélioration, jamais une dépendance.
 
+### Le registre disait « cette année » et imprimait 2024
+
+0023 a borné l'assiduité là où on l'avait cherchée. Une relecture systématique
+des autres écrans en a trouvé deux qui souffrent du même mal — et l'un d'eux se
+contredit tout seul, à l'écran, sur une seule ligne.
+
+**Le registre de discipline.** On pose deux faits vieux de deux ans, hors de
+toute année ouverte. La carte affiche alors :
+
+> **Ce qui revient — 1 élève signalé plusieurs fois cette année**
+> BAMBARA Alizèta · 2 faits · « 2 fois signalé, rien n'a été décidé » ·
+> dernier le **16/10/2024**
+
+Le titre dit l'année. La colonne imprime 2024. Personne ne lit la colonne de
+droite quand le titre a déjà répondu. La borne était pourtant écrite — dans le
+`ON` d'une jointure externe vers `enrolments`, où elle choisit la classe
+affichée et rien d'autre. Même piège qu'en 0023, second module. Or le registre
+existe, dit son en-tête, pour pouvoir dire au conseil qu'« un élève a été
+signalé quatre fois sans qu'on ait jamais rien fait » : sans borne, cette phrase
+additionne trois années et la prononce sur un enfant qui en avait sept à la
+première.
+
+**Un point bloquant que personne ne pouvait éteindre.** *« Les règles de
+notation n'ont pas été confirmées : toutes les moyennes calculées restent
+indicatives. »* Déduit de `count(*) from grading_policies where source_note is
+not null` — toutes les lignes, toutes les dates. Or `settings.ts` écrit **une
+ligne par année scolaire** et ne touche jamais aux précédentes. Un directeur qui
+confirme ses règles en 2026 laisse celle de 2024 avec sa note : le point reste
+allumé pour toujours, et aucun geste offert par l'écran ne peut l'éteindre —
+confirmer réécrit la ligne de l'année en cours, qui est déjà propre. C'est la
+faute que `attention.ts` s'interdit dans sa première phrase : un indicateur
+rouge que rien ne peut éteindre apprend à ne plus lire les rouges.
+
+**Et un garde permanent.** Un défaut corrigé deux fois reviendra une troisième.
+`tests/bornes.e2e.mjs` ne lit pas la base : il lit **le code source** du dépôt et
+refuse trois formes — un agrégat qui prend un `ON` de jointure externe pour une
+borne ; une lecture d'`attendance_records`, `behavior_incidents` ou
+`grade_entries` sans période ; une lecture d'une règle datée sans
+`effective_from <= <date>`. Une requête qui doit vraiment porter sur toutes les
+années le déclare dans le SQL lui-même — `-- borne: volontairement toutes les
+années, <pourquoi>` — et la raison est obligatoire : le but n'est pas d'avoir un
+moyen de se taire, c'est d'obliger à écrire pourquoi. Le balayage a trouvé deux
+cas légitimes, désormais écrits noir sur blanc : le total de notes saisies par
+un agent depuis son arrivée, et les arbitrages de synchronisation ouverts, qui
+n'appartiennent à aucune année tant que personne ne les a tranchés.
+
+`db/migrations/0024_ce_qui_est_clos_est_clos.sql`, `tests/clos.e2e.mjs`
+(13 assertions) et `tests/bornes.e2e.mjs` (7 assertions, dont quatre qui
+vérifient que le témoin sait encore mordre).
+
 ### « Assiduité et conduite de l'année ». Ce n'était l'année de personne
 
 Trouvé en donnant un passé à un élève. On ajoute au jeu de démonstration une
@@ -1778,13 +1828,16 @@ Comptes de démonstration — le code s'affiche à l'écran, aucun SMS n'est env
 | `70000005` | Directeur |
 
 Vérifications : `npm run check:all` — typecheck strict, 60 tests unitaires, et
-**quarante-trois parcours**, chacun contre un vrai PostgreSQL et un vrai
-serveur.
+**quarante-cinq parcours**, chacun contre un vrai PostgreSQL et un vrai
+serveur — sauf deux témoins qui n'écrivent rien : l'un compte le jeu de
+démonstration, l'autre relit le code source.
 Le tableau ci-dessous en détaille une partie ; les autres sont décrits, avec ce
 qu'ils ont trouvé, dans les sections qui précèdent.
 
 | suite | ce qu'elle prouve |
 |---|---|
+| `test:bornes` (7) | aucune requête du dépôt ne prend un `ON` de jointure externe pour une borne d'année, ne lit une table datée sans période, ni une règle datée sans date — et le témoin sait encore mordre |
+| `test:clos` (13) | un fait de discipline d'une année close n'entre pas dans « ce qui revient cette année », et un point bloquant s'éteint quand le geste est fait |
 | `test:annee-courante` (21) | une année scolaire close n'entre plus dans les chiffres d'aujourd'hui — conseil, fiche, espace famille — et le passé s'affiche daté au lieu d'être additionné |
 | `test:regle-passage` (32) | une règle de passage saisie pour l'an prochain ne gouverne pas cette année, son absence n'autorise rien, et l'arrêté de 2019 n'est cité que là où il s'applique |
 | `test:dementi` (47) | corriger une absence déjà annoncée envoie un démenti à la même famille, le registre garde les deux messages, et la tâche devenue fausse est close au lieu d'être suivie |
@@ -1963,7 +2016,16 @@ faits de discipline ou de moyennes se borne à l'année scolaire, et la borne es
 une jointure interne — un `ON` de jointure externe a l'apparence d'un filtre et
 le comportement d'un commentaire. Corollaire : le passé ne s'efface pas, il se
 date. Une fiche d'élève montre les années précédentes nommées, à part, jamais
-additionnées au présent.
+additionnées au présent. Ce défaut a été trouvé deux fois, dans deux modules :
+`tests/bornes.e2e.mjs` relit désormais le code source du dépôt pour qu'il n'y
+ait pas de troisième fois, et une requête volontairement cumulative doit écrire
+`-- borne:` suivi de sa raison.
+
+**Un point d'attention doit pouvoir s'éteindre.** Un indicateur rouge qu'aucun
+geste offert par l'écran ne peut faire disparaître est pire qu'une absence
+d'indicateur : il apprend à ne plus lire les rouges. Chaque point du tableau de
+bord se déduit donc de la règle EN VIGUEUR et de l'année en cours, jamais de
+l'existence d'une ligne quelque part dans une table datée.
 
 **Une note ne dépend jamais du paiement.** Le module évaluation n'importe
 rien du module scolarité. Le jour où un directeur demande de masquer les

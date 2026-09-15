@@ -81,6 +81,10 @@ export async function loadPersonnel(schoolId: string): Promise<Personnel> {
               u.phone,
               (select count(*)::int from teacher_assignments ta
                 where ta.staff_id = st.id) as services,
+              -- borne: volontairement toutes les années. Ce nombre décrit un
+              -- AGENT, pas une classe : « combien de notes cette enseignante
+              -- a-t-elle saisies depuis son arrivée ». Le remettre à zéro
+              -- chaque rentrée effacerait l'ancienneté de son travail.
               (select count(*)::int from grade_entries ge
                 where ge.recorded_by = st.id) as notes
          from staff st

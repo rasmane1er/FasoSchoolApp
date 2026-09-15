@@ -75,7 +75,8 @@ psql "$CIBLE" -v ON_ERROR_STOP=1 -q \
   -f db/migrations/0020_fetes_au_dela_de_2028.sql \
   -f db/migrations/0021_dementi_absence.sql \
   -f db/migrations/0022_regle_de_passage_datee.sql \
-  -f db/migrations/0023_assiduite_de_l_annee.sql
+  -f db/migrations/0023_assiduite_de_l_annee.sql \
+  -f db/migrations/0024_ce_qui_est_clos_est_clos.sql
 echo "migrations appliquées"
 
 echo

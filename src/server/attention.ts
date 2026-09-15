@@ -51,8 +51,23 @@ export async function pointsDAttention(
       });
     }
 
+    /* LA RÈGLE EN VIGUEUR, PAS TOUTES CELLES QUI ONT EXISTÉ.
+     *
+     * `grading_policies` est une table datée : `settings.ts` écrit une ligne
+     * par année scolaire et ne touche jamais aux précédentes. Le décompte
+     * portait sur toutes les lignes — donc un directeur qui confirmait ses
+     * règles en 2026 laissait celle de 2024 avec sa note de provenance, et le
+     * point bloquant restait allumé POUR TOUJOURS. Aucun geste offert par
+     * l'écran ne pouvait l'éteindre : confirmer réécrit la ligne de l'année en
+     * cours, qui était déjà propre. Éprouvé.
+     *
+     * Une règle révolue qui porte encore sa note n'est pas un problème : c'est
+     * une archive. Un point rouge que rien ne peut éteindre, si — il apprend à
+     * ne plus lire les rouges, ce que la première phrase de ce fichier
+     * s'interdit. */
     const reglesNonConfirmees = await un(
-      `select count(*)::int as n from grading_policies where source_note is not null`);
+      `select (case when regle_notation_a_confirmer()
+                      or coefficients_a_confirmer() then 1 else 0 end) as n`);
     if (reglesNonConfirmees > 0) {
       points.push({
         gravite: "bloquant",
@@ -89,12 +104,16 @@ export async function pointsDAttention(
     /* Une absence à une évaluation qui attend une explication : tant que
        personne ne tranche, la règle en vigueur peut la compter zéro dans une
        moyenne, et c'est un bulletin faux qui part chez la famille. */
-    const aJustifier = await un(
-      `select count(*)::int as n from grade_entries ge
-         join evaluations ev on ev.id = ge.evaluation_id
-        where ge.is_absent and not ge.is_justified
-          and exists (select 1 from grading_policies gp
-                       where gp.unjustified_absence_counts_as_zero)`);
+    /* Bornée à l'année, et à la règle EN VIGUEUR. L'ancienne version comptait
+     * toutes les années, et se déclenchait sur l'existence de N'IMPORTE QUELLE
+     * politique comptant zéro — y compris une abandonnée depuis deux ans, y
+     * compris une saisie d'avance pour l'an prochain. Un bulletin figé et remis
+     * il y a deux ans entretenait ainsi un point que plus personne ne pouvait
+     * résoudre. */
+    const aJustifier = yearId && await un(
+      `select (case when absence_non_justifiee_compte_zero()
+                    then absences_evaluation_a_justifier($1) else 0 end) as n`,
+      [yearId]) || 0;
     if (aJustifier > 0) {
       points.push({
         gravite: "bloquant",

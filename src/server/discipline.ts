@@ -160,10 +160,23 @@ export async function loadRegistre(
          left join users auteur on auteur.id = sa.user_id
          left join staff sr on sr.id = bi.retracted_by
          left join users retire on retire.id = sr.user_id
+        where dans_l_annee(bi.occurred_on, $1)
         order by bi.occurred_on desc, bi.created_at desc
         limit 120`, [yearId]);
 
-    /* CE QUI REVIENT, PAR ÉLÈVE.
+    /* CE QUI REVIENT, PAR ÉLÈVE — ET CETTE ANNÉE, comme le titre le promet.
+     *
+     * La carte s'intitulait « signalé plusieurs fois CETTE ANNÉE » et
+     * imprimait, dans sa colonne de droite, « dernier le 16/10/2024 ». La même
+     * ligne se contredisait, et personne ne lit la colonne de droite quand le
+     * titre a déjà répondu.
+     *
+     * La borne d'année était pourtant écrite — dans le ON de la jointure
+     * externe vers `enrolments`, où elle décide de la classe affichée et de
+     * rien d'autre. Même piège qu'en 0023, second module. La voici en clair,
+     * sur la table qui porte la date.
+     *
+     * CE QUI REVIENT, PAR ÉLÈVE.
      *
      * Le registre est une liste chronologique de cent vingt lignes. Pour y
      * voir qu'un élève a été signalé quatre fois, il faut compter des noms à
@@ -187,6 +200,7 @@ export async function loadRegistre(
                                and e.academic_year_id = $1
          left join classes cl on cl.id = e.class_id
         where bi.retracted_at is null
+          and dans_l_annee(bi.occurred_on, $1)
         group by bi.student_id, st.last_name, st.first_names, cl.label
        having count(*) >= $2
         order by count(*) filter (where coalesce(bi.sanction, '') = '') desc,

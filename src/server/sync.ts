@@ -213,7 +213,12 @@ export async function conflictsPage(
   const schoolId = user.schoolId!;
   const rows = await withSchool(schoolId, async (c) =>
     (await c.query(
-      `select sc.id, sc.server_payload, sc.device_payload, sc.created_at,
+      `-- borne: volontairement toutes les années. La liste part de
+       -- sync_conflicts — des arbitrages OUVERTS, qui n'appartiennent à aucune
+       -- année tant que personne ne les a tranchés — et ne joint grade_entries
+       -- que pour nommer l'élève et la matière. Fermer sans arbitrer les
+       -- conflits d'une année close serait perdre des notes.
+       select sc.id, sc.server_payload, sc.device_payload, sc.created_at,
               st.last_name, st.first_names, sub.label as matiere,
               ev.eval_type, ev.label as eval_label, cl.label as classe
          from sync_conflicts sc
