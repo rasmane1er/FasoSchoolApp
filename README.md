@@ -793,6 +793,60 @@ saisit quarante notes, le réseau tombe, tout est perdu. Ici :
 4. Sans JavaScript, le formulaire se poste normalement. Le hors-ligne est une
    amélioration, jamais une dépendance.
 
+### « Assiduité et conduite de l'année ». Ce n'était l'année de personne
+
+Trouvé en donnant un passé à un élève. On ajoute au jeu de démonstration une
+année scolaire close — l'élève avait redoublé — avec six absences et deux faits
+de discipline, tous vieux de deux ans. Puis on relit les écrans d'aujourd'hui,
+sans rien toucher d'autre :
+
+- **le conseil de classe** passe de « 0 0 0 » à « 6 dont 6 non justifiées / 0 /
+  2 aucune suite donnée ». Au-delà de dix jours, le chiffre passe en laterite
+  pour que le conseil le regarde ;
+- **la fiche de l'élève** affiche « Absences relevées : 6 » pour un élève qui
+  n'en a aucune cette année ;
+- **l'espace famille** affiche l'enfant dans la classe de l'an dernier, sous le
+  libellé du trimestre en cours, avec les six absences.
+
+Le commentaire au-dessus de la requête du conseil, écrit depuis le premier
+jour : *« Assiduité et conduite **de l'année**, par élève. Un conseil de classe
+burkinabè délibère sur travail, assiduité et conduite : ne montrer que la
+moyenne, c'est délibérer sur un tiers du dossier. »* L'intention était juste et
+écrite. La requête ne la tenait pas.
+
+**Pourquoi le filtre ne filtrait pas.** Il était là, pourtant :
+
+```sql
+left join attendance_sessions ses on ses.id = ar.attendance_session_id
+                                 and ses.class_id = e.class_id
+```
+
+Dans le `ON` d'une jointure **externe**. Un tel `ON` ne retire aucune ligne : il
+met `ses` à `NULL` quand il n'est pas satisfait, et la ligne de
+`attendance_records` reste — puis le `count(*) filter` la compte. Le filtre
+avait l'apparence d'un filtre et le comportement d'un commentaire. Les deux
+autres écrans ne prétendaient même pas filtrer.
+
+**Et dans la même fonction que la fiche.** `loadFiche` choisit la classe avec un
+soin visible — « l'inscription de l'année en cours, sinon la plus récente » —
+puis compte les absences et lit les bulletins sans aucune borne, trente lignes
+plus bas. Un redoublant y voyait deux tuiles « 1er trimestre », côte à côte,
+sans rien pour les distinguer.
+
+**Qui cela touche : le redoublant.** C'est-à-dire précisément l'élève dont le
+cas se discute, et dans le sens qui l'accable, sur les trois écrans à la fois.
+
+Ce qui change : `assiduite_de_l_annee()` et `conduite_de_l_annee()` comptent en
+un seul endroit, pour les quatre écrans qui le posaient chacun à leur façon ;
+l'espace famille passe par `inscription_de_l_annee()` et dit « pas inscrit(e)
+cette année » au lieu de servir la classe de l'an dernier ; et surtout
+`annees_anterieures()` — **le passé d'un élève n'est pas à jeter, il est à
+dater** : la fiche le montre année par année, nommée, avec sa classe et ses
+chiffres, au lieu de l'additionner en silence au présent.
+
+`db/migrations/0023_assiduite_de_l_annee.sql`, `tests/annee-courante.e2e.mjs`
+(21 assertions).
+
 ### La règle de passage était datée ; l'écran qui décide de l'année d'un enfant ne lisait pas la date
 
 La première règle d'ingénierie de ce dépôt, écrite plus bas depuis le premier
@@ -1724,13 +1778,14 @@ Comptes de démonstration — le code s'affiche à l'écran, aucun SMS n'est env
 | `70000005` | Directeur |
 
 Vérifications : `npm run check:all` — typecheck strict, 60 tests unitaires, et
-**quarante-deux parcours**, chacun contre un vrai PostgreSQL et un vrai
+**quarante-trois parcours**, chacun contre un vrai PostgreSQL et un vrai
 serveur.
 Le tableau ci-dessous en détaille une partie ; les autres sont décrits, avec ce
 qu'ils ont trouvé, dans les sections qui précèdent.
 
 | suite | ce qu'elle prouve |
 |---|---|
+| `test:annee-courante` (21) | une année scolaire close n'entre plus dans les chiffres d'aujourd'hui — conseil, fiche, espace famille — et le passé s'affiche daté au lieu d'être additionné |
 | `test:regle-passage` (32) | une règle de passage saisie pour l'an prochain ne gouverne pas cette année, son absence n'autorise rien, et l'arrêté de 2019 n'est cité que là où il s'applique |
 | `test:dementi` (47) | corriger une absence déjà annoncée envoie un démenti à la même famille, le registre garde les deux messages, et la tâche devenue fausse est close au lieu d'être suivie |
 | `test:cookies` (13) | les deux cookies de session portent `Secure` derrière https et pas en local, et on refuse d'inviter une famille sur une adresse en http |
@@ -1902,6 +1957,13 @@ cas la trace d'origine demeure, avec son heure, parce que c'est elle que
 l'établissement devra montrer le jour où on lui reprochera ce qu'il a envoyé.
 Corollaire moins évident : corriger une donnée ne suffit pas quand elle a déjà
 été communiquée — il faut aussi corriger celui à qui on l'a dite.
+
+**Un chiffre affiché porte toujours sa période.** Un compte d'absences, de
+faits de discipline ou de moyennes se borne à l'année scolaire, et la borne est
+une jointure interne — un `ON` de jointure externe a l'apparence d'un filtre et
+le comportement d'un commentaire. Corollaire : le passé ne s'efface pas, il se
+date. Une fiche d'élève montre les années précédentes nommées, à part, jamais
+additionnées au présent.
 
 **Une note ne dépend jamais du paiement.** Le module évaluation n'importe
 rien du module scolarité. Le jour où un directeur demande de masquer les

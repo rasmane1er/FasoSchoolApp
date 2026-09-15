@@ -171,19 +171,27 @@ export async function loadDeliberation(
     /* Assiduité et conduite de l'année, par élève. Un conseil de classe
        burkinabè délibère sur « travail, assiduité et conduite » : ne montrer
        que la moyenne, c'est délibérer sur un tiers du dossier. */
+    /* LE FILTRE D'ANNÉE ÉTAIT LÀ, ET NE FILTRAIT RIEN.
+     *
+     * L'ancienne requête portait `and ses.class_id = e.class_id` dans le ON
+     * d'une jointure EXTERNE. Un ON externe ne retire aucune ligne : il met
+     * `ses` à NULL quand il n'est pas satisfait, et la ligne de
+     * `attendance_records` reste — puis `count(*) filter (where ar.status =
+     * 'absent')` la compte. Le filtre avait l'apparence d'un filtre et le
+     * comportement d'un commentaire.
+     *
+     * Éprouvé : on donne à un élève une année close vieille de deux ans avec
+     * six absences, et cette colonne passe de 0 à 6, en laterite, sur l'écran
+     * qui décide de son année. C'est le REDOUBLANT que cela frappe — celui
+     * dont le cas se discute justement, et dans le sens qui l'accable.
+     *
+     * Le compte vit désormais dans `assiduite_de_l_annee()`, une seule fois
+     * pour les quatre écrans qui le posaient chacun à leur façon. */
     const vie = await c.query(
-      `select e.student_id,
-              count(*) filter (where ar.status = 'absent')::int as absences,
-              count(*) filter (where ar.status = 'absent'
-                                 and not ar.is_justified)::int as non_justifiees,
-              count(*) filter (where ar.status = 'retard')::int as retards
+      `select e.student_id, a.absences, a.non_justifiees, a.retards
          from enrolments e
-         left join attendance_records ar on ar.student_id = e.student_id
-         left join attendance_sessions ses
-                on ses.id = ar.attendance_session_id
-               and ses.class_id = e.class_id
-        where e.class_id = $1
-        group by e.student_id`, [classId]);
+         cross join lateral assiduite_de_l_annee(e.student_id, $2) a
+        where e.class_id = $1`, [classId, k.rows[0].academic_year_id]);
 
     /* TROIS NOMBRES, PAS DEUX.
      *
@@ -203,16 +211,14 @@ export async function loadDeliberation(
      * [...] c'est précisément ce registre qui permet de dire, au conseil, qu'un
      * élève a été signalé quatre fois sans qu'on ait jamais rien fait ». Le
      * registre le permettait ; le conseil ne le demandait pas. */
+    /* Et la conduite avait le même défaut, sans même l'apparence du filtre :
+     * `behavior_incidents` n'était borné par aucune date. Deux faits d'une
+     * année close remontaient dans le « dont N sans suite » d'aujourd'hui. */
     const conduite = await c.query(
-      `select bi.student_id,
-              count(*)::int as incidents,
-              count(*) filter (where bi.sanction in
-                ('exclusion_temporaire','exclusion_definitive'))::int as lourdes,
-              count(*) filter (where coalesce(bi.sanction, '') = '')::int as sans_suite
-         from behavior_incidents bi
-         join enrolments e on e.student_id = bi.student_id
-        where e.class_id = $1 and bi.retracted_at is null
-        group by bi.student_id`, [classId]);
+      `select e.student_id, k.incidents, k.lourdes, k.sans_suite
+         from enrolments e
+         cross join lateral conduite_de_l_annee(e.student_id, $2) k
+        where e.class_id = $1`, [classId, k.rows[0].academic_year_id]);
 
     return {
       label: k.rows[0].label as string,

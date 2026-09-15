@@ -128,14 +128,25 @@ const jourFr = (iso: string): string => {
 
 export async function loadChildren(g: GuardianSession): Promise<ChildView[]> {
   const base = await withSchool(g.schoolId, async (c) => {
+    /* L'ANNÉE EN COURS, ET ELLE SEULE.
+     *
+     * Cette requête joignait TOUTES les inscriptions de l'enfant, sans borne
+     * d'année et sans ordre. Un enfant de deuxième année y figurait deux fois
+     * — dont une sous la classe d'une année close, surmontée du libellé du
+     * trimestre en cours. Un parent lisait « 6e A — Trimestre 1 » et croyait y
+     * voir la classe d'aujourd'hui.
+     *
+     * Un enfant sans inscription cette année reste listé : sa classe est
+     * `null`, et l'écran le dit. Le faire disparaître serait pire — un parent
+     * qui ne voit plus son enfant conclut que l'école l'a perdu. */
     const kids = await c.query(
-      `select st.id, st.last_name, st.first_names, cl.id as class_id, cl.label as classe,
-              ay.id as year_id
+      `select st.id, st.last_name, st.first_names,
+              i.class_id, i.classe, ay.id as year_id
          from student_guardians sg
          join students st on st.id = sg.student_id
-         left join enrolments e on e.student_id = st.id
-         left join classes cl on cl.id = e.class_id
-         left join academic_years ay on ay.id = e.academic_year_id
+         cross join lateral (select annee_en_cours() as id) courante
+         left join academic_years ay on ay.id = courante.id
+         left join lateral inscription_de_l_annee(st.id, courante.id) i on true
         where sg.guardian_id = $1
         order by st.last_name, st.first_names`, [g.guardianId]);
 
@@ -148,11 +159,13 @@ export async function loadChildren(g: GuardianSession): Promise<ChildView[]> {
 
     const out = [];
     for (const k of kids.rows) {
+      /* Et les absences de l'année, pas de toute la scolarité : celles d'une
+       * année close s'ajoutaient à celles d'aujourd'hui, sous le seul mot
+       * « Absences », à côté de la moyenne et du rang du trimestre en cours. */
       const abs = await c.query(
-        `select count(*) filter (where ar.status = 'absent')::int as absences,
-                count(*) filter (where ar.status = 'retard')::int as retards,
-                count(*) filter (where ar.status = 'absent' and ar.is_justified)::int as justifiees
-           from attendance_records ar where ar.student_id = $1`, [k.id]);
+        `select a.absences, a.retards,
+                (a.absences - a.non_justifiees) as justifiees
+           from assiduite_de_l_annee($1, $2) a`, [k.id, k.year_id]);
       /* CE QU'UNE FAMILLE A BESOIN DE SAVOIR N'EST PAS « VOUS DEVEZ 78 000 F ».
        *
        * C'est un chiffre qui effraie et qu'on ne peut pas verser d'un coup.
@@ -189,7 +202,9 @@ export async function loadChildren(g: GuardianSession): Promise<ChildView[]> {
         id: k.id as string,
         classId: k.class_id as string | null,
         fullName: `${k.last_name} ${k.first_names}`,
-        classe: (k.classe as string) ?? "—",
+        // « Pas inscrit cette année » se DIT. Avant, la case portait la
+        // classe de l'an dernier, ce qui est la seule réponse pire que rien.
+        classe: (k.classe as string) ?? "Pas inscrit(e) cette année",
         absences: abs.rows[0].absences as number,
         retards: abs.rows[0].retards as number,
         justifiees: abs.rows[0].justifiees as number,

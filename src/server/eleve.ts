@@ -67,6 +67,8 @@ export interface Fiche {
   urgences: Urgence[];
   joignable: boolean;
   absences: number;
+  /** Les années déjà passées ici, chacune nommée. Vide pour un nouvel élève. */
+  passe: AnneePassee[];
   moyennes: Array<{ trimestre: string; moyenne: number | null; rang: number | null }>;
   resteAPayer: number | null;
 }
@@ -110,6 +112,14 @@ export async function chercher(
   });
 }
 
+export interface AnneePassee {
+  annee: string;
+  classe: string;
+  niveau: string;
+  absences: number;
+  incidents: number;
+}
+
 export async function loadFiche(
   schoolId: string, studentId: string,
 ): Promise<Fiche | null> {
@@ -140,18 +150,34 @@ export async function loadFiche(
       `select id, full_name, phone, relationship from emergency_contacts
         where student_id = $1 order by full_name`, [studentId]);
 
+    /* CETTE FONCTION SAVAIT L'ANNÉE ET L'OUBLIAIT TRENTE LIGNES PLUS BAS.
+     *
+     * La requête d'identité, juste au-dessus, choisit l'inscription de l'année
+     * en cours avec un soin visible. Puis on comptait les absences sans aucune
+     * borne : « Absences relevées : 6 » pour un élève qui n'en avait aucune
+     * cette année-ci, les six venant d'une année close depuis deux ans.
+     *
+     * Le passé d'un élève n'est pas à jeter — il est à DATER. On le montre donc
+     * à part, année par année, au lieu de l'additionner en silence au présent. */
+    const annee = await c.query(`select annee_en_cours() as id`);
+    const anneeId = annee.rows[0].id;
     const abs = await c.query(
-      `select count(*)::int as n from attendance_records ar
-         join attendance_sessions ses on ses.id = ar.attendance_session_id
-        where ar.student_id = $1 and ar.status = 'absent'`, [studentId]);
+      `select a.absences as n from assiduite_de_l_annee($1, $2) a`,
+      [studentId, anneeId]);
+    const passe = await c.query(
+      `select annee, classe, level_code, absences, incidents
+         from annees_anterieures($1, $2)`, [studentId, anneeId]);
 
     const b = await c.query(
       // Un trimestre n'a pas de libellé en base : il porte un rang, et c'est
       // ce rang qui le nomme sur un bulletin burkinabè.
+      /* Bornés à l'année eux aussi : un redoublant affichait DEUX tuiles
+         « 1er trimestre », côte à côte, sans rien pour les distinguer. */
       `select tr.sequence, b.moyenne_generale, b.rang
          from bulletins b join terms tr on tr.id = b.term_id
         where b.student_id = $1 and b.status = 'publie'
-        order by tr.sequence`, [studentId]);
+          and tr.academic_year_id = $2
+        order by tr.sequence`, [studentId, anneeId]);
 
     const inv = await c.query(
       `select (coalesce(sum(i.total_fcfa), 0)
@@ -175,7 +201,11 @@ export async function loadFiche(
         id: r.id, nom: r.full_name, phone: r.phone, lien: r.relationship,
       })),
       joignable: tuteurs.some((g) => g.recoitSms && g.phone),
-      absences: abs.rows[0].n,
+      absences: Number(abs.rows[0]?.n ?? 0),
+      passe: passe.rows.map((r: any): AnneePassee => ({
+        annee: r.annee, classe: r.classe, niveau: r.level_code,
+        absences: Number(r.absences ?? 0), incidents: Number(r.incidents ?? 0),
+      })),
       moyennes: b.rows.map((r: any) => ({
         trimestre: `${r.sequence}<sup>${r.sequence === 1 ? "er" : "e"}</sup> trimestre`,
         moyenne: r.moyenne_generale === null ? null : Number(r.moyenne_generale),
@@ -513,7 +543,7 @@ ${f.joignable ? "" : `<div class="note bad"><b>Aucun numéro joignable.</b>
   Sa famille ne recevra aucun SMS d'absence. C'est ici que cela se répare.</div>`}
 
 <div class="tiles">
-  <div class="tile"><div class="k">Absences relevées</div>
+  <div class="tile"><div class="k">Absences cette année</div>
     <div class="v">${f.absences}</div></div>
   ${f.moyennes.map((m) => `
   <div class="tile"><div class="k">${m.trimestre}</div>
@@ -525,6 +555,30 @@ ${f.joignable ? "" : `<div class="note bad"><b>Aucun numéro joignable.</b>
     <div class="v">${fcfa(f.resteAPayer)}</div>
     <div class="n"><a href="/scolarite">Voir la scolarité</a></div></div>`}
 </div>
+
+${f.passe.length ? `
+<div class="card">
+  <header><b>Les années précédentes dans cet établissement</b>
+    <span style="color:var(--muted);font-size:13px">datées, pas additionnées</span>
+  </header>
+  <table>
+    <thead><tr><th>Année</th><th>Classe</th>
+      <th class="r">Absences</th><th class="r">Faits consignés</th></tr></thead>
+    <tbody>${f.passe.map((a) => `<tr>
+      <td>${esc(a.annee)}</td>
+      <td>${esc(a.classe)} <span class="dit" style="color:var(--faint)">${
+        esc(a.niveau)}</span></td>
+      <td class="num r">${a.absences}</td>
+      <td class="num r">${a.incidents}</td>
+    </tr>`).join("")}</tbody>
+  </table>
+  <div class="body" style="border-top:1px solid var(--rule);font-size:13.5px;color:var(--muted)">
+    Ces chiffres étaient auparavant AJOUTÉS à ceux de l'année en cours, sans
+    que rien ne le dise — ici, sur la fiche, et jusque sur l'écran du conseil
+    de classe, où le total passait en rouge au-delà de dix jours. C'est le
+    redoublant que cela frappait : celui dont le cas se discute justement.
+  </div>
+</div>` : ""}
 
 <div class="card">
   <header><b>Les tuteurs</b> — ce sont eux qui reçoivent les SMS</header>
