@@ -1646,7 +1646,14 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       const chrome = await chromeFor(user, "scolarite");
       const recu = url.searchParams.get("recu");
       const flash = recu
-        ? `Paiement enregistré. <a href="/recus/${esc(recu)}" target="_blank" rel="noopener"><b>Ouvrir le reçu ${esc(recu)}</b></a>`
+        ? (url.searchParams.get("deja") === "1"
+            /* Le second clic. On ne fait pas semblant d'avoir enregistré un
+               nouveau versement : on nomme ce qui s'est passé, et on montre
+               le reçu qui existe déjà. */
+            ? `Ce versement était déjà enregistré : un seul reçu a été émis. `
+              + `<a href="/recus/${esc(recu)}" target="_blank" rel="noopener">`
+              + `<b>Ouvrir le reçu ${esc(recu)}</b></a>`
+            : `Paiement enregistré. <a href="/recus/${esc(recu)}" target="_blank" rel="noopener"><b>Ouvrir le reçu ${esc(recu)}</b></a>`)
         : undefined;
       return html(res, await financePage(user, chrome, url, flash));
     }
@@ -1658,7 +1665,13 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     if (path === "/scolarite/encaisser" && req.method === "POST") {
       if (!can(user, "encaisser")) return html(res, "Accès refusé.", 403);
       const r = await collect(user, await formBody(req));
-      if (r.ok) return redirect(res, `/scolarite?recu=${encodeURIComponent(r.receipt)}`);
+      /* LE SECOND CLIC RETOMBE SUR LE MÊME REÇU, et l'écran le DIT. Le taire
+         donnerait à l'économe l'impression d'avoir encaissé deux fois — il
+         irait vérifier, puis annuler un versement qui n'a jamais eu lieu. */
+      if (r.ok) {
+        return redirect(res, `/scolarite?recu=${encodeURIComponent(r.receipt)}${
+          r.deja ? "&deja=1" : ""}`);
+      }
       const chrome = await chromeFor(user, "scolarite");
       return html(res, await collectPage(user, chrome, r.invoiceId, r.error));
     }

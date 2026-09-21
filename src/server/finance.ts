@@ -364,7 +364,8 @@ export async function collectPage(
 
 export async function collect(
   user: SessionUser, form: URLSearchParams,
-): Promise<{ ok: true; receipt: string } | { ok: false; error: string; invoiceId: string }> {
+): Promise<{ ok: true; receipt: string; deja?: boolean }
+         | { ok: false; error: string; invoiceId: string }> {
   const schoolId = user.schoolId!;
   const invoiceId = form.get("facture") ?? "";
   const montant = Math.round(Number((form.get("montant") ?? "").replace(/[^\d.,]/g, "").replace(",", ".")));
@@ -393,16 +394,87 @@ export async function collect(
     const staff = await c.query(`select id from staff where user_id = $1 limit 1`, [user.userId]);
     const staffId = staff.rows[0]?.id ?? null;
 
+    /* LE DOUBLE-CLIC AU GUICHET.
+     *
+     * Deux POST identiques lancés ensemble produisaient DEUX paiements, DEUX
+     * reçus et deux numéros : un billet de dix mille remis, vingt mille portés
+     * au crédit de la famille, et une caisse qui manque de dix mille au soir.
+     * Les deux papiers portaient même « total payé : 10 000 » — tous deux
+     * avaient lu la facture avant qu'aucun n'ait écrit.
+     *
+     * La serrure existait pourtant depuis le premier schéma :
+     * `unique (school_id, idempotency_key)`. Le code lui présentait
+     * `guichet:<facture>:<Date.now()>` — une clé neuve à chaque milliseconde.
+     * La serrure n'a jamais refusé personne.
+     *
+     * On compare donc LE GESTE, comme 0014 le fait pour les envois en masse :
+     * cette facture, ce montant, ce moyen, ce guichetier. Un jeton de
+     * formulaire n'attraperait que le double-clic ; le geste attrape aussi le
+     * retour arrière, le rechargement et le re-clic après une attente jugée
+     * trop longue. */
+    const deja = await c.query(
+      `select * from encaissement_deja_enregistre($1, $2, $3, $4)`,
+      [invoiceId, montant, methode, staffId]);
+    if (deja.rowCount! > 0 && deja.rows[0].receipt_number) {
+      /* On rend LE MÊME REÇU, pas une erreur. Un guichetier à qui l'on répond
+       * « erreur » après deux clics ne sait pas si l'argent est passé, et
+       * recommence — ce qui est exactement le geste qu'on voulait empêcher. */
+      return { ok: true as const, receipt: deja.rows[0].receipt_number as string,
+               deja: true as const };
+    }
+
     // Numérotation : on sérialise l'émission par établissement, sinon deux
     // guichets simultanés se disputent le même numéro.
     await c.query(`select pg_advisory_xact_lock(hashtext($1))`, [`recu:${schoolId}`]);
 
+    /* SOUS LE VERROU, ON REGARDE DE NOUVEAU. La garde ci-dessus est lue avant
+     * le verrou : deux requêtes VRAIMENT simultanées la franchissent toutes
+     * les deux. C'est ce cas-là qui produisait les deux reçus. */
+    const dejaVerrou = await c.query(
+      `select * from encaissement_deja_enregistre($1, $2, $3, $4)`,
+      [invoiceId, montant, methode, staffId]);
+    if (dejaVerrou.rowCount! > 0 && dejaVerrou.rows[0].receipt_number) {
+      return { ok: true as const,
+               receipt: dejaVerrou.rows[0].receipt_number as string,
+               deja: true as const };
+    }
+
+    /* Et la clé déterministe, pour que la contrainte d'unicité de la base soit
+     * la dernière ligne de défense — celle qui tient même si deux serveurs
+     * répondent en parallèle. `on conflict do nothing` : si elle refuse, c'est
+     * que le geste est déjà enregistré.
+     *
+     * Le RANG, et pas un créneau de temps. Une première version datait la clé
+     * par `epoch / fenêtre` : un versement légitime dix minutes plus tard
+     * tombait dans le même créneau absolu et était refusé, et la fenêtre mise à
+     * zéro ne désactivait rien. Le rang — combien de versements identiques ont
+     * déjà été acceptés — ne dépend d'aucune horloge : deux clics simultanés le
+     * calculent pareil, un vrai second versement en obtient un autre. */
+    const cle = (await c.query(
+      `select cle_encaissement($1,$2,$3,$4,
+                rang_encaissement($1,$2,$3,$4)) as cle`,
+      [invoiceId, montant, methode, staffId])).rows[0].cle;
+
     const pay = await c.query(
       `insert into payments (school_id, invoice_id, amount_fcfa, method, status,
                              idempotency_key, provider_ref, recorded_by, confirmed_at)
-       values ($1,$2,$3,$4,'confirme',$5,$6,$7, now()) returning id`,
-      [schoolId, invoiceId, montant, methode,
-       `guichet:${invoiceId}:${Date.now()}`, form.get("ref") || null, staffId]);
+       values ($1,$2,$3,$4,'confirme',$5,$6,$7, now())
+       on conflict (school_id, idempotency_key) do nothing
+       returning id`,
+      [schoolId, invoiceId, montant, methode, cle, form.get("ref") || null, staffId]);
+
+    if (pay.rowCount === 0) {
+      const r = await c.query(
+        `select r.receipt_number from payments p
+           join receipts r on r.payment_id = p.id
+          where p.school_id = $1 and p.idempotency_key = $2`, [schoolId, cle]);
+      return r.rowCount! > 0
+        ? { ok: true as const, receipt: r.rows[0].receipt_number as string,
+            deja: true as const }
+        : { ok: false as const,
+            error: "Ce versement vient d'être enregistré ailleurs. Rechargez la "
+              + "page : le reçu s'y trouve.", invoiceId };
+    }
 
     // Compteur monotone porté par l'établissement. Dériver de max(sequence)
     // réutiliserait un numéro si le reçu le plus haut venait à disparaître.

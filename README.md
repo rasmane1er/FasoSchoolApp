@@ -793,6 +793,66 @@ saisit quarante notes, le réseau tombe, tout est perdu. Ici :
 4. Sans JavaScript, le formulaire se poste normalement. Le hors-ligne est une
    amélioration, jamais une dépendance.
 
+### La serrure était posée ; la clé était refaite à chaque tour
+
+Trouvé en cliquant deux fois sur « Encaisser ». Deux POST identiques lancés
+ensemble — sur une connexion lente, cliquer une seconde fois est le geste
+humain normal — et voici ce que la base portait :
+
+```
+paiements : 2 · reçus : 2 · réglé : 20 000 F
+R-2026-0025  10 000 F   « total payé : 10 000 »
+R-2026-0026  10 000 F   « total payé : 10 000 »
+```
+
+Un billet de dix mille remis au guichet, **vingt mille portés au crédit de la
+famille**, deux numéros tirés du registre, et une caisse qui manque de dix
+mille francs au soir. La touche F5 sur l'écran de confirmation en ajoutait un
+troisième.
+
+Et les deux papiers portaient le même « total payé : 10 000 » — tous deux
+avaient lu la facture avant qu'aucun n'ait écrit. L'état figé du reçu, celui
+qui garantit qu'une réimpression dit la même chose que le papier remis, était
+lui-même faux : la course avait eu lieu en amont de lui.
+
+**La serrure existait depuis le premier schéma.**
+
+```sql
+idempotency_key text not null,
+...
+unique (school_id, idempotency_key)
+```
+
+Une contrainte d'unicité, réelle, posée par PostgreSQL. Et le code la
+nourrissait de `` `guichet:${invoiceId}:${Date.now()}` `` — une clé neuve à
+chaque milliseconde. La serrure n'a jamais refusé personne : on lui présentait
+une clé différente à chaque fois. C'est la forme la plus discrète de défaut :
+le dispositif est là, il est correct, il est même vérifié par la base, et la
+valeur qu'on lui donne l'annule. Le verrou d'avis qui sérialise la
+*numérotation*, lui, marchait parfaitement — il ne faisait que rendre le
+doublon net, avec deux numéros consécutifs.
+
+La règle était déjà écrite, pour les envois en masse : *« Ce n'est pas un cas
+tordu. C'est le double-clic. »* Elle n'avait pas été appliquée au chemin de
+l'argent. On compare donc le **geste** — cette facture, ce montant, ce moyen,
+ce guichetier — dans une fenêtre courte et réglable par l'établissement ; le
+second clic **retombe sur le même reçu** et l'écran le dit, parce qu'un
+guichetier à qui l'on répond « erreur » ne sait pas si l'argent est passé et
+recommence.
+
+Deux erreurs de conception, dans le correctif lui-même, que l'épreuve a
+renversées : la clé portait d'abord un créneau de temps (`epoch / fenêtre`) —
+un versement légitime dix minutes plus tard tombait dans la même case et était
+refusé, et la fenêtre mise à zéro ne désactivait rien. Un découpage absolu du
+temps ne dit pas « ces deux gestes sont le même », il dit « ils sont tombés
+dans la même case ». La clé porte désormais le **rang** : combien de versements
+identiques ont déjà été acceptés. Deux clics simultanés le calculent pareil —
+c'est ce qui les rend détectables ; un vrai second versement en obtient un
+autre.
+
+`db/migrations/0026_double_clic_au_guichet.sql`, `tests/double-clic.e2e.mjs`
+(19 assertions).
+
 ### Le jeu de démonstration avait cinq jours de validité
 
 Trouvé le matin où quatre suites sont mortes ensemble sur un
@@ -1928,7 +1988,7 @@ Comptes de démonstration — le code s'affiche à l'écran, aucun SMS n'est env
 | `70000005` | Directeur |
 
 Vérifications : `npm run check:all` — typecheck strict, 60 tests unitaires, et
-**quarante-six parcours**, chacun contre un vrai PostgreSQL et un vrai
+**quarante-sept parcours**, chacun contre un vrai PostgreSQL et un vrai
 serveur — sauf deux témoins qui n'écrivent rien : l'un compte le jeu de
 démonstration, l'autre relit le code source.
 Le tableau ci-dessous en détaille une partie ; les autres sont décrits, avec ce
@@ -1936,6 +1996,7 @@ qu'ils ont trouvé, dans les sections qui précèdent.
 
 | suite | ce qu'elle prouve |
 |---|---|
+| `test:double-clic` (19) | deux clics sur « Encaisser » ne font qu'un versement et qu'un reçu, un vrai second versement passe, et la fenêtre est un réglage de l'établissement |
 | `test:entre-trimestres` (30) | aux quatre coins du calendrier, aucun écran n'annonce un trimestre qui n'a pas cours ; celui qui écrit fait choisir, celui qui rapporte nomme le trimestre qu'il lit |
 | `test:bornes` (7) | aucune requête du dépôt ne prend un `ON` de jointure externe pour une borne d'année, ne lit une table datée sans période, ni une règle datée sans date — et le témoin sait encore mordre |
 | `test:clos` (13) | un fait de discipline d'une année close n'entre pas dans « ce qui revient cette année », et un point bloquant s'éteint quand le geste est fait |
@@ -2121,6 +2182,13 @@ additionnées au présent. Ce défaut a été trouvé deux fois, dans deux modul
 `tests/bornes.e2e.mjs` relit désormais le code source du dépôt pour qu'il n'y
 ait pas de troisième fois, et une requête volontairement cumulative doit écrire
 `-- borne:` suivi de sa raison.
+
+**Un dispositif de garde doit être nourri de la bonne valeur.** Une contrainte
+d'unicité alimentée par une clé neuve à chaque requête ne refuse jamais rien ;
+un verrou qui sérialise la numérotation ne sérialise pas l'écriture. Quand le
+schéma porte déjà un garde-fou — `idempotency_key`, `unique`, un index partiel
+— la question à se poser n'est pas « existe-t-il ? » mais « qu'est-ce qu'on lui
+donne à manger ? ».
 
 **Le produit ne devine jamais une période.** Un trimestre s'observe — la date
 d'aujourd'hui tombe dedans — ou se choisit, et l'écran dit lequel des deux. Il

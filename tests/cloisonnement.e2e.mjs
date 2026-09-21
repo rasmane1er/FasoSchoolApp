@@ -56,7 +56,7 @@ const MIGRATIONS = [
   "0012_bulletin_conseil", "0013_examens", "0014_garde_envois",
   "0015_bulletin_complet", "0016_famille_injoignable",
   "0017_echeancier", "0018_recu_fige", "0019_arrivee_en_cours_annee", "0020_fetes_au_dela_de_2028",
-  "0021_dementi_absence", "0022_regle_de_passage_datee", "0023_assiduite_de_l_annee", "0024_ce_qui_est_clos_est_clos", "0025_entre_deux_trimestres",
+  "0021_dementi_absence", "0022_regle_de_passage_datee", "0023_assiduite_de_l_annee", "0024_ce_qui_est_clos_est_clos", "0025_entre_deux_trimestres", "0026_double_clic_au_guichet",
 ];
 
 const BASE_SANS_0009 = `fasoschool_sans_0009_${process.pid}`;
