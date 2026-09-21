@@ -154,11 +154,19 @@ try {
 
   const avantConseil = await ligneConseil();
   const avantFiche = await fiche();
-  check("le conseil ne montre aucune absence pour cet élève",
-    / 0 0 0 /.test(avantConseil), avantConseil.slice(0, 120));
-  check("la fiche non plus",
-    /Absences cette année 0/.test(avantFiche),
-    avantFiche.slice(avantFiche.indexOf("Absences"), avantFiche.indexOf("Absences") + 60));
+  /* ON NE SUPPOSE PAS QUE L'ÉLÈVE EST À ZÉRO : on relève ce qu'il a
+   * aujourd'hui, et on vérifiera que RIEN N'A BOUGÉ après avoir ajouté une
+   * année close. Une assertion qui exige « 0 » dépend du jeu semé ce jour-là,
+   * et tombe à la première démonstration qui sème une absence de plus — c'est
+   * arrivé. */
+  const { rows: dep } = await client.query(
+    `select * from assiduite_de_l_annee($1, annee_en_cours())`, [A.id]);
+  const DEPART = Number(dep[0].absences);
+  console.log(`     (l'élève part avec ${DEPART} absence(s) cette année)`);
+  check("la fiche annonce les absences de l'année en cours",
+    new RegExp(`Absences cette année ${DEPART}`).test(avantFiche),
+    avantFiche.slice(avantFiche.indexOf("Absences cette"),
+                     avantFiche.indexOf("Absences cette") + 60));
   check("et elle ne montre aucune année précédente",
     !/années précédentes dans cet établissement/.test(avantFiche));
 
@@ -208,9 +216,11 @@ try {
     apresConseil.slice(0, 150));
 
   const apresFiche = await fiche();
-  check("la fiche de l'élève reste à zéro pour l'année en cours",
-    /Absences cette année 0/.test(apresFiche),
-    apresFiche.slice(apresFiche.indexOf("Absences"), apresFiche.indexOf("Absences") + 60));
+  check("la fiche de l'élève n'a pas bougé pour l'année en cours",
+    new RegExp(`Absences cette année ${DEPART}`).test(apresFiche),
+    apresFiche.slice(apresFiche.indexOf("Absences cette"),
+                     apresFiche.indexOf("Absences cette") + 60)
+      + ` — elle devrait rester à ${DEPART}`);
 
   /* === 2. Mais le passé n'est pas jeté : il est daté =================== */
   console.log("\nLe passé n'est pas jeté — il est daté");
@@ -247,8 +257,9 @@ try {
       <= (espace.match(new RegExp(CLASSE.label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")) ?? []).length + 1,
     "toutes les inscriptions étaient jointes, sans borne ni ordre");
   check("et ses absences sont celles de cette année",
-    /Absences 0/.test(espace),
-    espace.slice(espace.indexOf("Absences"), espace.indexOf("Absences") + 40));
+    new RegExp(`Absences ${DEPART}\\b`).test(espace),
+    espace.slice(espace.indexOf("Absences"), espace.indexOf("Absences") + 40)
+      + ` — attendu ${DEPART} : les six de l'année close ne comptent pas`);
 
   /* === 4. Un enfant sans inscription cette année ======================= */
   console.log("\nUn enfant sans inscription cette année est dit tel, pas effacé");
@@ -287,7 +298,8 @@ try {
   const { rows: close } = await client.query(
     `select * from assiduite_de_l_annee($1, $2)`, [A.id, AN]);
   check("l'année en cours ne voit pas les absences de l'année close",
-    cette[0].absences === 0, JSON.stringify(cette[0]));
+    Number(cette[0].absences) === DEPART,
+    JSON.stringify(cette[0]) + ` — attendu ${DEPART}`);
   check("et l'année close les voit toutes", close[0].absences === 6,
     JSON.stringify(close[0]) + " — la borne coupe, elle n'efface pas");
 

@@ -120,11 +120,30 @@ const REEL_UTILISABLE =
 const PLACER_AUJOURDHUI =
   process.argv.includes("--aujourdhui") || !REEL_UTILISABLE;
 
+/**
+ * LE JOUR DE L'ANNÉE OÙ « AUJOURD'HUI » EST PLACÉ, et pourquoi ce n'est plus 75.
+ *
+ * La démonstration était ancrée au 75ᵉ jour d'un premier trimestre qui en
+ * comptait 80 : CINQ JOURS de validité. Semée le 14 septembre 2026, relue le
+ * 21, elle tombait au 82ᵉ jour — hors trimestre. Le produit se comportait alors
+ * exactement comme il doit, en refusant de deviner un trimestre (voir 0025) et
+ * en demandant lequel ; mais une démonstration qui commence par une question
+ * ne démontre plus rien, et quatre suites sont mortes le même matin sur un
+ * délai d'attente qui ne parlait pas du calendrier.
+ *
+ * On vise donc le MILIEU du premier trimestre, allongé pour que la marge soit
+ * réelle : quarante jours devant, après la dernière composition. Une
+ * démonstration se sème une fois et se montre des semaines plus tard.
+ * `tests/fixture.e2e.mjs` vérifie cette marge et dit de resemer quand elle est
+ * mangée.
+ */
+const ANCRE = 80;
+
 /** Le premier jour de l'année scolaire de démonstration. */
 const DEBUT = (() => {
   if (PLACER_AUJOURDHUI) {
     const d = new Date();
-    d.setUTCDate(d.getUTCDate() - 75);
+    d.setUTCDate(d.getUTCDate() - ANCRE);
     return iso(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
   }
   return derniereRentree();
@@ -138,8 +157,11 @@ const jour = (n: number): string => {
 };
 
 /* Les décalages, relevés sur l'année 2026-2027 écrite en dur à l'origine. */
-const T1 = [0, 80], T2 = [96, 178], T3 = [187, 241];
-const FIN_ANNEE = 287;
+/* Le premier trimestre est allongé — 120 jours au lieu de 80 — pour que
+ * l'ancre (jour 80) laisse quarante jours devant elle. Les autres suivent, et
+ * les écarts entre trimestres sont conservés : ce sont les congés. */
+const T1 = [0, 120], T2 = [136, 218], T3 = [227, 281];
+const FIN_ANNEE = 327;
 const EVALUATIONS = [19, 47, 68];        // deux devoirs et une composition
 const PREMIER_APPEL = 4, PAS_APPEL = 5;  // douze appels, tous les cinq jours
 

@@ -793,6 +793,45 @@ saisit quarante notes, le réseau tombe, tout est perdu. Ici :
 4. Sans JavaScript, le formulaire se poste normalement. Le hors-ligne est une
    amélioration, jamais une dépendance.
 
+### Le jeu de démonstration avait cinq jours de validité
+
+Trouvé le matin où quatre suites sont mortes ensemble sur un
+`page.waitForNavigation: Timeout 30000ms` qui ne parlait pas du calendrier.
+
+La démonstration était ancrée au **75ᵉ jour** d'un premier trimestre qui en
+comptait **80**. Semée le 14 septembre, relue le 21 : 82ᵉ jour — hors
+trimestre. Le produit se comportait alors exactement comme il doit, refusant de
+deviner un trimestre et demandant lequel (correctif précédent). Mais une
+démonstration qui s'ouvre sur une question ne démontre rien, et les suites qui
+cliquaient « Publier » sans avoir répondu attendaient une navigation qui ne
+venait pas.
+
+Deux réparations, et la seconde est la plus importante.
+
+**La démonstration se sème une fois et se montre des semaines plus tard.**
+L'ancre vise désormais le milieu du premier trimestre, allongé pour que la
+marge soit réelle : quarante jours devant, après la dernière composition. Et
+`tests/fixture.e2e.mjs` — le témoin qui compte le jeu après tout le reste —
+vérifie maintenant qu'aujourd'hui tombe dans un trimestre **et** qu'il reste au
+moins quinze jours avant sa fin. Quand la marge est mangée, il le dit et
+demande de resemer, au lieu de laisser quatre suites mourir d'un délai
+d'attente.
+
+**Une suite possède les réglages dont ses assertions dépendent** — la règle
+était déjà écrite plus bas, pour les heures de silence et pour les jours
+d'école ; elle vaut aussi pour la saison. Les quatre suites qui ont besoin
+d'être *dans* un trimestre l'empruntent maintenant et le rendent, via
+`tests/calendrier-epreuve.mjs` : si aujourd'hui est déjà bien au chaud dans un
+trimestre, l'aide ne touche à rien ; sinon elle fait glisser l'année entière —
+durées et congés conservés — pour placer aujourd'hui au milieu du premier, et
+remet tout dans le `finally`. Une suite dont le résultat change selon le jour
+de l'année où on la lance n'est pas une épreuve, c'est un présage.
+
+Au passage, `tests/annee-courante.e2e.mjs` exigeait « 0 absence » pour son
+élève ; il relève désormais le compte de départ et vérifie qu'il **n'a pas
+bougé**. Une assertion qui exige un chiffre absolu dépend du jeu semé ce
+jour-là.
+
 ### Entre deux trimestres, le produit disait « Trimestre 1 »
 
 Trouvé en déplaçant les dates des trimestres. Le socle de presque toutes les
@@ -2111,6 +2150,12 @@ l'appel, sur le poste de l'enseignant. Ni l'administration ni la comptabilité :
 ces utilisateurs sont à un bureau.
 
 **Une suite de tests possède les réglages dont dépendent ses assertions.**
+Cela vaut aussi pour la SAISON : quatre suites sont mortes ensemble le jour où
+la démonstration a glissé hors de son propre trimestre, sur un délai d'attente
+qui ne parlait pas du calendrier. Celles qui ont besoin d'être dans un trimestre
+l'empruntent désormais et le rendent (`tests/calendrier-epreuve.mjs`). Et une
+assertion ne réclame pas un chiffre absolu — « 0 absence » — quand elle peut
+relever le compte de départ et vérifier qu'il n'a pas bougé.
 Cela vaut aussi pour le calendrier : six suites portaient les dates de l'année
 2026-2027 du jeu de démonstration. Elles demandent désormais à la base un jour
 d'école libre, ou dérivent leurs dates de l'année en cours.

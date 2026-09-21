@@ -187,6 +187,28 @@ try {
       + `toute l'école « en novembre », et l'écran annonçait douze arrivées `
       + `tardives`);
 
+  /* LA DÉMONSTRATION EST-ELLE ENCORE DANS UN TRIMESTRE ?
+   *
+   * Elle était ancrée au 75ᵉ jour d'un premier trimestre qui en comptait 80 :
+   * cinq jours de validité. Semée un lundi, montrée le lundi suivant, elle
+   * tombait hors trimestre — et le produit, qui refuse désormais de deviner
+   * (voir 0025), commençait par demander lequel. Une démonstration qui
+   * s'ouvre sur une question ne démontre rien. */
+  const { rows: sit } = await client.query(
+    `select s.etat,
+            (select t.ends_on - current_date from terms t where t.id = s.term_id)
+              as jours_restants
+       from situation_de_l_annee() s`);
+  check("aujourd'hui tombe dans un trimestre de la démonstration",
+    sit[0].etat === "en_trimestre",
+    `« ${sit[0].etat} » — relancez « npm run demo » : le jeu a glissé hors de `
+      + `son propre trimestre, et la saisie des notes commence par une question`);
+  check("et il reste de la marge avant la fin de ce trimestre",
+    Number(sit[0].jours_restants ?? 0) >= 14,
+    `${sit[0].jours_restants} jours — une démonstration se sème une fois et se `
+      + `montre des semaines plus tard ; sous quinze jours de marge, elle est `
+      + `déjà en sursis`);
+
   const { rows: fetes } = await client.query(
     `select annee_sans_fetes_legales(ay.id) as vide
        from academic_years ay

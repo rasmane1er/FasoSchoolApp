@@ -12,6 +12,7 @@ import { spawn } from "node:child_process";
 import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
 import pg from "pg";
+import { emprunterCalendrier } from "./calendrier-epreuve.mjs";
 
 const PORT = 4188;
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -127,6 +128,25 @@ const jourLibre = async (rang) => {
   await client.query(`delete from auth_sessions`);
   await client.end();
 }
+
+/* CETTE SUITE A BESOIN D'ÊTRE DANS UN TRIMESTRE.
+ *
+ * Le produit refuse de deviner un trimestre quand aujourd'hui n'en désigne
+ * aucun (voir 0025) : il demande lequel. Une suite qui clique « Publier » sans
+ * avoir répondu meurt sur un délai d'attente qui ne parle pas du calendrier —
+ * c'est arrivé à quatre suites le même matin. Elle pose donc elle-même le
+ * réglage dont ses assertions dépendent, et le rend. */
+const clientCalendrier = new pg.Client({ connectionString: process.env.DATABASE_URL });
+await clientCalendrier.connect();
+{
+  const { rows } = await clientCalendrier.query(
+    `select school_id from auth_lookup_user('70000001')`);
+  if (rows[0]) {
+    await clientCalendrier.query(
+      `select set_config('fasoschool.school_id', $1, false)`, [rows[0].school_id]);
+  }
+}
+const calendrier = await emprunterCalendrier(clientCalendrier);
 
 const server = spawn(process.execPath, ["--experimental-strip-types", "src/server/app.ts"], {
   env: { ...process.env, PORT: String(PORT), SMS_PROVIDER: "mock" },
@@ -404,6 +424,8 @@ try {
   check("la session est bien révoquée", page.url().endsWith("/connexion"));
 
 } finally {
+  await calendrier.rendre();
+  await clientCalendrier.end();
   await browser.close();
   server.kill();
 

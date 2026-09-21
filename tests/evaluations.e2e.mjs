@@ -15,6 +15,7 @@
 import { spawn } from "node:child_process";
 import { chromium } from "playwright";
 import pg from "pg";
+import { emprunterCalendrier } from "./calendrier-epreuve.mjs";
 
 const PORT = 4204;
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -29,6 +30,15 @@ const check = (name, cond, detail = "") => {
 
 const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
 await client.connect();
+
+/* CETTE SUITE A BESOIN D'ÊTRE DANS UN TRIMESTRE.
+ *
+ * Le produit refuse de deviner un trimestre quand aujourd'hui n'en désigne
+ * aucun (voir 0025) : il demande lequel. Une suite qui clique sans avoir
+ * répondu meurt sur un délai d'attente qui ne parle pas du calendrier —
+ * c'est arrivé à quatre suites le même jour. Elle pose donc elle-même le
+ * réglage dont ses assertions dépendent, et le rend. */
+const calendrier = await emprunterCalendrier(client);
 const { rows: sc } = await client.query(`select school_id from auth_lookup_user('70000001')`);
 await client.query(`select set_config('fasoschool.school_id', $1, false)`, [sc[0].school_id]);
 await client.query(`delete from auth_rate_limits`);
@@ -251,6 +261,7 @@ try {
   await ens.close();
 
 } finally {
+  await calendrier.rendre();
   await browser.close();
   server.kill();
   await purge().catch(() => {});
