@@ -40,6 +40,11 @@ export interface InvoiceLine {
   prochaine: { label: string; montant: number; le: string } | null;
   /** Élève arrivé après l'ouverture de l'année, et échéances antérieures. */
   arrivee: { le: string; echeances: number; montant: number } | null;
+  /** Annulée : par qui, quand, pourquoi. Une somme retirée se justifie. */
+  annulee: { le: string; par: string | null; motif: string } | null;
+  /** Cet élève a-t-il quitté l'établissement ? C'est ce qui rend l'annulation
+   *  nécessaire — et ce qui la rend lisible dans la liste. */
+  parti: string | null;
 }
 
 export async function listInvoices(schoolId: string, filter: "tous" | "impayes") {
@@ -67,14 +72,21 @@ export async function listInvoices(schoolId: string, filter: "tous" | "impayes")
                  join guardians g on g.id = sg.guardian_id
                 where sg.student_id = st.id and sg.receives_sms
                   and g.phone is not null and g.phone <> ''
-                order by sg.is_primary desc limit 1) as tuteur
+                order by sg.is_primary desc limit 1) as tuteur,
+              i.annulee_le, i.motif_annulation, e.status as inscription,
+              (select u.full_name from staff sa
+                 left join users u on u.id = sa.user_id
+                where sa.id = i.annulee_par) as annulee_par
          from invoices i
          join students st on st.id = i.student_id
          left join enrolments e on e.student_id = st.id
                                and e.academic_year_id = i.academic_year_id
          left join classes cl on cl.id = e.class_id
-        where i.status <> 'annulee'
-        order by st.last_name, st.first_names`);
+        -- LES FACTURES ANNULÉES RESTENT VISIBLES. Les cacher ferait douter
+        -- de celles qui restent : une somme qui disparaît d'un tableau sans
+        -- explication est exactement ce qu'un contrôleur vient chercher. La
+        -- liste les montre barrées, avec leur motif, et les exclut des totaux.
+        order by (i.status = 'annulee'), st.last_name, st.first_names`);
 
     const rows: InvoiceLine[] = r.rows.map((x) => ({
       id: x.id, reference: x.reference,
@@ -93,8 +105,16 @@ export async function listInvoices(schoolId: string, filter: "tous" | "impayes")
             echeances: Number(x.arrivee.combien),
             montant: Number(x.arrivee.montant) }
         : null,
+      annulee: x.annulee_le
+        ? { le: String(x.annulee_le).slice(0, 10),
+            par: x.annulee_par ?? null,
+            motif: x.motif_annulation ?? "" }
+        : null,
+      parti: ["transfere_sortant", "radie", "abandon"].includes(x.inscription ?? "")
+        ? (x.inscription as string) : null,
     }));
-    return filter === "impayes" ? rows.filter((x) => x.rest > 0) : rows;
+    return filter === "impayes"
+      ? rows.filter((x) => x.rest > 0 && !x.annulee) : rows;
   });
 }
 
@@ -113,8 +133,14 @@ export async function financePage(
          from fee_schedules fs join fee_lines fl on fl.fee_schedule_id = fs.id
         group by fs.id, fs.label`)).rows);
 
-  const attendu = rows.reduce((a, r) => a + r.total, 0);
-  const encaisse = rows.reduce((a, r) => a + r.paid, 0);
+  /* UNE FACTURE ANNULÉE NE COMPTE DANS AUCUN TOTAL — elle reste pourtant
+   * dans la liste, barrée, avec son motif. Les deux choses vont ensemble :
+   * l'exclure des chiffres est la raison de l'annulation ; la garder à
+   * l'écran est ce qui rend la somme retirée vérifiable. */
+  const vivantes = rows.filter((r) => !r.annulee);
+  const annulees = rows.filter((r) => r.annulee);
+  const attendu = vivantes.reduce((a, r) => a + r.total, 0);
+  const encaisse = vivantes.reduce((a, r) => a + r.paid, 0);
   const reste = attendu - encaisse;
 
   /* « EN RETARD » VEUT DIRE EN RETARD SUR CE QUI ÉTAIT DÛ.
@@ -126,8 +152,9 @@ export async function financePage(
    * première tranche y était comptée comme celle qui n'a rien versé.
    *
    * C'est le mot sur lequel un établissement décide qui il renvoie chez lui. */
-  const enRetard = rows.filter((r) => (r.retard ?? 0) > 0);
-  const sansEcheancier = rows.filter((r) => r.retard === null && r.rest > 0);
+  const enRetard = vivantes.filter((r) => (r.retard ?? 0) > 0);
+  const sansEcheancier = vivantes.filter((r) => r.retard === null && r.rest > 0);
+  const partisAvecFacture = vivantes.filter((r) => r.parti && r.rest > 0);
   const arriveesTardives = enRetard.filter(
     (r) => r.arrivee !== null && r.arrivee.echeances > 0);
   const montantEnRetard = enRetard.reduce((a, r) => a + (r.retard ?? 0), 0);
@@ -136,10 +163,34 @@ export async function financePage(
     const enRetardCeJour = (r.retard ?? 0) > 0;
     /* Le rouge est réservé au retard réel. Une famille qui doit encore la
        tranche de janvier n'est pas en faute en octobre. */
+    /* UNE FACTURE ANNULÉE RESTE À L'ÉCRAN, barrée, avec son motif, son
+     * auteur et sa date. Elle ne compte dans aucun total ; la cacher ferait
+     * douter de celles qui restent. */
+    if (r.annulee) {
+      return `
+    <tr class="pale">
+      <td><s><b>${esc(r.lastName)}</b> ${esc(r.firstNames)}</s>
+        <div style="font-size:12px;color:var(--faint)" class="num">${esc(r.reference)}</div>
+        <span class="dit">annulée le ${jour(r.annulee.le)}${
+          r.annulee.par ? ` par ${esc(r.annulee.par)}` : ""} — ${
+          esc(r.annulee.motif)}</span></td>
+      <td>${esc(r.classe ?? "—")}</td>
+      <td class="num r"><s>${fcfa(r.total)}</s></td>
+      <td class="num r">${fcfa(r.paid)}</td>
+      <td class="num r"><span class="pill p-info">ANNULÉE</span></td>
+      <td></td><td></td>
+    </tr>`;
+    }
     return `
     <tr${enRetardCeJour ? ' class="bad"' : ""}>
       <td><b>${esc(r.lastName)}</b> ${esc(r.firstNames)}
-        <div style="font-size:12px;color:var(--faint)" class="num">${esc(r.reference)}</div></td>
+        <div style="font-size:12px;color:var(--faint)" class="num">${esc(r.reference)}</div>${
+        /* L'élève est parti et sa facture court encore : c'est LA situation
+           que l'annulation existe pour clore, et l'écran la nomme. */
+        r.parti && r.rest > 0
+          ? `<span class="dit" style="color:var(--ochre)">a quitté
+             l'établissement (${esc(r.parti.replace(/_/g, " "))}) — sa facture
+             court toujours</span>` : ""}</td>
       <td>${esc(r.classe ?? "—")}</td>
       <td class="num r">${fcfa(r.total)}</td>
       <td class="num r">${fcfa(r.paid)}</td>
@@ -343,6 +394,34 @@ export async function collectPage(
             <a class="btn ghost" href="/scolarite">Annuler</a>
           </div>
         </form>
+
+        ${/* ANNULER LA FACTURE ELLE-MÊME.
+              Le statut `annulee` était lu par onze endroits du code et écrit
+              par aucun : un élève parti gardait sa facture indéfiniment dans
+              le « reste à recouvrer » et dans les relances. Le geste est ici,
+              sous l'encaissement, avec un motif obligatoire — et il est refusé
+              si de l'argent est entré : on contre-passe d'abord, un versement
+              à la fois, ce qui produit autant de reçus inverses. */ ""}
+        <div style="border-top:1px solid var(--rule);margin-top:22px;padding-top:16px">
+          ${inv.paid !== 0 ? `<div class="note">
+            <b>Cette facture ne peut pas être annulée telle quelle.</b>
+            ${fcfa(inv.paid)} F ont été encaissés. Contre-passez les versements
+            un par un — chacun produit un reçu inverse que la famille garde —
+            puis annulez la facture vide.
+          </div>` : `
+          <form method="post" action="/scolarite/facture/annuler">
+            <input type="hidden" name="facture" value="${esc(inv.id)}">
+            <label for="motif_facture">Annuler cette facture — pourquoi ?</label>
+            <input id="motif_facture" name="motif" type="text" required
+                   minlength="5"
+                   placeholder="élève jamais arrivé, transféré en octobre, double émission…">
+            <div class="row" style="margin-top:12px">
+              <button class="btn ghost" type="submit">Annuler la facture</button>
+              <span style="color:var(--muted);font-size:13px">Elle restera
+                visible, barrée, avec votre nom et ce motif.</span>
+            </div>
+          </form>`}
+        </div>
       </div></div>
 
       <div class="card"><div class="body">
@@ -651,6 +730,76 @@ export async function encaissements(
  * produirait un caissier malhonnête, et c'est la seule chose qu'un contrôle
  * puisse lire ensuite.
  */
+/**
+ * Annuler une FACTURE — pas un versement.
+ *
+ * CE QUI MANQUAIT. Le statut `annulee` était lu par onze endroits du code et
+ * écrit par aucun. Un élève inscrit en septembre qui ne revient pas en octobre
+ * laissait une facture de 78 000 F que rien ne pouvait retirer : elle restait
+ * dans le « reste à recouvrer », dans les relances, et dans l'espace de sa
+ * famille, indéfiniment. Les seuls contournements étaient pires — mettre le
+ * total à zéro, qu'aucun écran n'offre, ou enregistrer un versement fictif,
+ * qui falsifierait le registre des reçus.
+ *
+ * DEUX RÈGLES, TOUTES DEUX POSÉES EN BASE parce qu'un écran se contourne :
+ *
+ *   1. on n'annule pas en changeant un mot. La contrainte
+ *      `invoices_annulation_tracee` exige que le statut et sa trace — qui,
+ *      quand, pourquoi — aillent ensemble ;
+ *   2. on n'annule pas une facture sur laquelle de l'argent est entré. Le
+ *      chemin propre existe déjà : contre-passer les versements un par un,
+ *      chacun produisant un reçu inverse, puis annuler la facture vide.
+ *      Annuler par le haut ferait disparaître d'un clic la contrepartie de
+ *      reçus remis à des familles.
+ */
+export async function annulerFacture(
+  user: SessionUser, invoiceId: string, motif: string,
+): Promise<{ ok: boolean; error?: string; flash?: string }> {
+  const schoolId = user.schoolId!;
+  const raison = motif.trim().replace(/\s+/g, " ");
+
+  /* LE MOTIF EST OBLIGATOIRE, et refusé ici avant d'atteindre la base : le
+   * message doit dire quoi écrire, pas rendre une violation de contrainte. */
+  if (raison.length < 5) {
+    return { ok: false, error: "Dites pourquoi cette facture est annulée — "
+      + "« élève jamais arrivé », « transféré en octobre », « double "
+      + "émission ». C'est la phrase que lira l'économe de l'an prochain." };
+  }
+
+  return withSchool(schoolId, async (c) => {
+    const verdict = await c.query(
+      `select * from facture_annulable($1)`, [invoiceId]);
+    if (!verdict.rows[0]?.possible) {
+      return { ok: false,
+               error: verdict.rows[0]?.raison ?? "Annulation impossible." };
+    }
+
+    const staff = await c.query(
+      `select id from staff where user_id = $1 limit 1`, [user.userId]);
+    const inv = await c.query(
+      `update invoices
+          set status = 'annulee', annulee_le = now(), annulee_par = $2,
+              motif_annulation = $3
+        where id = $1 and status <> 'annulee'
+        returning reference, total_fcfa`,
+      [invoiceId, staff.rows[0]?.id ?? null, raison]);
+    if (inv.rowCount === 0) return { ok: false, error: "Elle est déjà annulée." };
+
+    await c.query(
+      `insert into audit_log (school_id, actor_id, action, target_type,
+                              target_id, detail)
+       values (current_school_id(), $1, 'invoice.cancel', 'invoice', $2, $3)`,
+      [user.userId, invoiceId,
+       JSON.stringify({ reference: inv.rows[0].reference,
+                        total: inv.rows[0].total_fcfa, motif: raison })]);
+
+    return { ok: true,
+      flash: `Facture ${inv.rows[0].reference} annulée : ${raison}. Elle reste `
+        + `visible, barrée, avec son motif — une somme qui disparaît d'un `
+        + `tableau sans explication est ce qu'un contrôleur vient chercher.` };
+  });
+}
+
 export async function annulerPaiement(
   user: SessionUser, paymentId: string, motif: string,
 ): Promise<{ ok: boolean; error?: string; recu?: string; invoiceId?: string }> {

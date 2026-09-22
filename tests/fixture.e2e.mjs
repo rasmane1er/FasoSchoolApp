@@ -187,6 +187,32 @@ try {
       + `toute l'école « en novembre », et l'écran annonçait douze arrivées `
       + `tardives`);
 
+  /* DOUZE ÉLÈVES INSCRITS, ET AUCUN PARTI.
+   *
+   * Trouvé le jour où `app.e2e.mjs` a annoncé « 11 feuilles » au lieu de 12 :
+   * une suite avait fait partir un élève par `transfere_sortant` et ne l'avait
+   * pas remis. Le témoin comptait les élèves, les factures, les séances — mais
+   * pas leur STATUT D'INSCRIPTION, si bien que la fuite est allée se plaindre
+   * trois suites plus loin, avec un message qui ne parlait pas d'inscription.
+   *
+   * Pire : la suite fautive photographiait l'état AVANT de travailler, donc au
+   * tour suivant elle « rendait » l'élève parti. Une fuite recopiée en
+   * référence devient la nouvelle normale, et plus personne ne sait quand elle
+   * a commencé. */
+  const { rows: insc } = await client.query(
+    `select count(*) filter (where e.status = 'inscrit'
+                               and e.left_on is null)::int as inscrits,
+            count(*)::int as total,
+            coalesce(string_agg(distinct e.status, ', ')
+                       filter (where e.status <> 'inscrit'), '') as autres
+       from enrolments e where e.academic_year_id = annee_en_cours()`);
+  check("les douze élèves sont encore inscrits, et aucun n'est parti",
+    insc[0].inscrits === 12 && insc[0].total === 12,
+    `${insc[0].inscrits}/${insc[0].total} inscrits`
+      + `${insc[0].autres ? ` — statuts trouvés : ${insc[0].autres}` : ""}`
+      + ` — une suite a fait partir un élève et ne l'a pas remis ; les`
+      + ` bulletins, l'appel et les factures en dépendent tous`);
+
   /* LA DÉMONSTRATION EST-ELLE ENCORE DANS UN TRIMESTRE ?
    *
    * Elle était ancrée au 75ᵉ jour d'un premier trimestre qui en comptait 80 :

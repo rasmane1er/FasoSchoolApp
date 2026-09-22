@@ -124,7 +124,8 @@ psql "$CIBLE" -v ON_ERROR_STOP=1 -q \
   -f db/migrations/0023_assiduite_de_l_annee.sql \
   -f db/migrations/0024_ce_qui_est_clos_est_clos.sql \
   -f db/migrations/0025_entre_deux_trimestres.sql \
-  -f db/migrations/0026_double_clic_au_guichet.sql
+  -f db/migrations/0026_double_clic_au_guichet.sql \
+  -f db/migrations/0027_annuler_une_facture.sql
 echo "migrations appliquées"
 
 echo

@@ -23,7 +23,7 @@ import {
 import { page, loginPage, esc, fr, fcfa, ordinal, plural, type PageChrome } from "./html.ts";
 import { settingsPage, saveSettings, type Period } from "./settings.ts";
 import { financePage, collectPage, collect, receiptPage,
-         annulerPaiement } from "./finance.ts";
+         annulerPaiement, annulerFacture } from "./finance.ts";
 import { parseMutations, applyMutations, conflictsPage, resolveConflict, conflictCount } from "./sync.ts";
 import {
   importPage, previewPage, resultPage, runImport,
@@ -1674,6 +1674,17 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       }
       const chrome = await chromeFor(user, "scolarite");
       return html(res, await collectPage(user, chrome, r.invoiceId, r.error));
+    }
+    /* ANNULER LA FACTURE — pas un versement. Le statut `annulee` était lu par
+       onze endroits du code et écrit par aucun : c'est ce geste qui manquait. */
+    if (path === "/scolarite/facture/annuler" && req.method === "POST") {
+      if (!can(user, "encaisser")) return html(res, "Accès refusé.", 403);
+      const form = await formBody(req);
+      const facture = form.get("facture") ?? "";
+      const r = await annulerFacture(user, facture, form.get("motif") ?? "");
+      const chrome = await chromeFor(user, "scolarite");
+      if (r.ok) return html(res, await financePage(user, chrome, url, r.flash));
+      return html(res, await collectPage(user, chrome, facture, r.error));
     }
     if (path === "/scolarite/annuler" && req.method === "POST") {
       if (!can(user, "encaisser")) return html(res, "Accès refusé.", 403);

@@ -793,6 +793,95 @@ saisit quarante notes, le réseau tombe, tout est perdu. Ici :
 4. Sans JavaScript, le formulaire se poste normalement. Le hors-ligne est une
    amélioration, jamais une dépendance.
 
+### « annulee » : un état que onze écrans respectaient et qu'aucun geste ne pouvait atteindre
+
+Trouvé en cherchant qui **écrit** ce statut. Onze endroits du code le lisent —
+`where i.status <> 'annulee'`, dans la scolarité, l'espace famille, la fiche de
+l'élève, les relances, les bourses, le tableau de bord, les frais. Aucun ne
+l'écrit. Le produit honorait partout une décision qu'aucun écran ne permettait
+de prendre.
+
+Ce que cela coûte est annuel et banal. Un élève inscrit en septembre qui ne
+revient pas en octobre — un déménagement, un transfert, un renoncement — laisse
+une facture de 78 000 F que **rien** ne peut retirer. Éprouvé : on fait partir
+un élève par `/transferts`, exactement comme le produit le prévoit, et le
+« reste à recouvrer » de l'école compte toujours sa facture. Elle reste dans les
+relances, dans les chiffres du tableau de bord, et dans l'espace de sa famille —
+qui lit « 78 000 F dus » pour un enfant qui n'est plus là.
+
+Les seuls contournements étaient pires que le mal : mettre le total à zéro,
+qu'aucun écran n'offre, ou enregistrer un versement fictif, ce qui falsifierait
+le registre des reçus.
+
+**Et la réémission ressuscitait.** `frais.ts` testait l'existence sur
+`status <> 'annulee'` — donc ne voyait pas l'annulée — puis retombait sur sa
+référence :
+
+```sql
+on conflict (school_id, reference) do update
+  set status = 'ouverte', total_fcfa = excluded.total_fcfa
+```
+
+Éprouvé : la **même ligne** revient à la vie, son total passe de 78 000 à 999,
+ses tranches sont effacées et refaites, et l'annulation disparaît sans trace —
+avec, le cas échéant, des reçus déjà remis qui portent l'état figé d'une vie que
+la facture n'a plus.
+
+**On n'annule pas en changeant un mot.** C'est la doctrine des reçus, étendue
+d'un cran : une facture annulée porte **qui** l'a annulée, **quand** et
+**pourquoi**, et c'est une contrainte de la base qui l'exige — le statut et sa
+trace ne peuvent pas être dissociés, dans les deux sens. `update invoices set
+status = 'annulee'` est refusé par PostgreSQL, pas seulement par un écran.
+
+**Elle sort des totaux, pas de l'écran.** Sous « Impayées » elle disparaît —
+c'est la raison du geste. Sous « Toutes » elle reste entière, barrée, avec son
+motif, son auteur et sa date. Les deux choses vont ensemble : l'exclure des
+chiffres est ce qu'on demandait ; la garder lisible est ce qui rend la somme
+retirée vérifiable. Une somme qui s'évapore d'un tableau sans explication est
+exactement ce qu'un contrôleur vient chercher.
+
+**Et on n'annule pas par le haut une facture sur laquelle de l'argent est
+entré.** Le chemin propre existe déjà : contre-passer les versements un par un,
+chacun produisant son reçu inverse, puis annuler la facture vide. Le refus
+**nomme** ce chemin et le montant déjà versé ; un refus qui ne dit pas ce qui
+bloque envoie l'économe chercher à l'aveugle. L'écran d'encaissement n'offre
+d'ailleurs pas un bouton qui refuserait : il explique à sa place.
+
+**Réémettre crée une nouvelle facture.** La référence porte un rang —
+`F-2026-2027-WP-2026-0001`, puis `-2`, puis `-3` — calculé sur **toutes** les
+factures de l'élève pour l'année, annulées comprises. Deux lignes, deux
+histoires, et la première reste lisible avec son motif.
+
+Enfin le tableau de bord **nomme la situation** qui rend le geste nécessaire :
+les élèves partis qui gardent une facture ouverte. Un geste que personne ne sait
+quand utiliser n'existe qu'à moitié.
+
+Une leçon d'épreuve, aussi : la première version de la suite vérifiait la
+fonction SQL de référence, et passait au vert avec le défaut remis en place. La
+résurrection ne se voit qu'en appuyant **deux fois** sur le formulaire de
+l'économe, sur une facture née du produit — un seul tour ne la reproduit pas.
+
+Deux fuites de la même famille, trouvées en écrivant cette suite. La première
+est la sienne : elle fait partir un élève pour éprouver le tableau de bord, et
+photographiait l'état **avant** de travailler — donc, au tour suivant, elle
+« rendait » l'élève parti. Une fuite recopiée en référence devient la nouvelle
+normale, et plus personne ne sait quand elle a commencé. La seconde dormait
+depuis longtemps dans `tests/import.e2e.mjs` : l'import réinscrit volontairement
+un élève **déjà connu** — c'est une de ses assertions — et la purge ne rendait
+que ce qu'elle avait **créé**. Chaque `check:all` laissait donc un élève de la
+démonstration en `reinscrit`, définitivement.
+
+Ni l'une ni l'autre ne faisait tomber une assertion : elles sortaient trois
+suites plus loin, `app.e2e.mjs` annonçant « 11 feuilles » au lieu de 12, avec un
+message qui ne parlait pas d'inscription. Le témoin comptait les élèves, les
+factures et les séances, mais pas leur **statut d'inscription** ; il le compte
+désormais. Et une suite possède ce qu'elle **emprunte** autant que ce qu'elle
+crée — c'est la règle « une suite ne supprime que ce qu'elle a créé », vue de
+l'autre côté.
+
+`db/migrations/0027_annuler_une_facture.sql`,
+`tests/annuler-facture.e2e.mjs` (35 assertions).
+
 ### La serrure était posée ; la clé était refaite à chaque tour
 
 Trouvé en cliquant deux fois sur « Encaisser ». Deux POST identiques lancés
@@ -1988,7 +2077,7 @@ Comptes de démonstration — le code s'affiche à l'écran, aucun SMS n'est env
 | `70000005` | Directeur |
 
 Vérifications : `npm run check:all` — typecheck strict, 60 tests unitaires, et
-**quarante-sept parcours**, chacun contre un vrai PostgreSQL et un vrai
+**quarante-huit parcours**, chacun contre un vrai PostgreSQL et un vrai
 serveur — sauf deux témoins qui n'écrivent rien : l'un compte le jeu de
 démonstration, l'autre relit le code source.
 Le tableau ci-dessous en détaille une partie ; les autres sont décrits, avec ce
@@ -1996,6 +2085,7 @@ qu'ils ont trouvé, dans les sections qui précèdent.
 
 | suite | ce qu'elle prouve |
 |---|---|
+| `test:annuler-facture` (35) | une facture d'élève parti s'annule avec un nom, une date et un motif — refusée sans trace par la base, sortie des totaux mais lisible barrée, et réémise en nouvelle ligne au lieu d'être ressuscitée |
 | `test:double-clic` (19) | deux clics sur « Encaisser » ne font qu'un versement et qu'un reçu, un vrai second versement passe, et la fenêtre est un réglage de l'établissement |
 | `test:entre-trimestres` (30) | aux quatre coins du calendrier, aucun écran n'annonce un trimestre qui n'a pas cours ; celui qui écrit fait choisir, celui qui rapporte nomme le trimestre qu'il lit |
 | `test:bornes` (7) | aucune requête du dépôt ne prend un `ON` de jointure externe pour une borne d'année, ne lit une table datée sans période, ni une règle datée sans date — et le témoin sait encore mordre |
@@ -2020,7 +2110,7 @@ qu'ils ont trouvé, dans les sections qui précèdent.
 | `test:echeancier` (26) | « en retard » veut dire en retard sur une échéance, pas « doit encore quelque chose sur l'année », et une facture sans échéancier ne bascule d'aucun côté |
 | `test:canal` (24) | le serveur refuse de démarrer sans canal SMS déclaré, le mode démonstration s'annonce partout, et un code que l'opérateur refuse n'est plus annoncé comme envoyé |
 | `test:recurrence` (18) | « quatre faits, quatre convocations » et « quatre faits, aucune suite » ne sont plus le même chiffre au conseil de classe, et le registre ouvre sur ce qui revient |
-| `test:fixture` (21) | le jeu de démonstration sort de `check:all` exactement comme il y est entré : une suite qui emporte ce qui n'est pas à elle est nommée, avec la table et le nombre |
+| `test:fixture` (24) | le jeu de démonstration sort de `check:all` exactement comme il y est entré : une suite qui emporte — ou fait partir, ou réinscrit — ce qui n'est pas à elle est nommée, avec la table et le nombre |
 | `test:injoignable` (31) | un absent dont la famille n'a aucun numéro laisse une tâche nommée au lieu d'un silence, et un tuteur principal sans numéro ne masque plus un second tuteur joignable |
 | `test:evaluations` (22) | un enseignant ouvre un devoir pour sa matière ; une composition ne s'ouvre que par le censeur, et pour tout le niveau |
 | `test:transferts` (23) | un parcours déclaré est accepté et étiqueté, une moyenne inventée est refusée, le certificat porte sa réserve |
@@ -2183,6 +2273,22 @@ additionnées au présent. Ce défaut a été trouvé deux fois, dans deux modul
 ait pas de troisième fois, et une requête volontairement cumulative doit écrire
 `-- borne:` suivi de sa raison.
 
+**Un état que le produit respecte partout doit être atteignable par un
+geste.** `invoices.status = 'annulee'` était lu par onze écrans et écrit par
+aucun : une décision que tout le code honorait et que personne ne pouvait
+prendre. Un statut, un drapeau, une colonne qui gouverne un affichage sans
+avoir de chemin d'écriture est un défaut complet, pas une fonctionnalité
+inachevée — les utilisateurs inventent alors des contournements qui abîment
+les données, et le premier venu est toujours le pire.
+
+**Retirer une somme d'un total exige un nom, une date et une raison.** Non par
+formalisme : parce que c'est la ligne que l'économe de l'an prochain lira, et
+celle que le contrôleur viendra chercher. La trace et le statut sont liés par
+une contrainte de la base, pas par la discipline du code, de sorte qu'un
+`update` d'une seule colonne ne puisse pas la contourner. Et ce qui sort d'un
+total ne sort pas de l'écran : la ligne demeure, barrée, avec son motif — une
+somme qui s'évapore sans explication fait douter de celles qui restent.
+
 **Un dispositif de garde doit être nourri de la bonne valeur.** Une contrainte
 d'unicité alimentée par une clé neuve à chaque requête ne refuse jamais rien ;
 un verrou qui sérialise la numérotation ne sérialise pas l'écriture. Quand le
@@ -2240,6 +2346,14 @@ famille de lignes — un prédicat attrape aussi ce qui n'est pas à lui. Chaque
 suite a ses propres jours, hors du semis de démonstration et hors de ceux des
 autres ; chaque dépôt porte un préfixe témoin. `test:fixture` le vérifie en
 dernier, en comptant.
+
+**Et elle possède ce qu'elle emprunte autant que ce qu'elle crée.** Une suite
+qui fait partir un élève, réinscrit un élève connu ou déplace une date rend
+l'état de départ, et elle le rend à une valeur **connue** — pas à la photo
+qu'elle vient de prendre. Photographier l'état avant de travailler recopie en
+référence la fuite du tour précédent : elle devient la nouvelle normale, et
+plus personne ne sait quand elle a commencé. Une suite qui ne peut pas
+distinguer son propre reste du jeu semé refuse de partir et le dit.
 
 ---
 

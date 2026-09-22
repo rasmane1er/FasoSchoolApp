@@ -287,13 +287,25 @@ export async function issueInvoices(
       const aPayer = total - remise;
       out.remisesFcfa += remise;
 
-      const reference = `F-${v.yearLabel}-${el.matricule}`;
+      /* RÉÉMETTRE CRÉE UNE NOUVELLE FACTURE, jamais une résurrection.
+       *
+       * L'ancienne version retombait, par `on conflict (school_id, reference)
+       * do update`, sur la référence de la facture ANNULÉE — dont le test
+       * d'existence ci-dessus ne tient pas compte — et la ramenait à la vie :
+       * `status = 'ouverte'`, total réécrit, tranches effacées et refaites,
+       * annulation disparue sans trace. Éprouvé : la même ligne, 78 000 F
+       * devenus 999.
+       *
+       * La référence porte désormais un rang, calculé sur TOUTES les factures
+       * de l'élève pour l'année, annulées comprises. Deux lignes, deux
+       * histoires, et la première reste lisible avec son motif. */
+      const reference = (await c.query(
+        `select reference_facture($1, $2, $3) as r`,
+        [el.student_id, v.yearId, v.yearLabel])).rows[0].r;
       const inv = await c.query(
         `insert into invoices (school_id, student_id, academic_year_id,
                                fee_schedule_id, reference, total_fcfa)
          values (current_school_id(), $1, $2, $3, $4, $5)
-         on conflict (school_id, reference) do update
-           set status = 'ouverte', total_fcfa = excluded.total_fcfa
          returning id`,
         [el.student_id, v.yearId, grille.id, reference, aPayer]);
 

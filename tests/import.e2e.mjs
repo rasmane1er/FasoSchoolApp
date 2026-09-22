@@ -77,11 +77,37 @@ const ceuxDuTest = async () => (await client.query(
 
 const purge = async () => {
   const ids = await ceuxDuTest();
-  if (ids.length === 0) return;
-  await client.query(`delete from student_guardians where student_id = any($1::uuid[])`, [ids]);
-  await client.query(`delete from enrolments where student_id = any($1::uuid[])`, [ids]);
-  await client.query(`delete from students where id = any($1::uuid[])`, [ids]);
-  await client.query(`delete from guardians where phone in ('70456789','76112233')`);
+  if (ids.length > 0) {
+    await client.query(`delete from student_guardians where student_id = any($1::uuid[])`, [ids]);
+    await client.query(`delete from enrolments where student_id = any($1::uuid[])`, [ids]);
+    await client.query(`delete from students where id = any($1::uuid[])`, [ids]);
+    await client.query(`delete from guardians where phone in ('70456789','76112233')`);
+  }
+  await rendreLesInscriptions();
+};
+
+/* CE QUE L'IMPORT MODIFIE SANS CRÉER : L'INSCRIPTION D'UN ÉLÈVE DÉJÀ CONNU.
+ *
+ * La liste importée contient volontairement le matricule `WP-2026-0001`, qui
+ * existe déjà : c'est l'assertion « l'élève déjà connu est marqué réinscrit ».
+ * `roster.ts` fait alors un upsert sur son inscription et passe son statut de
+ * `inscrit` à `reinscrit`.
+ *
+ * La purge ci-dessus ne rendait que ce qu'elle avait CRÉÉ. Le statut de cet
+ * élève-là restait donc `reinscrit` après chaque `check:all`, définitivement.
+ * Une suite possède ce qu'elle emprunte autant que ce qu'elle crée — sinon la
+ * plainte sort ailleurs : ici, une autre suite refusant de partir d'un jeu
+ * qu'elle ne reconnaissait plus. */
+const INSCRIPTIONS_AVANT = (await client.query(
+  `select id, status, class_id, is_redoublant from enrolments`)).rows;
+const rendreLesInscriptions = async () => {
+  for (const e of INSCRIPTIONS_AVANT) {
+    await client.query(
+      `update enrolments set status = $2, class_id = $3, is_redoublant = $4
+        where id = $1 and (status, class_id, is_redoublant)
+                       is distinct from ($2, $3, $4)`,
+      [e.id, e.status, e.class_id, e.is_redoublant]);
+  }
 };
 
 // Instantané de départ : tout ce qui existe déjà est intouchable.

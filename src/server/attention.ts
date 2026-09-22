@@ -177,6 +177,26 @@ export async function pointsDAttention(
       }
     }
 
+    /* UN ÉLÈVE PARTI QUI GARDE UNE FACTURE OUVERTE.
+     *
+     * C'est la situation qui rend l'annulation d'une facture nécessaire — et
+     * jusqu'ici le statut `annulee` était lu par onze écrans et écrit par
+     * aucun : la facture d'un élève transféré en octobre pesait
+     * indéfiniment sur le « reste à recouvrer » et dans les relances. Le
+     * geste existe maintenant ; ce point-ci dit quand s'en servir. */
+    const partis = await un(
+      `select count(*)::int as n from factures_d_eleves_partis()`);
+    if (partis > 0) {
+      points.push({
+        gravite: "important",
+        texte: `${partis === 1
+          ? "Un élève a quitté l'établissement en gardant une facture ouverte"
+          : partis + " élèves ont quitté l'établissement en gardant une facture ouverte"}`
+          + " : ces sommes pèsent sur le reste à recouvrer et partent en relance.",
+        action: "Voir", lien: "/scolarite", droit: "voir_scolarite",
+      });
+    }
+
     /* LES NIVEAUX ENSEIGNÉS ONT-ILS UNE RÈGLE DE PASSAGE EN VIGUEUR ?
      *
      * L'absence de règle était lue comme une permission : `?? true`. Le conseil
