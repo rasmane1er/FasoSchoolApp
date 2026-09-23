@@ -94,8 +94,17 @@ try {
   await page.waitForSelector('form[action="/frais/grille"]');
   const vue = await page.content();
   check("la grille de la démonstration est affichée", vue.includes("plafonnés"));
-  check("le plafond déclaré est rappelé, pas deviné",
-    vue.includes("lu dans l'arrêté") || vue.includes("Aucun plafond déclaré"));
+  check("le plafond est rappelé, pas deviné",
+    vue.includes("lu dans l'arrêté") || vue.includes("Aucun plafond renseigné"));
+  /* ET LE MOT « DÉCLARÉ » N'EST PAS EMPLOYÉ À LA LÉGÈRE. L'écran l'écrivait
+   * sur un chiffre qu'un humain venait de taper dans un dossier resté
+   * brouillon : c'était une affirmation du produit sur un fait qu'il ne
+   * connaissait pas. Voir 0028. */
+  const declare = await client.query(
+    `select count(*)::int as n from category_assessments where status = 'declare'`);
+  check("et « déclaré » n'est pas écrit sans déclaration",
+    declare.rows[0].n > 0 || !/Plafond déclaré/.test(vue),
+    "le dossier de la démonstration est un brouillon");
 
   console.log("\nUn supplément sans autorisation est refusé");
   const grilleId = await page.$eval('form[action="/frais/ligne"] input[name=grille]',

@@ -31,6 +31,12 @@ import type { SessionUser } from "./session.ts";
 import { piecesParCritere, blocPieces, TYPES_ACCEPTES } from "./pieces.ts";
 import { loadExamens } from "./examens.ts";
 
+/** Une date ISO en jour français. */
+const jourFr = (iso: string): string => {
+  const [a, m, j] = iso.split("-");
+  return `${j}/${m}/${a}`;
+};
+
 export const AXES = [
   ["investissement", "Investissement"],
   ["qualite", "Qualité"],
@@ -58,6 +64,47 @@ export interface Dossier {
   category: number | null;
   declaredCeiling: number | null;
   criteria: Criterion[];
+  /* CE QU'ON SAIT DE L'ÉTAT DU PLAFOND, et rien de plus.
+   *
+   * Les deux écrans écrivaient « plafond déclaré » sur un chiffre qu'un
+   * humain venait de taper dans un brouillon. Le mot affirmait qu'une
+   * déclaration avait eu lieu ; rien dans le produit ne pouvait le savoir,
+   * parce que rien ne l'écrivait. */
+  declaration: Declaration;
+  /** L'histoire du plafond : on n'écrase pas un chiffre qui décide d'une
+   *  sanction, on écrit le suivant à côté du précédent. */
+  mouvements: Mouvement[];
+  /** Les grilles dont les lignes plafonnées dépassent le plafond. */
+  horsPlafond: HorsPlafond[];
+}
+
+export interface Declaration {
+  statut: string;
+  declareLe: string | null;
+  declarePar: string | null;
+  saisiLe: string | null;
+  possible: boolean;
+  raison: string | null;
+}
+
+export interface Mouvement {
+  ancien: number | null;
+  nouveau: number | null;
+  ancienneCategorie: number | null;
+  nouvelleCategorie: number | null;
+  motif: string | null;
+  apresDeclaration: boolean;
+  par: string | null;
+  quand: string;
+}
+
+export interface HorsPlafond {
+  scheduleId: string;
+  libelle: string;
+  niveau: string | null;
+  plafonne: number;
+  plafond: number;
+  ecart: number;
 }
 
 /** Sommes par axe, plafonnées à 50 : le barème de l'arrêté est sur 50 + 50. */
@@ -118,12 +165,55 @@ export async function loadDossier(schoolId: string): Promise<Dossier | null> {
          from category_criteria where category_assessment_id = $1
         order by axis, code`, [a.rows[0].id]);
 
+    /* L'ÉTAT DU PLAFOND SE LIT EN UN SEUL ENDROIT — `plafond_du_dossier()` —
+     * pour que l'écran des frais et celui du dossier ne puissent plus dire
+     * deux choses différentes du même chiffre. */
+    const etat = (await c.query(`select * from plafond_du_dossier()`)).rows[0];
+    const verdict = (await c.query(`select * from dossier_declarable()`)).rows[0];
+
+    const mvt = await c.query(
+      `select cc.ancien_fcfa, cc.nouveau_fcfa, cc.ancienne_categorie,
+              cc.nouvelle_categorie, cc.motif, cc.apres_declaration,
+              cc.quand,
+              (select u.full_name from staff sa
+                 left join users u on u.id = sa.user_id
+                where sa.id = cc.par) as par
+         from category_ceiling_changes cc
+        where cc.category_assessment_id = $1
+        order by cc.quand desc limit 12`, [a.rows[0].id]);
+
+    const hors = await c.query(
+      `select schedule_id, libelle, niveau, plafonne, plafond, ecart
+         from grilles_hors_plafond($1)`, [yearId]);
+
     return {
       id: a.rows[0].id as string,
       yearId, yearLabel: y.rows[0].label as string,
       status: a.rows[0].status as string,
       category: a.rows[0].category as number | null,
       declaredCeiling: a.rows[0].declared_ceiling_fcfa as number | null,
+      declaration: {
+        statut: etat?.statut ?? "brouillon",
+        declareLe: etat?.declare_le === null || etat?.declare_le === undefined
+          ? null : String(etat.declare_le),
+        declarePar: etat?.declare_par ?? null,
+        saisiLe: etat?.saisi_le ? new Date(etat.saisi_le).toISOString() : null,
+        possible: verdict?.possible === true,
+        raison: verdict?.raison ?? null,
+      },
+      mouvements: mvt.rows.map((r) => ({
+        ancien: r.ancien_fcfa === null ? null : Number(r.ancien_fcfa),
+        nouveau: r.nouveau_fcfa === null ? null : Number(r.nouveau_fcfa),
+        ancienneCategorie: r.ancienne_categorie === null ? null : Number(r.ancienne_categorie),
+        nouvelleCategorie: r.nouvelle_categorie === null ? null : Number(r.nouvelle_categorie),
+        motif: r.motif, apresDeclaration: r.apres_declaration === true,
+        par: r.par, quand: new Date(r.quand).toISOString(),
+      })),
+      horsPlafond: hors.rows.map((r) => ({
+        scheduleId: r.schedule_id, libelle: r.libelle, niveau: r.niveau,
+        plafonne: Number(r.plafonne), plafond: Number(r.plafond),
+        ecart: Number(r.ecart),
+      })),
       criteria: crit.rows.map((r) => ({
         id: r.id, axis: r.axis, code: r.code, label: r.label,
         maxPoints: Number(r.max_points),
@@ -196,11 +286,47 @@ export async function saveDossier(
         group by axis`, [dossier.id]);
     const parAxe = new Map(relu.rows.map((r) => [r.axis as string, Number(r.pts)]));
 
-    const categorie = num(form.get("categorie"));
-    const plafond = num(form.get("plafond"));
+    /* MÊME RÈGLE QUE POUR LES CRITÈRES, À L'ÉTAGE DU DESSUS : un champ ABSENT
+     * de l'envoi veut dire « non soumis », pas « efface ». Elle avait été
+     * posée pour les points et pas pour les deux chiffres qui décident du
+     * plafond légal — un POST partiel effaçait donc en silence la catégorie
+     * et le plafond de tout l'établissement. */
+    const aCategorie = form.has("categorie");
+    const aPlafond = form.has("plafond");
+    const categorie = aCategorie ? num(form.get("categorie")) : dossier.category;
+    const plafondBrut = aPlafond ? num(form.get("plafond")) : dossier.declaredCeiling;
+    const plafond = plafondBrut === null ? null : Math.round(plafondBrut);
     if (categorie !== null && ![1, 2, 3].includes(categorie)) {
       return { error: "La catégorie est 1, 2 ou 3." };
     }
+    if (plafond !== null && plafond < 0) {
+      return { error: "Un plafond ne peut pas être négatif." };
+    }
+
+    /* LE PLAFOND NE BOUGE PAS SANS TRACE.
+     *
+     * C'est le chiffre qui rend toute la grille légale ou illégale, et le
+     * chemin le plus court quand la grille dépasse n'est pas de baisser la
+     * grille : c'est de monter le plafond. Éprouvé : un POST le faisait
+     * passer de 1 000 à 9 999 999, et le journal n'en gardait rien.
+     *
+     * Après déclaration, le mouvement exige en plus un MOTIF : ce chiffre est
+     * alors censé être sorti de l'établissement, et le corriger est un acte,
+     * pas une saisie. */
+    const bouge = plafond !== dossier.declaredCeiling
+      || categorie !== dossier.category;
+    const dejaDeclare = dossier.declaration.statut === "declare";
+    const motif = (form.get("motif_plafond") ?? "").trim();
+    if (bouge && dejaDeclare && motif.length < 5) {
+      return { error: "Ce dossier est déclaré. Dites pourquoi le plafond ou la "
+        + "catégorie change — « erreur de lecture de l'arrêté », « nouvelle "
+        + "notification du ministère » — avant d'enregistrer. Rien n'a été "
+        + "modifié." };
+    }
+
+    const staff = await c.query(
+      `select id from staff where user_id = $1 limit 1`, [user.userId]);
+    const staffId = staff.rows[0]?.id ?? null;
 
     await c.query(
       `update category_assessments
@@ -210,15 +336,84 @@ export async function saveDossier(
       [dossier.id,
        Math.min(parAxe.get("investissement") ?? 0, 50),
        Math.min(parAxe.get("qualite") ?? 0, 50),
-       categorie, plafond === null ? null : Math.round(plafond)]);
+       categorie, plafond]);
+
+    if (bouge) {
+      await c.query(
+        `insert into category_ceiling_changes
+           (school_id, category_assessment_id, ancien_fcfa, nouveau_fcfa,
+            ancienne_categorie, nouvelle_categorie, motif, apres_declaration, par)
+         values (current_school_id(), $1, $2, $3, $4, $5, $6, $7, $8)`,
+        [dossier.id, dossier.declaredCeiling, plafond,
+         dossier.category, categorie, motif || null, dejaDeclare, staffId]);
+    }
 
     await c.query(
       `insert into audit_log (school_id, actor_id, action, target_type, target_id, detail)
        values (current_school_id(), $1, 'categorisation.save', 'category_assessment', $2, $3)`,
-      [user.userId, dossier.id, JSON.stringify({ criteres: modifies })]);
+      [user.userId, dossier.id, JSON.stringify({
+        criteres: modifies,
+        plafond: bouge ? { de: dossier.declaredCeiling, a: plafond } : undefined,
+        categorie: bouge ? { de: dossier.category, a: categorie } : undefined,
+        motif: motif || undefined,
+      })]);
 
     if (refuses.length) return { error: refuses.join(" ") };
-    return { flash: `${plural(modifies, "critère enregistré", "critères enregistrés")}.` };
+    const dit = bouge
+      ? ` Plafond : ${dossier.declaredCeiling === null
+            ? "non renseigné" : `${fcfa(dossier.declaredCeiling)} F`} → ${
+            plafond === null ? "non renseigné" : `${fcfa(plafond)} F`}.`
+      : "";
+    return { flash: `${plural(modifies, "critère enregistré", "critères enregistrés")}.${dit}` };
+  });
+}
+
+/* ---------------------------------------------------------------------------
+ * DÉCLARER LE DOSSIER.
+ *
+ * `category_assessments.status` était écrit une fois, à la création, à
+ * `'brouillon'`, et plus jamais ; `declared_on` n'était écrit nulle part. Les
+ * deux écrans disaient pourtant « plafond déclaré ». Le mot était une
+ * affirmation du produit sur un fait qu'il ne connaissait pas.
+ *
+ * Déclarer n'est pas enregistrer : c'est dire que ces chiffres ont quitté
+ * l'établissement. Le produit ne peut pas le vérifier — aucun canal ne le
+ * relie au ministère — mais il peut savoir QUI l'a affirmé et QUAND, et ne
+ * plus écrire le mot avant.
+ */
+export async function declarerDossier(
+  user: SessionUser,
+): Promise<{ flash?: string; error?: string }> {
+  const schoolId = user.schoolId!;
+  const dossier = await loadDossier(schoolId);
+  if (!dossier) return { error: "Aucune année scolaire ouverte." };
+  if (!dossier.declaration.possible) {
+    return { error: dossier.declaration.raison ?? "Ce dossier ne peut pas être déclaré." };
+  }
+
+  return withSchool(schoolId, async (c) => {
+    const staff = await c.query(
+      `select id from staff where user_id = $1 limit 1`, [user.userId]);
+    const staffId = staff.rows[0]?.id ?? null;
+    if (!staffId) {
+      return { error: "Seul un membre du personnel peut déclarer un dossier." };
+    }
+
+    await c.query(
+      `update category_assessments
+          set status = 'declare', declared_on = current_date, declared_by = $2
+        where id = $1 and status <> 'declare'`, [dossier.id, staffId]);
+
+    await c.query(
+      `insert into audit_log (school_id, actor_id, action, target_type, target_id, detail)
+       values (current_school_id(), $1, 'categorisation.declare', 'category_assessment', $2, $3)`,
+      [user.userId, dossier.id, JSON.stringify({
+        categorie: dossier.category, plafond: dossier.declaredCeiling })]);
+
+    return { flash: `Dossier déclaré : catégorie ${dossier.category}, plafond `
+      + `${fcfa(dossier.declaredCeiling!)} FCFA. À partir d'aujourd'hui, les `
+      + `écrans peuvent écrire « déclaré » — et tout changement de ce plafond `
+      + `demandera un motif.` };
   });
 }
 
@@ -265,6 +460,7 @@ export async function categorisationPage(
       `<h1>Catégorisation</h1><div class="note warn">Aucune année scolaire ouverte.</div>`);
   }
   const s = scores(d.criteria);
+  const dec = d.declaration;
   const pieces = await piecesParCritere(user.schoolId!);
 
   /* LES CHIFFRES QUE LE LOGICIEL ÉTABLIT DÉJÀ.
@@ -419,8 +615,8 @@ ${s.sansPiece ? `<div class="note bad">
   ${axe("qualite", "Qualité", s.qualite, s.maxQualite)}
 
   <div class="card">
-    <header><b>Déclaration</b>
-      <span style="color:var(--muted);font-size:13px">lue dans l'arrêté, pas calculée</span>
+    <header><b>Catégorie et plafond</b>
+      <span style="color:var(--muted);font-size:13px">lus dans l'arrêté, pas calculés</span>
     </header>
     <div class="body row" style="align-items:flex-end">
       <div style="width:180px">
@@ -429,17 +625,80 @@ ${s.sansPiece ? `<div class="note bad">
                value="${d.category ?? ""}">
       </div>
       <div style="width:240px">
-        <label for="plafond">Plafond déclaré (FCFA)</label>
+        <label for="plafond">Plafond (FCFA)</label>
         <input type="text" id="plafond" name="plafond" form="dossier" inputmode="numeric"
                value="${d.declaredCeiling ?? ""}">
       </div>
-      <div class="grow"></div>
+      ${dec.statut === "declare" ? `<div class="grow">
+        <label for="motif_plafond">Motif du changement</label>
+        <input type="text" id="motif_plafond" name="motif_plafond" form="dossier"
+               placeholder="nouvelle notification du ministère">
+      </div>` : `<div class="grow"></div>`}
       <button type="submit" class="btn" form="dossier">Enregistrer le dossier</button>
     </div>
-    ${d.declaredCeiling ? `<div class="body" style="border-top:1px solid var(--rule)">
-      <p class="hint" style="margin:0">Plafond déclaré :
-      <b>${fcfa(d.declaredCeiling)} FCFA</b> — à confronter aux lignes de frais
-      marquées « plafonné » dans la scolarité.</p></div>` : ""}
+
+    ${dec.statut === "declare" ? `<div class="body" style="border-top:1px solid var(--rule)">
+      <p class="hint" style="margin:0"><b>Dossier déclaré le
+      ${jourFr(dec.declareLe!)}</b>${dec.declarePar ? ` par ${esc(dec.declarePar)}` : ""} :
+      catégorie ${d.category}, plafond <b>${fcfa(d.declaredCeiling!)} FCFA</b>.
+      Ce chiffre est celui auquel la scolarité compare votre grille. Le
+      changer demande désormais un motif — il est censé être sorti
+      d'ici.</p></div>`
+
+    /* LE MOT « DÉCLARÉ » ÉTAIT ÉCRIT PARTOUT, ET RIEN N'AVAIT ÉTÉ DÉCLARÉ.
+     * `status` restait « brouillon » à vie, `declared_on` n'était écrit nulle
+     * part, et les deux écrans affirmaient pourtant qu'une déclaration avait
+     * eu lieu. Le produit ne peut pas vérifier qu'un dossier est parti au
+     * ministère ; il peut savoir qui l'a affirmé, et quand. */
+    : `<div class="body" style="border-top:1px solid var(--rule)">
+      <div class="note ${dec.possible ? "warn" : ""}">
+        <b>Ce dossier n'a pas été déclaré.</b> Tant qu'il ne l'est pas, la
+        scolarité parle d'un plafond « renseigné », pas « déclaré » : le
+        logiciel n'a aucun moyen de savoir qu'un dossier a quitté
+        l'établissement, et il ne l'écrira pas à votre place.
+        ${dec.possible
+          ? `Quand les chiffres ci-dessus sont ceux que vous avez transmis,
+             dites-le ici.`
+          : `<br><b>${esc(dec.raison ?? "")}</b>`}
+        ${d.declaredCeiling !== null
+          ? `<br>Ce plafond est à confronter aux lignes de frais marquées
+             « plafonné » dans la scolarité : ce sont les seules qui y entrent.`
+          : ""}
+      </div>
+      ${dec.possible ? `<form method="post" action="/categorisation/declarer"
+             style="margin:12px 0 0">
+        <button type="submit" class="btn">Déclarer le dossier
+          — catégorie ${d.category}, plafond ${fcfa(d.declaredCeiling!)} F</button>
+      </form>` : ""}
+    </div>`}
+
+    ${d.horsPlafond.length > 0 ? `<div class="body" style="border-top:1px solid var(--rule)">
+      <div class="note bad"><b>${plural(d.horsPlafond.length,
+        "grille de frais dépasse ce plafond", "grilles de frais dépassent ce plafond")}.</b>
+        ${d.horsPlafond.map((g) => `<br>${esc(g.libelle)} :
+          ${fcfa(g.plafonne)} F de lignes plafonnées, soit ${fcfa(g.ecart)} F de
+          trop.`).join("")}
+        <br>L'émission des factures de ces niveaux est refusée tant que l'écart
+        demeure. <a href="/frais"><b>Voir la grille</b></a>.</div>
+    </div>` : ""}
+
+    ${d.mouvements.length > 0 ? `<div class="body" style="border-top:1px solid var(--rule)">
+      <p class="hint" style="margin:0 0 8px"><b>L'histoire de ce plafond.</b>
+      On n'écrase pas un chiffre qui décide d'une sanction : le chemin le plus
+      court, quand la grille dépasse, n'est pas de baisser la grille.</p>
+      <div class="scroll"><table><thead><tr>
+        <th>Quand</th><th>Plafond</th><th>Catégorie</th><th>Par</th><th>Motif</th>
+      </tr></thead><tbody>${d.mouvements.map((m) => `<tr>
+        <td>${jourFr(m.quand.slice(0, 10))}</td>
+        <td class="num">${m.ancien === null ? "—" : `${fcfa(m.ancien)} F`}
+          → <b>${m.nouveau === null ? "—" : `${fcfa(m.nouveau)} F`}</b></td>
+        <td class="num">${m.ancienneCategorie ?? "—"} → ${m.nouvelleCategorie ?? "—"}</td>
+        <td>${m.par ? esc(m.par) : "—"}</td>
+        <td>${m.motif ? esc(m.motif)
+          : `<span style="color:var(--faint)">${m.apresDeclaration
+              ? "—" : "avant déclaration"}</span>`}</td>
+      </tr>`).join("")}</tbody></table></div>
+    </div>` : ""}
   </div>
 
 <div class="card">

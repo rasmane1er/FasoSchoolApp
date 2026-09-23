@@ -34,7 +34,8 @@ import { joindre as joindrePiece, retirer as retirerPiece,
          telecharger as telechargerPiece, nomSur, TAILLE_MAX } from "./pieces.ts";
 import { rentreePage, saveYear, openYear, addClass } from "./rentree.ts";
 import { conseilPage, saveDeliberation } from "./conseil.ts";
-import { categorisationPage, saveDossier, addCriterion } from "./categorisation.ts";
+import { categorisationPage, saveDossier, addCriterion,
+         declarerDossier } from "./categorisation.ts";
 import {
   fraisPage, addSchedule, addLine, removeLine, issueInvoices,
 } from "./frais.ts";
@@ -1714,6 +1715,16 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       return html(res, await categorisationPage(
         user, await chromeFor(user, "categorisation"), r.flash, r.error));
     }
+    /* DÉCLARER N'EST PAS ENREGISTRER. Le produit ne peut pas vérifier qu'un
+     * dossier est parti au ministère — aucun canal ne l'y relie — mais il
+     * peut savoir qui l'a affirmé et quand, et ne plus écrire « déclaré »
+     * avant. C'est un geste à part, avec son propre bouton. */
+    if (path === "/categorisation/declarer" && req.method === "POST") {
+      if (!can(user, "voir_categorisation")) return html(res, "Accès refusé.", 403);
+      const r = await declarerDossier(user);
+      return html(res, await categorisationPage(
+        user, await chromeFor(user, "categorisation"), r.flash, r.error));
+    }
     /* --- Pièces justificatives ------------------------------------------
      *
      * Le téléchargement d'un fichier déposé par un utilisateur est le point le
@@ -2064,13 +2075,24 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     }
     if (path === "/frais/emettre" && req.method === "POST") {
       if (!can(user, "voir_scolarite")) return html(res, "Accès refusé.", 403);
-      const out = await issueInvoices(user, (await formBody(req)).get("classe") ?? "");
+      /* LE FORÇAGE EST EXPLICITE, ET IL VIENT D'UN SECOND GESTE. Un
+       * établissement peut avoir une autorisation particulière, ou un plafond
+       * saisi de travers un vendredi soir ; mais il faut alors avoir lu le
+       * refus, et le bouton qui passe outre le dit. */
+      const corps = await formBody(req);
+      const out = await issueInvoices(
+        user, corps.get("classe") ?? "", corps.get("forcer") === "1");
       const flash = out.error ? undefined
         : `${plural(out.emises, "facture émise", "factures émises")}`
           + `${out.deja ? `, ${out.deja} élève(s) déjà facturé(s)` : ""}`
-          + `${out.remisesFcfa ? `, ${fcfa(out.remisesFcfa)} FCFA de remises déduits` : ""}.`;
+          + `${out.remisesFcfa ? `, ${fcfa(out.remisesFcfa)} FCFA de remises déduits` : ""}.`
+          + `${out.force ? ` Le plafond a été dépassé sciemment : `
+              + `${fcfa(out.force.plafonne)} F de lignes plafonnées pour un `
+              + `plafond de ${fcfa(out.force.plafond)} F. Le journal en garde `
+              + `la trace.` : ""}`;
       return html(res, await fraisPage(
-        user, await chromeFor(user, "frais"), flash, out.error));
+        user, await chromeFor(user, "frais"), flash, out.error,
+        out.forcable ? (corps.get("classe") ?? "") : undefined));
     }
 
     // --- Publication et clôture ---------------------------------------------

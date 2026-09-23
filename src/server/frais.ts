@@ -53,7 +53,19 @@ export interface FraisView {
   classes: Array<{ id: string; label: string; levelCode: string; effectif: number; factures: number }>;
   /** Plafond déclaré dans le dossier de catégorisation, ou null. */
   plafond: number | null;
+  /* LE MOT « DÉCLARÉ » EST UNE AFFIRMATION, pas un synonyme de « saisi ».
+   * L'écran l'écrivait sur un chiffre qu'un humain venait de taper dans un
+   * brouillon que rien ne pouvait faire sortir de l'établissement. */
+  plafondDeclare: boolean;
+  plafondDeclareLe: string | null;
 }
+
+/** Une date ISO en jour français. Le même que dans `finance.ts` : deux lignes
+ *  valent mieux qu'une dépendance croisée entre deux modules d'écran. */
+const jour = (iso: string): string => {
+  const [a, m, j] = iso.split("-");
+  return `${j}/${m}/${a}`;
+};
 
 const numero = (raw: string | null): number | null => {
   const t = (raw ?? "").trim().replace(/[^\d]/g, "");
@@ -114,9 +126,7 @@ export async function loadFrais(schoolId: string): Promise<FraisView | null> {
          from classes cl join levels lv on lv.code = cl.level_code
         where cl.academic_year_id = $1 order by lv.ordinal, cl.label`, [yearId]);
 
-    const cat = await c.query(
-      `select declared_ceiling_fcfa from category_assessments
-        where academic_year_id = $1`, [yearId]);
+    const cat = await c.query(`select * from plafond_du_dossier()`);
 
     return {
       yearId, yearLabel: y.rows[0].label as string,
@@ -129,7 +139,10 @@ export async function loadFrais(schoolId: string): Promise<FraisView | null> {
         id: k.id, label: k.label, levelCode: k.level_code,
         effectif: k.effectif, factures: k.factures,
       })),
-      plafond: cat.rows[0]?.declared_ceiling_fcfa ?? null,
+      plafond: cat.rows[0]?.montant ?? null,
+      plafondDeclare: cat.rows[0]?.statut === "declare",
+      plafondDeclareLe: cat.rows[0]?.declare_le
+        ? String(cat.rows[0].declare_le) : null,
     };
   });
 }
@@ -218,6 +231,10 @@ export interface IssueOutcome {
   emises: number; deja: number; sansGrille: number;
   /** Total des bourses et remises déduites au moment de l'émission. */
   remisesFcfa: number;
+  /** Le dépassement du plafond a été forcé : la phrase le dira. */
+  force?: { plafonne: number; plafond: number; ecart: number };
+  /** Un refus forçable, par opposition à un refus définitif. */
+  forcable?: boolean;
 }
 
 /**
@@ -232,7 +249,7 @@ export interface IssueOutcome {
  * modélise pas un solde unique.
  */
 export async function issueInvoices(
-  user: SessionUser, classId: string,
+  user: SessionUser, classId: string, forcer = false,
 ): Promise<IssueOutcome & { error?: string }> {
   const schoolId = user.schoolId!;
   const v = await loadFrais(schoolId);
@@ -260,6 +277,40 @@ export async function issueInvoices(
     }
     const total = totalGrille(grille.lines);
 
+    /* L'ÉCRAN NOMMAIT LA SANCTION, ET LE BOUTON PASSAIT QUAND MÊME.
+     *
+     * La carte de la grille imprimait déjà, en rouge : « Dépassement du
+     * plafond déclaré … Facturer ainsi expose l'établissement à une
+     * sanction. » Puis on appuyait sur « Émettre les factures », deux
+     * centimètres plus bas, et le produit répondait « 12 factures émises. »
+     * Rien d'autre. Douze factures à 118 000 F contre un plafond de 1 000 F.
+     *
+     * C'est la première règle du dépôt, prise en défaut sur le chemin de
+     * l'argent : un affichage n'est jamais la protection. Ici l'affichage
+     * n'était même pas un filtre — c'était un avertissement posé sur un autre
+     * écran que le geste.
+     *
+     * Le refus est FORÇABLE, comme tous les refus de ce dépôt : un
+     * établissement peut avoir une autorisation particulière, ou un plafond
+     * saisi de travers un vendredi soir. Mais il est alors EXPLICITE, et la
+     * facture émise le sera en connaissance de cause — le forçage laisse sa
+     * ligne au journal. */
+    const plafonneGrille = totalPlafonne(grille.lines);
+    const depassement = v.plafond !== null && plafonneGrille > v.plafond
+      ? { plafonne: plafonneGrille, plafond: v.plafond,
+          ecart: plafonneGrille - v.plafond }
+      : null;
+    if (depassement && !forcer) {
+      return { emises: 0, deja: 0, sansGrille: 0, remisesFcfa: 0, forcable: true,
+        error: `La grille « ${grille.label} » dépasse le plafond${
+          v.plafondDeclare ? " déclaré" : " renseigné"} : `
+          + `${fcfa(depassement.plafonne)} FCFA de lignes plafonnées pour un `
+          + `plafond de ${fcfa(depassement.plafond)} FCFA, soit `
+          + `${fcfa(depassement.ecart)} de trop. Facturer ainsi expose `
+          + `l'établissement à une sanction. Aucune facture n'a été émise : `
+          + `corrigez la grille, ou le plafond s'il a été mal lu.` };
+    }
+
     const eleves = await c.query(
       `select e.student_id, st.matricule from enrolments e
          join students st on st.id = e.student_id
@@ -271,6 +322,11 @@ export async function issueInvoices(
         where academic_year_id = $1 order by sequence`, [v.yearId]);
 
     const out: IssueOutcome = { emises: 0, deja: 0, sansGrille: 0, remisesFcfa: 0 };
+    /* LE FORÇAGE EST DIT, ET IL EST JOURNALISÉ. Une facture émise au-dessus du
+     * plafond n'est pas une facture comme les autres : le jour de
+     * l'inspection, c'est cette ligne qui dira que l'établissement le savait
+     * — ou qu'il ne le savait pas. */
+    if (depassement) out.force = depassement;
 
     for (const el of eleves.rows) {
       const existe = await c.query(
@@ -341,6 +397,11 @@ export async function issueInvoices(
 
 export async function fraisPage(
   user: SessionUser, chrome: PageChrome, flash?: string, error?: string,
+  /* LA CLASSE DONT L'ÉMISSION A ÉTÉ REFUSÉE POUR DÉPASSEMENT. Le bouton qui
+   * passe outre n'apparaît que là, et seulement après qu'on a lu le refus :
+   * un mur sans porte est un défaut, mais une porte toujours ouverte n'est
+   * pas un mur. */
+  forcable?: string,
 ): Promise<string> {
   const v = await loadFrais(user.schoolId!);
   if (!v) {
@@ -361,10 +422,13 @@ export async function fraisPage(
           ${fcfa(total)} FCFA dont ${fcfa(plafonne)} plafonnés</span></header>
 
       ${depasse ? `<div class="body" style="padding-bottom:0"><div class="note bad">
-        <b>Dépassement du plafond déclaré.</b> Les lignes comptées dans le
-        plafond totalisent ${fcfa(plafonne)} FCFA pour un plafond déclaré de
-        ${fcfa(v.plafond!)} FCFA — soit ${fcfa(plafonne - v.plafond!)} de trop.
-        Facturer ainsi expose l'établissement à une sanction.</div></div>` : ""}
+        <b>Dépassement du plafond ${v.plafondDeclare ? "déclaré" : "renseigné"}.</b>
+        Les lignes comptées dans le plafond totalisent ${fcfa(plafonne)} FCFA
+        pour un plafond de ${fcfa(v.plafond!)} FCFA — soit
+        ${fcfa(plafonne - v.plafond!)} de trop. Facturer ainsi expose
+        l'établissement à une sanction, <b>et l'émission des factures de ce
+        niveau est refusée</b> tant que l'écart demeure. Cette phrase n'est
+        plus seulement un avertissement.</div></div>` : ""}
 
       ${s.lines.length ? `<div class="scroll"><table>
         <thead><tr><th>Ligne</th><th class="r">Montant</th><th>Traitement</th>
@@ -420,12 +484,24 @@ ${error ? `<div class="note bad">${esc(error)}</div>` : ""}
 ${flash ? `<div class="note good">${esc(flash)}</div>` : ""}
 
 ${v.plafond === null ? `<div class="note warn">
-  Aucun plafond déclaré dans le dossier de catégorisation : le logiciel ne peut
-  donc pas vous dire si votre grille le dépasse.
+  Aucun plafond renseigné dans le dossier de catégorisation : le logiciel ne
+  peut donc pas vous dire si votre grille le dépasse.
   <a href="/categorisation"><b>Renseignez-le</b></a>.</div>`
-  : `<div class="note">Plafond déclaré : <b>${fcfa(v.plafond)} FCFA</b>, lu dans
-     l'arrêté et inscrit au dossier de catégorisation. Seules les lignes
-     « comptées dans le plafond » y entrent — l'hébergement en est exclu.</div>`}
+  : v.plafondDeclare
+  ? `<div class="note">Plafond déclaré : <b>${fcfa(v.plafond)} FCFA</b>, lu dans
+     l'arrêté, inscrit au dossier de catégorisation et déclaré le
+     ${jour(v.plafondDeclareLe!)}. Seules les lignes « comptées dans le
+     plafond » y entrent — l'hébergement en est exclu.</div>`
+  /* LE MOT « DÉCLARÉ » EST UNE AFFIRMATION. Cet écran l'écrivait sur un
+     chiffre qu'un humain venait de taper dans un dossier resté brouillon —
+     `status` n'a jamais quitté « brouillon » et `declared_on` n'était écrit
+     nulle part. Un chef d'établissement qui lit « déclaré » croit que quelque
+     chose a été fait. */
+  : `<div class="note warn">Plafond <b>renseigné</b> : ${fcfa(v.plafond)} FCFA,
+     lu dans l'arrêté et inscrit au dossier — mais ce dossier n'a pas encore
+     été déclaré. Le logiciel compare votre grille à ce chiffre ; il ne peut
+     pas dire qu'il a été déclaré, parce que rien ne le lui a dit.
+     <a href="/categorisation"><b>Déclarez le dossier</b></a>.</div>`}
 
 ${v.schedules.map(grille).join("")}
 
@@ -463,8 +539,11 @@ ${v.schedules.map(grille).join("")}
         ? `<span class="pill p-ok">à jour</span>`
         : `<form method="post" action="/frais/emettre" style="margin:0">
              <input type="hidden" name="classe" value="${k.id}">
-             <button class="btn" type="submit" style="height:32px;padding:0 14px">
-               Émettre ${plural(k.effectif - k.factures, "facture", "factures")}</button>
+             ${forcable === k.id ? `<input type="hidden" name="forcer" value="1">
+             <button class="btn danger" type="submit" style="height:32px;padding:0 14px">
+               Émettre malgré le dépassement</button>`
+             : `<button class="btn" type="submit" style="height:32px;padding:0 14px">
+               Émettre ${plural(k.effectif - k.factures, "facture", "factures")}</button>`}
            </form>`}</td>
     </tr>`).join("") || `<tr><td colspan="4" style="color:var(--muted)">Aucune classe.</td></tr>`}
     </tbody>

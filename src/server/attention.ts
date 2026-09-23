@@ -13,7 +13,7 @@
 
 import { withSchool } from "../lib/db.ts";
 import { verdictCanal } from "../lib/sms.ts";
-import { esc, plural, accord } from "./html.ts";
+import { esc, plural, accord, fcfa } from "./html.ts";
 import { can, type SessionUser } from "./session.ts";
 
 export type Gravite = "bloquant" | "important" | "a_faire";
@@ -38,6 +38,9 @@ export async function pointsDAttention(
   await withSchool(schoolId, async (c) => {
     const un = async (sql: string, params: unknown[] = []): Promise<number> =>
       Number((await c.query(sql, params)).rows[0]?.n ?? 0);
+    const plusieurs = async (
+      sql: string, params: unknown[] = []): Promise<any[]> =>
+      (await c.query(sql, params)).rows;
 
     // --- Ce qui fausse un bulletin -----------------------------------------
 
@@ -194,6 +197,48 @@ export async function pointsDAttention(
           : partis + " élèves ont quitté l'établissement en gardant une facture ouverte"}`
           + " : ces sommes pèsent sur le reste à recouvrer et partent en relance.",
         action: "Voir", lien: "/scolarite", droit: "voir_scolarite",
+      });
+    }
+
+    /* UNE GRILLE DE FRAIS AU-DESSUS DU PLAFOND.
+     *
+     * L'écran des frais imprimait déjà l'écart en rouge — et le bouton
+     * « Émettre les factures », deux centimètres plus bas, émettait quand
+     * même. L'émission refuse désormais ; ce point-ci le dit sur l'écran
+     * d'accueil, avant qu'un économe ne découvre le refus un matin de
+     * rentrée avec deux cents familles devant le guichet. */
+    const hors = await plusieurs(
+      `select libelle, ecart from grilles_hors_plafond()`);
+    if (hors.length > 0) {
+      points.push({
+        gravite: "bloquant",
+        texte: `${hors.length === 1
+          ? `La grille « ${hors[0].libelle} » dépasse le plafond du dossier de `
+            + `catégorisation de ${fcfa(Number(hors[0].ecart))} FCFA`
+          : `${hors.length} grilles de frais dépassent le plafond du dossier de `
+            + `catégorisation`}`
+          + " : l'émission des factures de ces niveaux est refusée, et facturer"
+          + " ainsi exposerait l'établissement à une sanction.",
+        action: "Voir la grille", lien: "/frais", droit: "voir_scolarite",
+      });
+    }
+
+    /* UN PLAFOND QUI GOUVERNE LA FACTURATION SANS AVOIR ÉTÉ DÉCLARÉ.
+     *
+     * Le mot « déclaré » était écrit sur les deux écrans alors que
+     * `category_assessments.status` n'avait jamais quitté « brouillon » et
+     * que `declared_on` n'était écrit nulle part. Le produit ne peut pas
+     * vérifier qu'un dossier est parti au ministère — il peut cesser de
+     * l'affirmer, et rappeler que le geste manque. */
+    const plaf = await plusieurs(
+      `select montant, statut from plafond_du_dossier()`);
+    if (plaf[0] && plaf[0].montant !== null && plaf[0].statut !== "declare") {
+      points.push({
+        gravite: "important",
+        texte: "Le plafond du dossier de catégorisation est renseigné mais le"
+          + " dossier n'a pas été déclaré : la scolarité compare votre grille à"
+          + " un chiffre que rien n'atteste.",
+        action: "Déclarer", lien: "/categorisation", droit: "voir_categorisation",
       });
     }
 

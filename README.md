@@ -793,6 +793,73 @@ saisit quarante notes, le réseau tombe, tout est perdu. Ici :
 4. Sans JavaScript, le formulaire se poste normalement. Le hors-ligne est une
    amélioration, jamais une dépendance.
 
+### L'écran nommait la sanction, et le bouton passait quand même
+
+Trouvé en cherchant qui **écrit** les valeurs d'énumération du schéma que rien
+ne semblait atteindre — la suite du défaut précédent, cherché cette fois de
+façon systématique, contrainte de vérification par contrainte de vérification.
+`category_assessments.status` est écrit une fois, à la création, à
+`'brouillon'`, et plus jamais. En tirant ce fil, trois choses sont sorties, et
+la première est la plus grave.
+
+**Un.** L'écran des frais imprime en rouge, sur la carte de la grille :
+*« Dépassement du plafond déclaré. Les lignes comptées dans le plafond
+totalisent 78 000 FCFA pour un plafond déclaré de 1 000 FCFA — soit 77 000 de
+trop. Facturer ainsi expose l'établissement à une sanction. »* Éprouvé : on
+appuie sur « Émettre les factures », deux centimètres plus bas, et le produit
+répond *« 12 factures émises. »* Rien d'autre. Douze factures à 118 000 F
+contre un plafond de 1 000 F, et la seule phrase qui parlait de sanction est
+restée sur l'écran d'avant.
+
+C'est la première règle du dépôt, prise en défaut sur le chemin de l'argent :
+**un affichage n'est jamais la protection.** Ici l'affichage n'était même pas
+un filtre — c'était un avertissement posé sur un autre écran que le geste.
+L'émission refuse désormais, et le refus nomme l'écart. Il est **forçable**,
+comme tous les refus de ce dépôt : un établissement peut avoir une
+autorisation particulière, ou un plafond saisi de travers un vendredi soir.
+Mais le bouton qui passe outre n'apparaît **qu'après** le refus, il dit ce
+qu'il fait, et le forçage laisse sa ligne au journal — le jour de
+l'inspection, c'est elle qui dira si l'établissement le savait.
+
+**Deux.** Le chiffre qui décide de cette sanction bougeait sans nom, sans date
+et sans raison. Éprouvé : un POST, et le plafond passe de 1 000 à 9 999 999 ;
+le journal garde `{"criteres": 0}` et l'ancienne valeur n'existe plus nulle
+part. Or, quand la grille dépasse, le chemin le plus court n'est pas de baisser
+la grille : c'est de monter le plafond. C'est la règle écrite la veille pour
+l'annulation d'une facture — retirer une somme d'un total exige un nom, une
+date et une raison — et elle vaut d'abord pour le chiffre qui rend toute la
+grille légale ou illégale. Chaque mouvement laisse maintenant sa ligne, avec
+l'ancien, le nouveau, qui et quand ; après déclaration il exige en plus un
+**motif**, et l'écran affiche l'histoire.
+
+**Trois.** Et rien n'avait jamais été déclaré. `status` n'a jamais quitté
+« brouillon », `declared_on` n'était écrit nulle part, et les deux écrans
+disaient pourtant « plafond **déclaré** » — *« lu dans l'arrêté et inscrit au
+dossier de catégorisation »*. Le mot était une **affirmation du produit sur un
+fait qu'il ne connaissait pas**. Un chef d'établissement qui lit « déclaré »
+croit que quelque chose a été fait.
+
+Le produit ne peut pas vérifier qu'un dossier est parti au ministère — aucun
+canal ne l'y relie, et en inventer un serait exactement l'erreur que ce dépôt
+refuse. Mais il peut savoir **qui l'a affirmé et quand**, et cesser d'écrire le
+mot avant. D'où un geste de déclaration à part, qui exige la catégorie et le
+plafond, écrit la date et l'auteur, et que la base refuse sans sa trace —
+`update ... set status = 'declare'` est rejeté par PostgreSQL, pas par un
+écran. Tant qu'il n'a pas eu lieu, la scolarité parle d'un plafond
+« **renseigné** » et dit pourquoi elle n'en dit pas plus.
+
+Au passage, une quatrième chose, du même module et de la même famille que ce
+qui y avait déjà été corrigé : `form.get("categorie")` et
+`form.get("plafond")` rendent `null` aussi bien pour une case **vidée** que
+pour une case **absente** de l'envoi. La règle « un champ absent veut dire
+*non soumis*, pas *efface* » avait été posée pour les points des critères, et
+pas pour les deux chiffres qui décident du plafond légal : un POST partiel les
+effaçait tous les deux en silence. Une règle posée dans un fichier ne s'applique
+pas d'elle-même à l'étage du dessus.
+
+`db/migrations/0028_le_plafond_declare.sql`,
+`tests/plafond-declare.e2e.mjs` (34 assertions).
+
 ### « annulee » : un état que onze écrans respectaient et qu'aucun geste ne pouvait atteindre
 
 Trouvé en cherchant qui **écrit** ce statut. Onze endroits du code le lisent —
@@ -2077,7 +2144,7 @@ Comptes de démonstration — le code s'affiche à l'écran, aucun SMS n'est env
 | `70000005` | Directeur |
 
 Vérifications : `npm run check:all` — typecheck strict, 60 tests unitaires, et
-**quarante-huit parcours**, chacun contre un vrai PostgreSQL et un vrai
+**quarante-neuf parcours**, chacun contre un vrai PostgreSQL et un vrai
 serveur — sauf deux témoins qui n'écrivent rien : l'un compte le jeu de
 démonstration, l'autre relit le code source.
 Le tableau ci-dessous en détaille une partie ; les autres sont décrits, avec ce
@@ -2085,6 +2152,7 @@ qu'ils ont trouvé, dans les sections qui précèdent.
 
 | suite | ce qu'elle prouve |
 |---|---|
+| `test:plafond-declare` (34) | le produit n'écrit plus « déclaré » sur un dossier que rien n'a fait sortir, le plafond ne bouge plus sans nom ni motif, et une grille au-dessus du plafond fait refuser l'émission au lieu de l'avertir |
 | `test:annuler-facture` (35) | une facture d'élève parti s'annule avec un nom, une date et un motif — refusée sans trace par la base, sortie des totaux mais lisible barrée, et réémise en nouvelle ligne au lieu d'être ressuscitée |
 | `test:double-clic` (19) | deux clics sur « Encaisser » ne font qu'un versement et qu'un reçu, un vrai second versement passe, et la fenêtre est un réglage de l'établissement |
 | `test:entre-trimestres` (30) | aux quatre coins du calendrier, aucun écran n'annonce un trimestre qui n'a pas cours ; celui qui écrit fait choisir, celui qui rapporte nomme le trimestre qu'il lit |
@@ -2272,6 +2340,32 @@ additionnées au présent. Ce défaut a été trouvé deux fois, dans deux modul
 `tests/bornes.e2e.mjs` relit désormais le code source du dépôt pour qu'il n'y
 ait pas de troisième fois, et une requête volontairement cumulative doit écrire
 `-- borne:` suivi de sa raison.
+
+**Une phrase qui nomme une sanction doit arrêter le geste.** Le produit
+imprimait « Facturer ainsi expose l'établissement à une sanction » sur l'écran
+de la grille, et le bouton « Émettre les factures », deux centimètres plus bas,
+émettait douze factures sans un mot. Ce n'est pas un avertissement mal placé :
+c'est la règle « un affichage n'est jamais la protection », prise en défaut sur
+le chemin de l'argent. Le refus doit vivre du côté du geste, dire l'écart
+chiffré, et — parce qu'un mur sans porte est un défaut — être forçable par un
+second geste explicite, qui se journalise. Une porte toujours ouverte n'est
+cependant pas un mur : le bouton qui passe outre n'apparaît qu'après le refus.
+
+**Le produit n'affirme pas un fait qu'il ne peut pas connaître.** Deux écrans
+écrivaient « plafond déclaré » alors que rien, dans le logiciel, ne pouvait
+savoir qu'un dossier avait quitté l'établissement — le statut n'avait jamais
+bougé de « brouillon ». Quand le produit ne peut pas vérifier, il ne devine pas
+et il n'invente pas un canal : il enregistre QUI l'a affirmé et QUAND, et
+jusque-là il emploie le mot exact — « renseigné » — en disant pourquoi il n'en
+dit pas plus. C'est le pendant de « quand le produit ne sait pas, il dit
+*null* », pour un fait qui se passe hors de lui.
+
+**Une règle posée dans un fichier ne s'applique pas d'elle-même à l'étage du
+dessus.** « Un champ absent veut dire *non soumis*, pas *efface* » avait été
+écrite, en toutes lettres, pour les points des critères de catégorisation —
+et pas pour les deux chiffres, vingt lignes plus bas dans le même fichier, qui
+décident du plafond légal des frais. Quand un défaut est corrigé, la question
+suivante est : où d'autre ce code fait-il la même chose ?
 
 **Un état que le produit respecte partout doit être atteignable par un
 geste.** `invoices.status = 'annulee'` était lu par onze écrans et écrit par
