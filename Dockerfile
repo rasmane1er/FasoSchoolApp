@@ -27,9 +27,17 @@ FROM node:22-bookworm-slim
 # appliquer les migrations, et `scripts/sauvegarde.sh` pour `pg_dump`.
 # `gnupg` pour le chiffrement des sauvegardes — une sauvegarde en clair est
 # une fuite de données qui attend son heure.
-RUN apt-get update \
- && apt-get install -y --no-install-recommends postgresql-client gnupg ca-certificates \
- && rm -rf /var/lib/apt/lists/*
+# APT RÉESSAIE. Le premier déploiement a échoué ici sur un « context
+# canceled » : le réseau du constructeur avait lâché au milieu. Un échec
+# transitoire qui casse une mise en ligne coûte plus cher que trois lignes.
+RUN set -eux; \
+    for essai in 1 2 3; do \
+      apt-get update && \
+      apt-get install -y --no-install-recommends \
+        postgresql-client gnupg ca-certificates && break; \
+      echo "apt a échoué (essai $essai), nouvelle tentative"; sleep 5; \
+    done; \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 

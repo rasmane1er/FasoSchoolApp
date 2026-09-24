@@ -100,9 +100,15 @@ check("elle n'installe pas les dépendances de développement",
 check("un railway.json existe", existsSync("railway.json"));
 const rail = existsSync("railway.json")
   ? JSON.parse(readFileSync("railway.json", "utf8")) : {};
+/* LA MIGRATION EST UNE COMMANDE DE RELEASE, ET ELLE PASSE PAR LE CHEMIN DE
+ * LA PREMIÈRE ÉCOLE. `preparer-base.sh` crée la base si elle manque, crée le
+ * rôle applicatif, REFUSE de continuer s'il porte SUPERUSER ou BYPASSRLS,
+ * applique les migrations et accorde les droits — le tout idempotent. Appeler
+ * `db:migrate` seul supposerait que tout le reste a déjà été fait à la main,
+ * ce qui est vrai exactement une fois et faux ensuite. */
 check("la migration est une commande de RELEASE, pas de démarrage",
-  rail.deploy?.preDeployCommand === "npm run db:migrate"
-    && !/db:migrate/.test(rail.deploy?.startCommand ?? ""),
+  /preparer-base\.sh/.test(rail.deploy?.preDeployCommand ?? "")
+    && !/migrate|preparer-base/.test(rail.deploy?.startCommand ?? ""),
   JSON.stringify(rail.deploy)
     + " — un conteneur qui migre en démarrant migre aussi quand il redémarre"
     + " en boucle, et deux instances qui démarrent ensemble migrent ensemble");
