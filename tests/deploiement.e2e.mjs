@@ -110,6 +110,27 @@ check("le healthcheck interroge /sante",
   rail.deploy?.healthcheckPath === "/sante",
   "il répond 200 seulement si la base répond, et il dit si les SMS sont simulés");
 
+/* L'ÉPREUVE TOURNE AILLEURS QUE SUR LA MACHINE DE CELUI QUI ÉCRIT.
+ *
+ * Soixante-trois commits sans intégration continue : `check:all` ne tournait
+ * que là où la base de démonstration portait déjà l'état de la veille. Trois
+ * fuites de jeu trouvées cette semaine l'ont montré — elles ne se voient que
+ * sur une base NEUVE, semée de zéro, par le chemin qu'empruntera la première
+ * vraie école. */
+const ci = "github/workflows/epreuve.yml";
+check("l'épreuve tourne en intégration continue",
+  existsSync(`.${ci}`), "sinon elle ne tourne que là où la base est déjà migrée");
+const flux = existsSync(`.${ci}`) ? readFileSync(`.${ci}`, "utf8") : "";
+check("elle part d'un PostgreSQL neuf, pas d'une base déjà migrée",
+  /postgres:16/.test(flux) && /preparer-base\.sh demo/.test(flux),
+  "c'est le chemin de la première vraie école, et aucun autre");
+check("elle vérifie que le rôle applicatif n'a aucun privilège",
+  /rolsuper.*rolbypassrls|rolbypassrls/.test(flux) && /false false/.test(flux),
+  "un superutilisateur contourne entièrement le row-level security");
+check("elle construit l'image et la démarre",
+  /docker build/.test(flux) && /sante/.test(flux),
+  "une image qui ne démarre qu'en production n'est pas éprouvée");
+
 check("le runbook de mise en ligne existe", existsSync("DEPLOIEMENT.md"));
 /* ON LIT LE RUNBOOK COMME UN TEXTE, PAS COMME DES LIGNES. Première version :
  * des expressions régulières sur le fichier brut, qui échouaient parce que la
