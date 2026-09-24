@@ -793,6 +793,67 @@ saisit quarante notes, le réseau tombe, tout est perdu. Ici :
 4. Sans JavaScript, le formulaire se poste normalement. Le hors-ligne est une
    amélioration, jamais une dépendance.
 
+### « Plus aucune famille n'est prévenue » — et l'appel suivant en prévenait trois
+
+Trouvé en se demandant ce qui se passe le premier matin d'une école neuve, qui
+n'a encore acheté aucun crédit SMS. Le tableau de bord porte ce point, en
+rouge, marqué **bloquant**, dès que le solde tombe à zéro :
+
+> Le crédit SMS est épuisé : plus aucune famille n'est prévenue.
+
+Éprouvé : on vide le crédit, on fait l'appel avec trois absents, et le produit
+répond **« Appel enregistré : 3 absences, 3 SMS envoyés pour 24 F »** — en
+portant le solde à **moins trois**. La phrase était fausse au moment où elle
+s'affichait.
+
+C'est l'image inversée du dépassement de plafond trouvé deux jours plus tôt :
+là, un écran nommait une sanction et le bouton passait quand même ; ici,
+l'écran annonce une conséquence qui n'arrive pas. Les deux enseignent la même
+chose à celui qui lit — **que le rouge ne veut rien dire** — et c'est ce qui
+les rend graves, bien plus que les vingt-quatre francs.
+
+Trois défauts dans un.
+
+**Un solde qui descend sous zéro n'est pas un solde.** Rien, dans le chemin de
+l'appel, ne lisait le crédit avant de composer. L'école achète N messages à
+l'opérateur ; au-delà, c'est l'opérateur qui refuse — et la comptabilité du
+produit diverge alors de la sienne en silence. Avec le canal simulé, où tout
+« réussit », la divergence est invisible à l'épreuve et n'apparaît que le
+premier vrai matin.
+
+**L'écran de l'appel ne disait rien du crédit.** Le surveillant général, à
+7 h 30, la classe devant lui, est la seule personne qui dépense ce crédit — et
+la seule à qui on ne le disait pas. Le point d'attention vit sur l'écran
+d'accueil, que celui qui fait l'appel n'ouvre pas.
+
+**Et rien ne disait quelles familles n'avaient pas été prévenues.** La doctrine
+existait pourtant déjà, mot pour mot, pour la famille sans numéro : *« un
+message non remis n'est pas une ligne de journal, c'est une tâche »*. Elle
+n'avait pas été appliquée au cas où c'est l'**école**, et non la famille, qui
+est hors d'atteinte.
+
+**Ce qu'on ne fait pas : refuser l'appel.** Une absence se consigne même sans
+crédit — le registre est le document, le SMS est la politesse. Le produit
+enregistre donc tout, envoie ce que le crédit couvre, et **nomme** les familles
+qu'il n'a pas pu prévenir : « 2 familles » envoie chercher lesquelles dans une
+liste de quarante. Chaque message non composé est écrit avec le numéro qu'on
+aurait appelé et l'état `sans_credit` — *pas* `injoignable`, qui dirait que
+c'est la famille qui n'a pas de numéro et enverrait quelqu'un vérifier un
+numéro qui n'a rien. Trois mots pour trois gestes : corriger un numéro,
+rappeler l'opérateur, recharger le crédit.
+
+Le point d'attention correspondant **s'éteint quand le message part enfin**,
+pas quand quelqu'un le lit.
+
+Au passage, le solde était recalculé par un `sum(case when …)` recopié dans
+cinq modules — l'en-tête des pages, les points d'attention, la clôture, les
+communiqués, la discipline — et deux d'entre eux traitaient déjà les
+ajustements autrement que les trois autres. `credit_sms()` est désormais la
+seule lecture.
+
+`db/migrations/0030_le_credit_qui_ne_retient_rien.sql`,
+`tests/credit-epuise.e2e.mjs` (22 assertions).
+
 ### Mettre en ligne, et la politique qui a cassé sept écrans
 
 Le dépôt savait tout faire sauf sortir de la machine où il était écrit : ni
@@ -2314,7 +2375,7 @@ Comptes de démonstration — le code s'affiche à l'écran, aucun SMS n'est env
 | `70000005` | Directeur |
 
 Vérifications : `npm run check:all` — typecheck strict, 60 tests unitaires, et
-**cinquante et un parcours**, chacun contre un vrai PostgreSQL et un vrai
+**cinquante-deux parcours**, chacun contre un vrai PostgreSQL et un vrai
 serveur — sauf deux témoins qui n'écrivent rien : l'un compte le jeu de
 démonstration, l'autre relit le code source.
 Le tableau ci-dessous en détaille une partie ; les autres sont décrits, avec ce
@@ -2322,6 +2383,7 @@ qu'ils ont trouvé, dans les sections qui précèdent.
 
 | suite | ce qu'elle prouve |
 |---|---|
+| `test:credit-epuise` (22) | le crédit épuisé arrête l'envoi au lieu de le nier, le solde ne descend plus sous zéro, et les familles restées sans nouvelle sont nommées — pas comptées |
 | `test:deploiement` (30) | les en-têtes de sécurité couvrent toute forme de réponse, aucun gestionnaire d'événement en ligne ne rend un geste inerte, et les quatre listes de migrations disent la même chose que le répertoire |
 | `test:histoire-note` (26) | une note modifiée ou effacée laisse son histoire quel que soit le chemin — écran, appareil, import, arbitrage, `psql` — et l'effacement n'emporte plus la preuve que la note a existé |
 | `test:plafond-declare` (34) | le produit n'écrit plus « déclaré » sur un dossier que rien n'a fait sortir, le plafond ne bouge plus sans nom ni motif, et une grille au-dessus du plafond fait refuser l'émission au lieu de l'avertir |
@@ -2546,6 +2608,19 @@ qu'elle existe pour documenter. Une histoire survit à son sujet, ou ce n'est
 pas une histoire. Corollaire à l'écran : effacer doit être compté et nommé —
 « 0 note enregistrée » est le message de *il ne s'est rien passé*, et le dire
 après avoir détruit une note est un mensonge de plus qu'un silence.
+
+**Un écran ne promet pas une conséquence que le produit n'applique pas.** Le
+tableau de bord annonçait « le crédit SMS est épuisé : plus aucune famille
+n'est prévenue », et l'appel suivant en prévenait trois. C'est la règle
+ci-dessous prise par l'autre bout : là un écran nommait une sanction et le
+bouton passait quand même ; ici il annonçait une conséquence qui n'arrivait
+pas. Les deux apprennent la même chose à celui qui lit — que le rouge ne veut
+rien dire — et c'est le coût réel, bien plus que le franc dépensé.
+
+**Ce qui se dépense se dit à celui qui le dépense.** Un avertissement sur
+l'écran d'accueil ne protège pas un geste fait sur un autre écran : celui qui
+fait l'appel à 7 h 30 n'ouvre pas le tableau de bord. Le chiffre va là où est
+le bouton.
 
 **Une phrase qui nomme une sanction doit arrêter le geste.** Le produit
 imprimait « Facturer ainsi expose l'établissement à une sanction » sur l'écran

@@ -56,9 +56,14 @@ const LIBELLES: Record<string, string> = Object.fromEntries([
   ["sans_objet", "Sans objet"],
 ]);
 
-/** Les états qui demandent un geste. Un message `injoignable` n'a pas échoué
- *  chez l'opérateur : il n'a jamais eu de numéro à composer. */
-export const EN_SOUFFRANCE = new Set(["echoue", "injoignable"]);
+/** Les états qui demandent un geste.
+ *
+ *  `injoignable` n'a pas échoué chez l'opérateur : il n'a jamais eu de numéro
+ *  à composer. `sans_credit` est son exact contraire — la famille A un numéro,
+ *  c'est l'école qui ne pouvait pas composer. Les confondre enverrait
+ *  quelqu'un vérifier un numéro qui n'a rien, et laisserait la famille sans
+ *  nouvelle une seconde fois. */
+export const EN_SOUFFRANCE = new Set(["echoue", "injoignable", "sans_credit"]);
 
 export type Filtre = "a_traiter" | "echecs" | "tous";
 
@@ -107,8 +112,8 @@ export async function loadRegistre(
      * pas un message qui n'a pas de numéro — mais c'est la même attente :
      * une famille n'a pas été prévenue et quelqu'un doit s'en occuper. */
     const où = filtre === "a_traiter"
-      ? "where m.status in ('echoue', 'injoignable') and m.resolution is null"
-      : filtre === "echecs" ? "where m.status in ('echoue', 'injoignable')" : "";
+      ? "where m.status in ('echoue', 'injoignable', 'sans_credit') and m.resolution is null"
+      : filtre === "echecs" ? "where m.status in ('echoue', 'injoignable', 'sans_credit')" : "";
 
     const r = await c.query(
       `select m.id, m.to_phone, m.body, m.status, m.error_detail, m.queued_at,
@@ -138,7 +143,7 @@ export async function loadRegistre(
          left join staff sf on sf.id = m.resolved_by
          left join users rs on rs.id = sf.user_id
          ${où}
-        order by (m.status in ('echoue', 'injoignable')
+        order by (m.status in ('echoue', 'injoignable', 'sans_credit')
                     and m.resolution is null) desc,
                  m.queued_at desc
         limit 120`);
@@ -146,10 +151,10 @@ export async function loadRegistre(
     const compte = await c.query(
       `select
          count(*) filter (
-           where status in ('echoue', 'injoignable')
+           where status in ('echoue', 'injoignable', 'sans_credit')
              and resolution is null)::int as a_traiter,
          count(*) filter (
-           where status in ('echoue', 'injoignable')
+           where status in ('echoue', 'injoignable', 'sans_credit')
              and queued_at::date = current_date)::int as echecs_jour,
          count(*) filter (
            where status = 'envoye' and queued_at::date = current_date)::int as envoyes_jour
@@ -246,7 +251,17 @@ export async function renvoyer(user: SessionUser, messageId: string): Promise<Is
       + "prochaine absence partira. En attendant, appelez la famille et "
       + "marquez-le ici." };
   }
-  if (cible.status !== "echoue") {
+  /* LE CRÉDIT ÉPUISÉ SE RENVOIE, LUI — une fois rechargé. Et s'il ne l'est
+     pas, le refus doit le dire au lieu de laisser croire qu'on a réessayé. */
+  if (cible.status === "sans_credit") {
+    const solde = await withSchool(schoolId, async (c) => Number(
+      (await c.query(`select solde from credit_sms()`)).rows[0]?.solde ?? 0));
+    if (solde < Number(cible.segments ?? 1)) {
+      return { error: "Le crédit SMS est toujours épuisé : ce message ne "
+        + "partirait pas davantage qu'hier. Rechargez le crédit, ou appelez la "
+        + "famille et marquez-le ici." };
+    }
+  } else if (cible.status !== "echoue") {
     return { error: "Ce message est parti : il n'y a rien à renvoyer." };
   }
   if (cible.resolution) {
@@ -342,9 +357,15 @@ const etat = (l: Ligne): string => {
   }
   if (!l.resolution) {
     // Deux mots différents, parce que ce sont deux gestes différents.
-    return l.status === "injoignable"
-      ? `<span class="pill p-bad">Sans numéro</span>`
-      : `<span class="pill p-bad">Non remis</span>`;
+    if (l.status === "injoignable") {
+      return `<span class="pill p-bad">Sans numéro</span>`;
+    }
+    /* TROIS MOTS DIFFÉRENTS, PARCE QUE CE SONT TROIS GESTES DIFFÉRENTS :
+       corriger un numéro, rappeler l'opérateur, ou recharger le crédit. */
+    if (l.status === "sans_credit") {
+      return `<span class="pill p-bad">Crédit épuisé</span>`;
+    }
+    return `<span class="pill p-bad">Non remis</span>`;
   }
   const libelle = LIBELLES[l.resolution] ?? l.resolution;
   return `<span class="pill p-info">${esc(libelle)}</span>`
@@ -467,6 +488,6 @@ export async function messagesEnSouffrance(schoolId: string): Promise<number> {
   return withSchool(schoolId, async (c) =>
     Number((await c.query(
       `select count(*)::int as n from sms_messages
-        where status in ('echoue', 'injoignable')
+        where status in ('echoue', 'injoignable', 'sans_credit')
           and resolution is null`)).rows[0].n));
 }

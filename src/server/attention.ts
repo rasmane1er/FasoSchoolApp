@@ -144,17 +144,48 @@ export async function pointsDAttention(
       });
     }
 
-    const credit = await un(
-      `select coalesce(sum(case when direction = 'achat' then messages
-                                else -messages end), 0)::int as n
-         from sms_credit_ledger`);
+    /* LE SOLDE SE LIT EN UN SEUL ENDROIT. La même somme était recopiée dans
+     * cinq modules, et deux d'entre eux traitaient déjà les ajustements
+     * autrement. */
+    const credit = await un(`select solde as n from credit_sms()`);
     if (credit < 100) {
       points.push({
         gravite: credit <= 0 ? "bloquant" : "important",
+        /* CETTE PHRASE ÉTAIT FAUSSE AU MOMENT OÙ ELLE S'AFFICHAIT.
+         *
+         * « Plus aucune famille n'est prévenue » : on vidait le crédit, on
+         * faisait l'appel avec trois absents, et le produit répondait « 3 SMS
+         * envoyés pour 24 F » en portant le solde à MOINS TROIS. C'est
+         * l'image inversée du dépassement de plafond — là un écran nommait une
+         * sanction et le bouton passait quand même ; ici il annonçait une
+         * conséquence qui n'arrivait pas. Les deux apprennent la même chose à
+         * celui qui lit : que le rouge ne veut rien dire.
+         *
+         * L'appel s'arrête désormais au crédit, et la phrase est vraie. */
         texte: credit <= 0
-          ? "Le crédit SMS est épuisé : plus aucune famille n'est prévenue."
+          ? "Le crédit SMS est épuisé : l'appel sera enregistré, mais plus"
+            + " aucune famille ne sera prévenue."
           : `Il reste ${credit} SMS. À ce rythme le crédit tombera pendant le trimestre.`,
         action: "Voir", lien: "/absences", droit: "faire_appel",
+      });
+    }
+
+    /* LES FAMILLES RESTÉES SANS NOUVELLE FAUTE DE CRÉDIT.
+     *
+     * La doctrine existait déjà, mot pour mot, pour la famille sans numéro :
+     * « un message non remis n'est pas une ligne de journal, c'est une
+     * tâche ». Elle n'avait pas été appliquée au cas où c'est l'ÉCOLE, et non
+     * la famille, qui est hors d'atteinte. Ce point s'éteint quand le message
+     * part enfin — pas quand quelqu'un le lit. */
+    const orphelines = await un(
+      `select count(*)::int as n from familles_sans_credit()`);
+    if (orphelines > 0) {
+      points.push({
+        gravite: "bloquant",
+        texte: `${plural(orphelines, "famille croit", "familles croient")}`
+          + " son enfant présent : le SMS d'absence n'est jamais parti, faute"
+          + " de crédit, et personne ne l'a rattrapé.",
+        action: "Voir le suivi", lien: "/messages", droit: "faire_appel",
       });
     }
 

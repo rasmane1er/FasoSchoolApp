@@ -1223,6 +1223,27 @@ async function absencesPage(user: SessionUser, url: URL, flash?: string,
     ? `<div class="note bad">Cette date n'est pas une date. Voici aujourd'hui.</div>`
     : "";
 
+  /* LE CRÉDIT SE DIT À CELUI QUI LE DÉPENSE.
+   *
+   * Le point d'attention sur le crédit épuisé vivait sur l'écran d'accueil.
+   * Or celui qui fait l'appel, à 7 h 30, la classe devant lui, est la seule
+   * personne qui dépense ce crédit — et la seule à qui on ne le disait pas.
+   * Pire : le tableau de bord annonçait « plus aucune famille n'est
+   * prévenue » pendant que l'appel en prévenait trois. */
+  const solde = await withSchool(schoolId, async (c) =>
+    Number((await c.query(`select solde from credit_sms()`)).rows[0]?.solde ?? 0));
+  const carteCredit = solde <= 0
+    ? `<div class="note bad"><b>Crédit SMS épuisé.</b> L'appel sera enregistré —
+        c'est lui le document — mais <b>aucune famille ne sera prévenue</b>.
+        Chaque absence sera inscrite au suivi des messages avec le texte qu'on
+        aurait envoyé, pour que quelqu'un puisse appeler.
+        <a href="/messages"><b>Voir le suivi</b></a>.</div>`
+    : solde < Math.max(5, d.students.length)
+    ? `<div class="note warn"><b>Il reste ${plural(solde, "SMS")}</b> — moins
+        qu'une classe. Les absences au-delà seront enregistrées sans que la
+        famille soit prévenue, et nommées dans la confirmation.</div>`
+    : "";
+
   if (!verdict.ouvert) {
     return page(chrome, "Absences", `
       <div class="row"><div><h1>Appel</h1></div>${selector}</div>
@@ -1275,6 +1296,7 @@ async function absencesPage(user: SessionUser, url: URL, flash?: string,
       <p style="margin:0;color:var(--muted)">${plural(d.students.length, "élève")} — ${new Date(date).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</p>
       </div>${selector}</div>
     ${alerte}
+    ${carteCredit}
     ${refus ? `<div class="note bad">${esc(refus)}</div>` : ""}
     ${flash ? `<div class="ok">${esc(flash)}</div>` : ""}
     <form method="post" action="/absences?classe=${esc(classId)}&amp;date=${esc(date)}">
@@ -1291,7 +1313,11 @@ async function absencesPage(user: SessionUser, url: URL, flash?: string,
 
 async function saveAbsences(user: SessionUser, url: URL, form: URLSearchParams):
   Promise<{ absents: number; queued: number; cost: number; injoignables: number;
-            dementis: number; dementisRates: number; sansObjet: number }
+            dementis: number; dementisRates: number; sansObjet: number;
+            /** Les familles joignables qu'on n'a PAS prévenues, faute de
+             *  crédit. Des noms, pas un compte : « 2 familles » envoie
+             *  chercher lesquelles dans une liste de quarante. */
+            sansCredit: string[] }
          | { refus: string } | null> {
   // Comme pour les notes : le contrôle est à l'écriture, pas à l'affichage.
   const perimetreAppel = await perimetreDe(user);
@@ -1336,6 +1362,17 @@ async function saveAbsences(user: SessionUser, url: URL, form: URLSearchParams):
 
     let absents = 0, queued = 0, cost = 0, injoignables = 0;
     let dementis = 0, dementisRates = 0, sansObjet = 0;
+
+    /* LE SOLDE, LU UNE FOIS, DÉCOMPTÉ AU FUR ET À MESURE.
+     *
+     * Lu une fois : deux appels lancés en même temps par deux surveillants
+     * pourraient dépasser de quelques messages, et c'est acceptable — ce qui
+     * ne l'est pas, c'est de descendre de quarante sans le savoir. Décompté au
+     * fur et à mesure : sinon la vingtième famille d'une classe de vingt
+     * partirait alors que le crédit s'est épuisé à la douzième. */
+    let soldeRestant = Number((await c.query(
+      `select solde from credit_sms()`)).rows[0]?.solde ?? 0);
+    const sansCredit: string[] = [];
 
     for (const [name, status] of form) {
       if (!name.startsWith("s_")) continue;
@@ -1482,7 +1519,42 @@ async function saveAbsences(user: SessionUser, url: URL, form: URLSearchParams):
       }
 
       const segments = countSegments(body);
+
+      /* LE CRÉDIT EST LU AVANT DE COMPOSER, PAS APRÈS.
+       *
+       * Rien ne le lisait. Le tableau de bord annonçait « le crédit SMS est
+       * épuisé : plus aucune famille n'est prévenue », et l'appel suivant en
+       * prévenait trois, en portant le solde à MOINS TROIS. La phrase était
+       * fausse au moment où elle s'affichait.
+       *
+       * Un solde qui descend sous zéro n'est pas un solde : l'école a acheté
+       * N messages à l'opérateur, et au-delà c'est l'opérateur qui refuse. La
+       * comptabilité du produit divergeait alors de la sienne en silence — et
+       * avec le canal simulé, où tout « réussit », la divergence ne se voyait
+       * qu'au premier vrai matin.
+       *
+       * On n'empêche PAS l'appel : une absence se consigne même sans crédit,
+       * le registre est le document et le SMS la politesse. On écrit la ligne
+       * qu'on aurait envoyée, on la marque `sans_credit` — pas `injoignable`,
+       * qui dirait que c'est la FAMILLE qui n'a pas de numéro et enverrait
+       * quelqu'un vérifier un numéro qui n'a rien — et on la nomme. */
+      if (soldeRestant < segments) {
+        sansCredit.push(
+          `${eleve.rows[0]?.last_name ?? ""} ${eleve.rows[0]?.first_names ?? ""}`.trim());
+        await c.query(
+          `insert into sms_messages (school_id, student_id, guardian_id, to_phone,
+                                     body, segments, cost_fcfa, status,
+                                     error_detail, attendance_record_id)
+           values ($1,$2,$3,$4,$5,$6,0,'sans_credit',$7,$8)`,
+          [schoolId, studentId, row.guardian_id, row.phone, body, segments,
+           "Crédit SMS épuisé : le message n'a pas été composé. La famille est "
+             + "joignable — rechargez le crédit, ou appelez-la.",
+           recordId]);
+        continue;
+      }
+
       const result = await sms.send({ to: row.phone, body, schoolId, studentId });
+      if (result.ok) soldeRestant -= segments;
 
       await c.query(
         `insert into sms_messages (school_id, student_id, guardian_id, to_phone, body,
@@ -1528,7 +1600,7 @@ async function saveAbsences(user: SessionUser, url: URL, form: URLSearchParams):
                                                sansObjet })]);
 
     return { absents, queued, cost, injoignables, dementis, dementisRates,
-             sansObjet };
+             sansObjet, sansCredit };
   });
 }
 
@@ -1840,6 +1912,22 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
             + " est close, personne n'appellera pour rien."
           : ` ${r.sansObjet} tâches du suivi des messages annonçaient ces`
             + " absences : elles sont closes.",
+        /* LE CRÉDIT ÉPUISÉ SE DIT AU MOMENT DU GESTE, ET AVEC DES NOMS.
+         *
+         * Le tableau de bord annonçait « plus aucune famille n'est prévenue »
+         * pendant que l'appel en prévenait trois et portait le solde à moins
+         * trois. Maintenant que le produit s'arrête, il doit dire QUI est
+         * resté sans nouvelle : « 2 familles » envoie chercher lesquelles
+         * dans une liste de quarante. */
+        r.sansCredit.length === 0 ? "" : r.sansCredit.length === 1
+          ? ` La famille de ${r.sansCredit[0]} n'a PAS été prévenue : le crédit`
+            + " SMS est épuisé. Elle est joignable — rechargez le crédit, ou"
+            + " appelez-la. Elle est en tête du suivi des messages."
+          : ` ${r.sansCredit.length} familles n'ont PAS été prévenues, le crédit`
+            + ` SMS étant épuisé : ${r.sansCredit.slice(0, 4).join(", ")}`
+            + `${r.sansCredit.length > 4 ? "…" : ""}. Elles sont joignables —`
+            + " rechargez le crédit, ou appelez-les. Elles sont en tête du"
+            + " suivi des messages.",
       ].join("");
       return html(res, await absencesPage(user, url,
         `Appel enregistré : ${plural(r.absents, "absence")}, ${plural(r.queued, "SMS envoyé", "SMS envoyés")} pour ${r.cost} F.${repris}${manque}`));
