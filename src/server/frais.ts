@@ -25,7 +25,7 @@
  * qu'elle en doit 92 000 parce qu'une ligne a bougé.
  */
 
-import { withSchool } from "../lib/db.ts";
+import { withSchool, sansDoublon } from "../lib/db.ts";
 import { page, esc, fcfa, plural, type PageChrome } from "./html.ts";
 import { remisePour } from "./bourses.ts";
 import type { SessionUser } from "./session.ts";
@@ -161,20 +161,23 @@ export async function addSchedule(
   const v = await loadFrais(user.schoolId!);
   if (!v) return { error: "Aucune année scolaire ouverte." };
 
-  return withSchool(user.schoolId!, async (c) => {
+  /* DEUX GRILLES POUR LE MÊME NIVEAU, C'EST DEUX FACTURES POUR LE MÊME
+   * ENFANT. La lecture ci-dessous ne protégeait rien : entre elle et
+   * l'écriture, un second clic passe. Depuis 0032 la base refuse, et le refus
+   * rend le MÊME message que la lecture. */
+  const dejaLa = level
+    ? `Une grille existe déjà pour ce niveau.`
+    : `Une grille « tous niveaux » existe déjà.`;
+  return sansDoublon(dejaLa, () => withSchool(user.schoolId!, async (c) => {
     const dup = await c.query(
       `select 1 from fee_schedules where academic_year_id = $1
          and level_code is not distinct from $2`, [v.yearId, level]);
-    if (dup.rowCount! > 0) {
-      return { error: level
-        ? `Une grille existe déjà pour ce niveau.`
-        : `Une grille « tous niveaux » existe déjà.` };
-    }
+    if (dup.rowCount! > 0) return { error: dejaLa };
     await c.query(
       `insert into fee_schedules (school_id, academic_year_id, level_code, label)
        values (current_school_id(), $1, $2, $3)`, [v.yearId, level, label]);
     return { flash: `Grille « ${label} » créée.` };
-  });
+  }));
 }
 
 export async function addLine(

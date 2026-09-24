@@ -129,7 +129,8 @@ psql "$CIBLE" -v ON_ERROR_STOP=1 -q \
   -f db/migrations/0028_le_plafond_declare.sql \
   -f db/migrations/0029_l_histoire_d_une_note.sql \
   -f db/migrations/0030_le_credit_qui_ne_retient_rien.sql \
-  -f db/migrations/0031_le_produit_change_de_nom.sql
+  -f db/migrations/0031_le_produit_change_de_nom.sql \
+  -f db/migrations/0032_une_verification_n_est_pas_une_contrainte.sql
 echo "migrations appliquées"
 
 echo

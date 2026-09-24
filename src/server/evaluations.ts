@@ -24,7 +24,7 @@
  *   faut d'abord vider les notes, et l'écran le dit.
  */
 
-import { withSchool } from "../lib/db.ts";
+import { withSchool, sansDoublon } from "../lib/db.ts";
 import { esc, plural } from "./html.ts";
 import { perimetreDe, peutMatiere, voitTout } from "./services.ts";
 import type { SessionUser } from "./session.ts";
@@ -141,7 +141,13 @@ export async function createEvaluation(
     return { error: "Classe, matière ou trimestre manquant." };
   }
 
-  return withSchool(schoolId, async (c) => {
+  /* LE MÊME DEVOIR COMPTÉ DEUX FOIS FAUSSE UNE MOYENNE SANS QU'UNE SEULE NOTE
+   * SOIT FAUSSE — et c'est la moyenne qu'une famille conteste. La garde plus
+   * bas est une lecture, et une lecture ne protège rien : entre elle et
+   * l'écriture, un second clic passe. Depuis 0032 la base refuse, et le refus
+   * rend la même phrase que la garde. */
+  return sansDoublon("Cette évaluation existe déjà à cette date.", () =>
+    withSchool(schoolId, async (c) => {
     const ctx = await c.query(
       `select cl.level_code, cl.academic_year_id, t.id as term_id, t.status
          from classes cl
@@ -193,12 +199,12 @@ export async function createEvaluation(
     if (creees === 0) {
       return { error: "Cette évaluation existe déjà à cette date." };
     }
-    return {
-      flash: type === "composition"
-        ? `Composition ouverte pour ${plural(creees, "classe", "classes")} du niveau.`
-        : "Évaluation créée.",
-    };
-  });
+      return {
+        flash: type === "composition"
+          ? `Composition ouverte pour ${plural(creees, "classe", "classes")} du niveau.`
+          : "Évaluation créée.",
+      };
+    }));
 }
 
 export async function deleteEvaluation(

@@ -19,7 +19,7 @@
  *    culture. Les dates de fin ne sont donc jamais déduites d'une constante.
  */
 
-import { withSchool } from "../lib/db.ts";
+import { withSchool, sansDoublon } from "../lib/db.ts";
 import { page, esc, plural, type PageChrome } from "./html.ts";
 import type { SessionUser } from "./session.ts";
 
@@ -303,7 +303,14 @@ export async function addClass(
 
   if (!yearId || !level) return { error: "Choisissez une année et un niveau." };
 
-  return withSchool(schoolId, async (c) => {
+  /* LA LECTURE DIT « existe déjà » ; LA BASE LE REFUSE. Dix clics simultanés
+   * créaient six « 6e Z » : six avaient lu avant qu'aucune n'ait écrit. La
+   * garde en lecture reste — elle rend le bon message sans faire échouer une
+   * transaction — et `sansDoublon` rattrape les gestes qui se croisent malgré
+   * elle, avec LE MÊME message : à qui l'on répond « erreur », on ne dit pas
+   * si son geste est passé, et il recommence. */
+  return sansDoublon("Cette classe existe déjà.", () =>
+    withSchool(schoolId, async (c) => {
     const lv = await c.query(`select code, label, cycle from levels where code = $1`, [level]);
     if (lv.rowCount === 0) return { error: "Niveau inconnu." };
 
@@ -334,8 +341,8 @@ export async function addClass(
       `insert into audit_log (school_id, actor_id, action, target_type, detail)
        values (current_school_id(), $1, 'class.create', 'class', $2)`,
       [user.userId, JSON.stringify({ label })]);
-    return { flash: `Classe ${label} créée.` };
-  });
+      return { flash: `Classe ${label} créée.` };
+    }));
 }
 
 /** « 6E » → « 6e », « TLE » → « Tle », « CP1 » → « CP1 ». */

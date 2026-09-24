@@ -428,18 +428,29 @@ export async function saveDeliberation(
                decided_on = excluded.decided_on, recorded_by = excluded.recorded_by`,
         [r.studentId, deliberation.yearId, raw, appreciation, staffId]);
 
-      // Le livret est cumulatif : une ligne par élève et par année, corrigée
-      // si le conseil revient sur sa décision, jamais dupliquée.
+      /* Le livret est cumulatif : une ligne par élève et par année, corrigée
+       * si le conseil revient sur sa décision, jamais dupliquée.
+       *
+       * CE FILTRE DISAIT AUTRE CHOSE QUE L'AUTRE CHEMIN. Il ne regardait que
+       * les lignes NON externes, alors que l'import d'une scolarité extérieure
+       * refuse l'année quelle qu'elle soit : une année déjà portée par un
+       * transfert recevait donc ici une SECONDE ligne, et le livret — que
+       * l'élève emporte — affichait deux fois la même année. La migration 0032
+       * tranche : une ligne par (élève, année). Le conseil corrige alors la
+       * ligne existante, et dit que l'année s'est passée ICI — sinon elle
+       * resterait au nom de l'autre établissement. */
       const existing = await c.query(
         `select id from livret_entries
-          where student_id = $1 and academic_year_label = $2 and not is_external`,
+          where student_id = $1 and academic_year_label = $2`,
         [r.studentId, deliberation.yearLabel]);
       if (existing.rowCount! > 0) {
         await c.query(
           `update livret_entries set moyenne_annuelle = $2, decision = $3,
-                                     level_code = $4
+                                     level_code = $4, school_name = $5,
+                                     is_external = false
             where id = $1`,
-          [existing.rows[0].id, r.moyenneAnnuelle, raw, deliberation.levelCode]);
+          [existing.rows[0].id, r.moyenneAnnuelle, raw, deliberation.levelCode,
+           schoolName]);
       } else {
         await c.query(
           `insert into livret_entries

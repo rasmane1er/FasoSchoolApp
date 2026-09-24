@@ -58,6 +58,7 @@ const MIGRATIONS = [
   "0017_echeancier", "0018_recu_fige", "0019_arrivee_en_cours_annee", "0020_fetes_au_dela_de_2028",
   "0021_dementi_absence", "0022_regle_de_passage_datee", "0023_assiduite_de_l_annee", "0024_ce_qui_est_clos_est_clos", "0025_entre_deux_trimestres", "0026_double_clic_au_guichet",
   "0027_annuler_une_facture", "0028_le_plafond_declare", "0029_l_histoire_d_une_note", "0030_le_credit_qui_ne_retient_rien", "0031_le_produit_change_de_nom",
+  "0032_une_verification_n_est_pas_une_contrainte",
 ];
 
 const BASE_SANS_0009 = `schoolfaso_sans_0009_${process.pid}`;

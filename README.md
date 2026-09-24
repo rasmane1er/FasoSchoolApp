@@ -1008,6 +1008,74 @@ compte Google.
 `Dockerfile`, `railway.json`, `DEPLOIEMENT.md`,
 `tests/deploiement.e2e.mjs` (41 assertions), `package-lock.json`.
 
+### Six classes « 6e Z » nées d'un seul geste
+
+Trouvé en cliquant plusieurs fois sur « Ajouter la classe », ce qui, sur une
+connexion lente — celle que ce produit vise —, est le geste humain normal. Dix
+POST simultanés, et la base porte :
+
+```
+classes « 6e Z » : 6
+```
+
+Six classes identiques, six identifiants différents. Le tableau de bord les
+liste six fois avec six effectifs ; les inscriptions se répartissent entre
+elles ; le bulletin d'un élève est calculé dans l'une, l'appel se fait dans une
+autre, et le rang de l'enfant n'a plus de sens.
+
+Le code avait pourtant une garde, correcte et lisible :
+
+```js
+const exists = await c.query(
+  `select 1 from classes where academic_year_id = $1 and label = $2`, [yearId, label]);
+if (exists.rowCount > 0) return { error: `La classe ${label} existe déjà.` };
+```
+
+Elle ne protège rien. Entre le `select` et l'`insert`, une autre requête passe :
+six des dix avaient lu avant qu'aucune n'ait écrit.
+
+**Et ce n'était pas le seul endroit.** Le dépôt a été relu à la recherche de
+cette forme exacte. Sept gardes. Trois avaient une contrainte d'unicité derrière
+elles — `academic_years`, `category_criteria`, `teacher_assignments`. Quatre
+n'en avaient aucune :
+
+| Table | Ce qu'un doublon produit |
+|---|---|
+| `classes` | la classe listée deux fois, les élèves répartis entre les deux |
+| `evaluations` | le même devoir compté deux fois dans une moyenne — un bulletin faux sans qu'une seule note soit fausse |
+| `fee_schedules` | deux grilles pour un niveau, donc deux factures pour le même enfant |
+| `livret_entries` | deux fois la même année sur un document que l'élève emporte |
+
+Quatre sur sept : la protection était jouée à pile ou face. La migration 0032
+pose donc les quatre contraintes **dans la base** et non quatre corrections dans
+quatre fichiers — la même raison qui met le cloisonnement dans le RLS et
+l'histoire d'une note dans un déclencheur.
+
+Deux choses méritent d'être dites sur la façon dont elle s'applique.
+
+**Elle refuse plutôt que de trancher.** Sur une base qui porte déjà des
+doublons, la migration s'arrête, nomme ce qu'elle a trouvé et ne touche aucune
+ligne. Choisir laquelle des deux « 6e A » survit, c'est effacer les élèves de
+l'autre, et *ce qui est sorti de l'établissement ne se rature pas*.
+`doublons_a_trancher()` les liste, pour que ce refus ne soit pas une découverte
+du jour du déploiement.
+
+**Elle a révélé que deux chemins ne disaient pas la même chose.** L'import
+d'une scolarité extérieure refusait une année déjà présente au livret ; le
+conseil de classe, lui, ne regardait que les lignes non externes, et pouvait
+donc ajouter une seconde ligne pour une année déjà portée par un transfert. Une
+contrainte force à choisir : le livret est un document que l'élève emporte, une
+année ne s'y lit qu'une fois, et le conseil corrige désormais la ligne
+existante en disant que l'année s'est passée ici.
+
+Côté écran, un refus de la base rend la phrase de la garde, jamais « erreur » :
+à un directeur à qui l'on répond « erreur », on ne dit pas si son geste est
+passé, et il recommence. `tests/doublons.e2e.mjs` (19 assertions) éprouve les
+dix clics, **sait échouer** — l'index retiré, les six reviennent —, vérifie que
+la migration refuse sans rien toucher, et relit le dépôt : toute garde de cette
+forme doit avoir une contrainte derrière elle, ou écrire `-- doublon:` avec la
+raison pour laquelle il n'en faut pas.
+
 ### L'image copiait un fichier que le dépôt n'a jamais contenu
 
 Trouvé dans les journaux de construction de la première mise en ligne réelle.
@@ -2521,6 +2589,7 @@ qu'ils ont trouvé, dans les sections qui précèdent.
 | suite | ce qu'elle prouve |
 |---|---|
 | `test:credit-epuise` (22) | le crédit épuisé arrête l'envoi au lieu de le nier, le solde ne descend plus sous zéro, et les familles restées sans nouvelle sont nommées — pas comptées |
+| `test:doublons` (19) | dix clics simultanés ne créent qu'une classe, la suite sait échouer sans l'index, la migration refuse sur une base qui porte des doublons sans toucher une ligne, et un lint relit le dépôt : une garde « existe déjà ? » sans contrainte derrière elle est un défaut |
 | `test:deploiement` (41) | les en-têtes de sécurité couvrent toute forme de réponse, aucun gestionnaire d'événement en ligne ne rend un geste inerte, toutes les migrations sauf la fondatrice se rejouent, les quatre listes disent la même chose que le répertoire, et **tout fichier que l'image copie est un fichier que le dépôt contient** — demandé à `git ls-files`, jamais au disque |
 | `test:histoire-note` (26) | une note modifiée ou effacée laisse son histoire quel que soit le chemin — écran, appareil, import, arbitrage, `psql` — et l'effacement n'emporte plus la preuve que la note a existé |
 | `test:plafond-declare` (34) | le produit n'écrit plus « déclaré » sur un dossier que rien n'a fait sortir, le plafond ne bouge plus sans nom ni motif, et une grille au-dessus du plafond fait refuser l'émission au lieu de l'avertir |
@@ -2726,6 +2795,19 @@ L'image de production téléchargeait un paquet au moment de se construire, pour
 un outil dont le seul rôle était d'exécuter du SQL que sa propre dépendance
 sait exécuter. Une dépendance réseau au moment du démarrage transforme la panne
 de quelqu'un d'autre en panne de l'école.
+
+**Une lecture n'est jamais la protection non plus.** La première règle de ce
+dépôt dit qu'un affichage ne protège rien. Un cran plus bas, une garde écrite
+`select 1 … if (existe) return "existe déjà"` ne protège pas davantage : entre
+la lecture et l'écriture, une autre requête passe. Dix clics simultanés sur
+« Ajouter la classe » créaient six « 6e Z ». Le dépôt portait sept gardes de
+cette forme ; quatre n'avaient aucune contrainte derrière elles — la protection
+était jouée à pile ou face. Ce qui protège, c'est ce que la base refuse, et
+c'est pourquoi `tests/doublons.e2e.mjs` relit le dépôt à chaque `check:all`
+plutôt que de laisser une note dans un commentaire. Corollaire à l'écran : un
+refus de la base doit rendre la phrase de la garde — « cette classe existe
+déjà » — et jamais « erreur », car à qui l'on répond « erreur » on ne dit pas
+si son geste est passé, et il recommence.
 
 **Ce qu'une recette copie, le dépôt doit le contenir — et c'est à git qu'on le
 demande, pas au disque.** L'image de production faisait

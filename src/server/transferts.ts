@@ -19,7 +19,7 @@
  * lieu de le faire redoubler par défaut.
  */
 
-import { withSchool } from "../lib/db.ts";
+import { withSchool, sansDoublon } from "../lib/db.ts";
 import { page, esc, fr, plural, accord, type PageChrome } from "./html.ts";
 import type { SessionUser } from "./session.ts";
 
@@ -202,7 +202,11 @@ export async function addLivretEntry(
     moyenne = n;
   }
 
-  return withSchool(user.schoolId!, async (c) => {
+  /* LE LIVRET EST UN DOCUMENT QUE L'ÉLÈVE EMPORTE : une année ne s'y lit
+   * qu'une fois. La lecture dit « déjà porté » ; depuis 0032 la base le
+   * refuse, et l'écran dit la même phrase dans les deux cas. */
+  return sansDoublon(`Le livret porte déjà l'année ${annee}.`, () =>
+    withSchool(user.schoolId!, async (c) => {
     const dup = await c.query(
       `select 1 from livret_entries
         where student_id = $1 and academic_year_label = $2`, [studentId, annee]);
@@ -215,8 +219,8 @@ export async function addLivretEntry(
                                    decision, is_external)
        values (current_school_id(), $1, $2, $3, $4, $5, $6, true)`,
       [studentId, annee, niveau, ecole, moyenne, decision]);
-    return { flash: `Année ${annee} ajoutée au livret.`, studentId };
-  });
+      return { flash: `Année ${annee} ajoutée au livret.`, studentId };
+    }));
 }
 
 // ---------------------------------------------------------------------------
