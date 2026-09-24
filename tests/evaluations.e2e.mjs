@@ -15,6 +15,7 @@
 import { spawn } from "node:child_process";
 import { chromium } from "playwright";
 import pg from "pg";
+import { emprunterLesNotes } from "./notes-epreuve.mjs";
 import { emprunterCalendrier } from "./calendrier-epreuve.mjs";
 
 const PORT = 4204;
@@ -41,6 +42,11 @@ await client.connect();
 const calendrier = await emprunterCalendrier(client);
 const { rows: sc } = await client.query(`select school_id from auth_lookup_user('70000001')`);
 await client.query(`select set_config('fasoschool.school_id', $1, false)`, [sc[0].school_id]);
+
+/* L'HISTOIRE DES NOTES EST ÉCRITE PAR LA BASE (0029) : écrire une note
+ * pour éprouver un écran, puis la remettre, laisse deux lignes derrière
+ * soi. On les emprunte, on les rend. */
+const notesEmpruntees = await emprunterLesNotes(client);
 await client.query(`delete from auth_rate_limits`);
 await client.query(`delete from auth_otp_challenges`);
 await client.query(`delete from auth_sessions`);
@@ -266,6 +272,7 @@ try {
   server.kill();
   await purge().catch(() => {});
   await client.query(`delete from auth_rate_limits`).catch(() => {});
+  await notesEmpruntees.rendre().catch(() => {});
   await client.end();
 }
 

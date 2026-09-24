@@ -39,9 +39,30 @@ const dossierId = dos[0].id;
 const { rows: depart } = await client.query(
   `select id, awarded_points, evidence_key from category_criteria
     where category_assessment_id = $1`, [dossierId]);
+/* L'EN-TÊTE DU DOSSIER SE REND À UNE VALEUR CONNUE, PAS À LA PHOTO.
+ *
+ * Cette suite écrit une catégorie et un plafond, puis les rendait à ce
+ * qu'elle avait relevé au départ. Si un tour précédent avait laissé une
+ * catégorie, la photo l'enregistrait comme la normale et le `finally` la
+ * rendait — pour toujours. La plainte est sortie deux suites plus loin, dans
+ * celle du plafond déclaré, qui refuse de partir d'un dossier déjà rempli.
+ *
+ * Le jeu de démonstration sème un dossier VIERGE : ni catégorie, ni plafond,
+ * et le statut « brouillon ». C'est cela qu'on rend, et on refuse de partir
+ * d'autre chose. */
 const { rows: entete } = await client.query(
-  `select category, declared_ceiling_fcfa from category_assessments where id = $1`,
+  `select category, declared_ceiling_fcfa, status from category_assessments where id = $1`,
   [dossierId]);
+if (entete[0].declared_ceiling_fcfa !== null
+    || entete[0].status !== "brouillon") {
+  console.error(
+    `Le dossier de catégorisation n'est pas vierge : `
+    + `${JSON.stringify(entete[0])}.\nCette suite y écrit une catégorie et un `
+    + `plafond ; elle ne peut pas distinguer son propre reste du jeu semé. `
+    + `Relancez « npm run demo ».`);
+  await client.end();
+  process.exit(1);
+}
 
 const CODE_TEST = "ZTEST";
 const purge = async () => {
@@ -220,9 +241,18 @@ try {
       `update category_criteria set awarded_points = $2, evidence_key = $3 where id = $1`,
       [c.id, c.awarded_points, c.evidence_key]).catch(() => {});
   }
+  /* ON REND À LA VALEUR SEMÉE, pas à la photo prise au début : une photo
+   * recopie la fuite du tour précédent et la rend éternelle. La démonstration
+   * sème une catégorie 2 — lue dans l'arrêté par le chef d'établissement — et
+   * aucun plafond. */
   await client.query(
-    `update category_assessments set category = $2, declared_ceiling_fcfa = $3 where id = $1`,
-    [dossierId, entete[0].category, entete[0].declared_ceiling_fcfa]).catch(() => {});
+    `update category_assessments
+        set category = 2, declared_ceiling_fcfa = null, status = 'brouillon',
+            declared_on = null, declared_by = null
+      where id = $1`, [dossierId]).catch(() => {});
+  await client.query(
+    `delete from category_ceiling_changes where category_assessment_id = $1`,
+    [dossierId]).catch(() => {});
   await purge().catch(() => {});
   await client.query(`delete from auth_rate_limits`).catch(() => {});
   await client.end();

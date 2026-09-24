@@ -200,6 +200,27 @@ export async function pointsDAttention(
       });
     }
 
+    /* DES NOTES EFFACÉES DEPUIS LE DERNIER CONSEIL.
+     *
+     * Effacer une note ne laissait rien : ni compte à l'écran — « 0 note
+     * enregistrée », le message exact de « il ne s'est rien passé » — ni
+     * ligne d'histoire, puisque la clé étrangère de l'historique portait
+     * « on delete cascade ». Le geste reste légitime ; il cesse d'être
+     * invisible. */
+    const effacees = await un(
+      `select count(*)::int as n from grade_entry_revisions r
+        where r.action = 'suppression'
+          and r.recorded_at > now() - interval '7 days'`);
+    if (effacees > 0) {
+      points.push({
+        gravite: "a_faire",
+        texte: `${plural(effacees, "note a été effacée", "notes ont été effacées")}`
+          + " cette semaine : c'est un geste légitime, mais il change une"
+          + " moyenne et il vaut d'être relu avant le conseil.",
+        action: "Voir les notes", lien: "/notes", droit: "voir_notes",
+      });
+    }
+
     /* UNE GRILLE DE FRAIS AU-DESSUS DU PLAFOND.
      *
      * L'écran des frais imprimait déjà l'écart en rouge — et le bouton

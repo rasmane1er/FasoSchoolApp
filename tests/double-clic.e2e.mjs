@@ -129,9 +129,22 @@ const etat = async (inv) => (await client.query(
 
 try {
   const cookie = await login("70000004");   // économe
+  /* UNE FACTURE QUI A DE LA PLACE. Cette suite versait sur « la première
+   * facture par identifiant » — un ordre que rien ne garantit, puisque les
+   * identifiants sont des UUID : au premier resemis, elle est tombée sur une
+   * facture déjà soldée et onze assertions ont accusé la garde anti-doublon
+   * d'un défaut qui n'était pas le sien. Une suite dont le résultat dépend de
+   * l'ordre d'identifiants tirés au hasard n'est pas une épreuve. */
   const { rows: inv } = await client.query(
-    `select i.id, i.total_fcfa from invoices i
-      where i.status <> 'annulee' order by i.id limit 1`);
+    `select i.id, i.total_fcfa, (i.total_fcfa - montant_regle(i.id))::int as reste
+       from invoices i
+      where i.status <> 'annulee' and i.total_fcfa - montant_regle(i.id) >= 30000
+      order by i.reference limit 1`);
+  if (inv.length === 0) {
+    console.error("Il faut une facture avec au moins 30 000 F de reste : "
+      + "lancez « npm run demo ».");
+    server.kill(); process.exit(1);
+  }
   const F = inv[0].id;
 
   const encaisser = (montant, methode = "especes") =>

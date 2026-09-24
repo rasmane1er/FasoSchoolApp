@@ -159,6 +159,9 @@ export async function applyMutations(
         continue;
       }
 
+      /* D'OÙ PARLE CE CODE : une note remontée d'un appareil. Le déclencheur
+       * `tracer_note()` lit ce réglage comme le RLS lit `school_id`. */
+      await c.query(`select set_config('fasoschool.grade_source', 'offline', true)`);
       const up = await c.query(
         `insert into grade_entries (school_id, evaluation_id, student_id, score, is_absent,
                                     is_justified, mutation_id, device_id, recorded_by, updated_at)
@@ -171,12 +174,13 @@ export async function applyMutations(
         [schoolId, m.evaluationId, m.studentId, m.score, m.isAbsent,
          m.mutationId, m.deviceId, staffId]);
 
-      // Append-only : la réponse au parent qui conteste une note.
-      await c.query(
-        `insert into grade_entry_revisions (school_id, grade_entry_id, score, is_absent,
-                                            source, device_id, recorded_by)
-         values ($1,$2,$3,$4,'offline',$5,$6)`,
-        [schoolId, up.rows[0].id, m.score, m.isAbsent, m.deviceId, staffId]);
+      /* L'HISTOIRE N'EST PLUS ÉCRITE ICI. Elle l'était, et c'était justement le
+       * défaut : deux chemins d'écriture sur trois la tenaient, et le
+       * troisième — l'écran des notes, par lequel passe la quasi-totalité des
+       * notes d'une année — ne la tenait pas. Le déclencheur `tracer_note()`
+       * s'en charge désormais pour tous les chemins, y compris ceux qu'on
+       * écrira l'an prochain. Le code ne fait plus que DIRE D'OÙ IL PARLE,
+       * ci-dessus, comme il dit déjà de quel établissement il parle. */
 
       await c.query(
         `insert into sync_mutations (school_id, mutation_id, device_id, actor_id,
@@ -275,14 +279,13 @@ export async function resolveConflict(
 
     if (choice === "appareil") {
       const d = r.rows[0].device_payload;
+      /* D'OÙ PARLE CE CODE : un arbitrage de conflit par le censeur. */
+      await c.query(`select set_config('fasoschool.grade_source', 'correction', true)`);
       await c.query(
         `update grade_entries set score = $2, is_absent = $3, updated_at = now()
           where id = $1`, [r.rows[0].entity_id, d.score, d.isAbsent === true]);
-      await c.query(
-        `insert into grade_entry_revisions (school_id, grade_entry_id, score, is_absent,
-                                            source, recorded_by)
-         values ($1,$2,$3,$4,'correction',$5)`,
-        [schoolId, r.rows[0].entity_id, d.score, d.isAbsent === true, staffId]);
+      /* Idem : c'est `tracer_note()` qui écrit, et la source a été déclarée
+       * juste avant l'`update`. */
     }
 
     await c.query(

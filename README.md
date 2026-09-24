@@ -793,6 +793,103 @@ saisit quarante notes, le réseau tombe, tout est perdu. Ici :
 4. Sans JavaScript, le formulaire se poste normalement. Le hors-ligne est une
    amélioration, jamais une dépendance.
 
+### « La réponse au parent qui conteste une note », et elle n'existait que hors ligne
+
+Trouvé en lisant qui alimente `grade_entry_revisions`. La table porte, dans le
+code qui l'écrit, ce commentaire :
+
+```
+// Append-only : la réponse au parent qui conteste une note.
+```
+
+Deux endroits l'écrivaient, et les deux sont le chemin **hors ligne** — la
+synchronisation d'un appareil, l'arbitrage d'un conflit. Le chemin **normal**,
+celui par lequel passe la quasi-totalité des notes d'une année, un enseignant
+qui tape sur l'écran des notes, n'écrivait rien.
+
+Éprouvé sur le produit qui tourne :
+
+- on remplace 14,50 par 19 : la note change, `grade_entry_revisions` reste à
+  **zéro ligne** ;
+- on vide la case : `delete from grade_entries`, la ligne disparaît, et l'écran
+  annonce **« 0 note enregistrée »** — le message exact de *il ne s'est rien
+  passé*. `saved` n'était pas incrémenté, aucun refus n'était signalé ;
+- le journal garde `{"classe": "…", "saisies": 0}`. Un compte. Ni l'élève, ni
+  la valeur d'avant.
+
+Le jeu de démonstration portait **288 notes et 0 révision**. Une année entière.
+
+Et la clé étrangère achevait le travail :
+
+```sql
+grade_entry_id ... references grade_entries(id) on delete cascade
+```
+
+L'histoire d'une note était **câblée pour être détruite par le geste même
+qu'elle existe pour documenter**. Effacer la note effaçait la preuve qu'elle
+avait existé.
+
+**Pourquoi c'est le plus grave des dix-neuf.** Une note est le seul nombre de
+ce produit qu'une famille peut contester, et le seul dont un établissement
+puisse avoir à rendre compte élève par élève. C'est aussi celui qu'il est le
+plus tentant de changer : un redoublement, une bourse, un rang se jouent à un
+demi-point. Un logiciel qui ne sait pas dire qu'une note valait 08 hier ne
+protège ni la famille, ni l'enseignant accusé d'avoir cédé — ni le chef
+d'établissement, qui n'a rien à opposer.
+
+**La règle est posée dans la base, pas dans le code.** La correction évidente
+serait d'ajouter un `insert` à côté des trois endroits qui écrivent une note.
+C'est exactement ce qui a produit le défaut : deux des trois l'avaient. Une
+règle posée dans un fichier ne s'applique pas d'elle-même au fichier d'à côté
+— c'est la leçon du défaut précédent, appliquée avant d'en refaire les frais.
+L'histoire est donc écrite par un **déclencheur**, comme le cloisonnement est
+assuré par le RLS : aucun chemin d'écriture n'y échappe, pas même un `psql`
+ouvert un dimanche soir, ni celui qu'on écrira l'an prochain. Le code ne fait
+plus qu'une chose — **dire d'où il parle**, par un réglage de session, comme
+il dit déjà de quel établissement il parle. Non posé, c'est `online` : un
+oubli doit retomber sur le cas le plus probable, pas sur un refus, et une
+valeur inventée ne doit pas faire échouer l'enregistrement de la note.
+
+Une réécriture à l'identique n'est pas une révision : renvoyer une feuille de
+classe réécrit quarante lignes dont trente-neuf n'ont pas bougé, et les garder
+noierait la seule qui compte. Le déclencheur compare la note, pas
+`updated_at`.
+
+Et **une histoire vide n'est pas « cette note n'a jamais bougé »** : les notes
+antérieures n'en ont pas. L'écran dit laquelle des deux il montre, et
+`notes_sans_histoire()` sait combien sont dans ce cas. Quand le produit ne
+sait pas, il le dit.
+
+Au passage, la feuille de saisie signale désormais les cases qui ont bougé —
+sans quoi le censeur qui relit avant le conseil n'a aucun moyen de savoir
+laquelle — et le tableau de bord nomme les notes effacées de la semaine : le
+geste reste légitime, il cesse d'être invisible.
+
+Deux leçons d'épreuve, et ce sont les plus utiles.
+
+La suite reconnaissait d'abord « ce qu'elle avait créé » à une **date** — les
+révisions postérieures au dernier horodatage. Or les 288 lignes du jeu sont
+écrites dans une seule transaction, donc portent toutes le même `now()`, et le
+pilote rend l'horodatage à la milliseconde là où PostgreSQL le garde à la
+microseconde : le « strictement postérieur » les emportait toutes.
+`test:fixture` l'a dit au premier tour. **Une marque est une liste
+d'identifiants relevée soi-même, pas une heure.**
+
+Et poser la règle dans la base a eu la conséquence qu'on lui demandait : neuf
+suites qui écrivaient une note pour éprouver un écran, puis la remettaient, ont
+commencé à laisser deux lignes d'histoire derrière elles. Ce n'est pas un
+défaut du déclencheur, c'est la preuve qu'il fonctionne — et le témoin l'a
+compté au franc près, « il y en a 14 de trop ». D'où `tests/notes-epreuve.mjs`,
+sur le modèle de `tests/calendrier-epreuve.mjs` : une suite emprunte l'histoire
+et la rend, en reconnaissant ce qu'elle a créé aux identifiants relevés au
+départ. Le dixième cas s'est caché plus longtemps : `app.e2e.mjs` rendait
+l'histoire **après** avoir fermé la connexion qui portait le contexte
+d'établissement, de sorte que le RLS ne montrait plus rien à supprimer — un
+`catch` silencieux, et le témoin qui compte reste la seule chose qui l'ait vu.
+
+`db/migrations/0029_l_histoire_d_une_note.sql`,
+`tests/histoire-note.e2e.mjs` (26 assertions).
+
 ### L'écran nommait la sanction, et le bouton passait quand même
 
 Trouvé en cherchant qui **écrit** les valeurs d'énumération du schéma que rien
@@ -2144,7 +2241,7 @@ Comptes de démonstration — le code s'affiche à l'écran, aucun SMS n'est env
 | `70000005` | Directeur |
 
 Vérifications : `npm run check:all` — typecheck strict, 60 tests unitaires, et
-**quarante-neuf parcours**, chacun contre un vrai PostgreSQL et un vrai
+**cinquante parcours**, chacun contre un vrai PostgreSQL et un vrai
 serveur — sauf deux témoins qui n'écrivent rien : l'un compte le jeu de
 démonstration, l'autre relit le code source.
 Le tableau ci-dessous en détaille une partie ; les autres sont décrits, avec ce
@@ -2152,6 +2249,7 @@ qu'ils ont trouvé, dans les sections qui précèdent.
 
 | suite | ce qu'elle prouve |
 |---|---|
+| `test:histoire-note` (26) | une note modifiée ou effacée laisse son histoire quel que soit le chemin — écran, appareil, import, arbitrage, `psql` — et l'effacement n'emporte plus la preuve que la note a existé |
 | `test:plafond-declare` (34) | le produit n'écrit plus « déclaré » sur un dossier que rien n'a fait sortir, le plafond ne bouge plus sans nom ni motif, et une grille au-dessus du plafond fait refuser l'émission au lieu de l'avertir |
 | `test:annuler-facture` (35) | une facture d'élève parti s'annule avec un nom, une date et un motif — refusée sans trace par la base, sortie des totaux mais lisible barrée, et réémise en nouvelle ligne au lieu d'être ressuscitée |
 | `test:double-clic` (19) | deux clics sur « Encaisser » ne font qu'un versement et qu'un reçu, un vrai second versement passe, et la fenêtre est un réglage de l'établissement |
@@ -2178,7 +2276,7 @@ qu'ils ont trouvé, dans les sections qui précèdent.
 | `test:echeancier` (26) | « en retard » veut dire en retard sur une échéance, pas « doit encore quelque chose sur l'année », et une facture sans échéancier ne bascule d'aucun côté |
 | `test:canal` (24) | le serveur refuse de démarrer sans canal SMS déclaré, le mode démonstration s'annonce partout, et un code que l'opérateur refuse n'est plus annoncé comme envoyé |
 | `test:recurrence` (18) | « quatre faits, quatre convocations » et « quatre faits, aucune suite » ne sont plus le même chiffre au conseil de classe, et le registre ouvre sur ce qui revient |
-| `test:fixture` (24) | le jeu de démonstration sort de `check:all` exactement comme il y est entré : une suite qui emporte — ou fait partir, ou réinscrit — ce qui n'est pas à elle est nommée, avec la table et le nombre |
+| `test:fixture` (26) | le jeu de démonstration sort de `check:all` exactement comme il y est entré : une suite qui emporte — ou fait partir, ou réinscrit — ce qui n'est pas à elle est nommée, avec la table et le nombre |
 | `test:injoignable` (31) | un absent dont la famille n'a aucun numéro laisse une tâche nommée au lieu d'un silence, et un tuteur principal sans numéro ne masque plus un second tuteur joignable |
 | `test:evaluations` (22) | un enseignant ouvre un devoir pour sa matière ; une composition ne s'ouvre que par le censeur, et pour tout le niveau |
 | `test:transferts` (23) | un parcours déclaré est accepté et étiqueté, une moyenne inventée est refusée, le certificat porte sa réserve |
@@ -2340,6 +2438,25 @@ additionnées au présent. Ce défaut a été trouvé deux fois, dans deux modul
 `tests/bornes.e2e.mjs` relit désormais le code source du dépôt pour qu'il n'y
 ait pas de troisième fois, et une requête volontairement cumulative doit écrire
 `-- borne:` suivi de sa raison.
+
+**Ce qui doit valoir pour TOUS les chemins d'écriture se pose dans la base.**
+L'histoire d'une note était écrite par le code, à côté de deux des trois
+endroits qui écrivent une note — et le troisième, celui par lequel passent
+presque toutes les notes d'une année, ne l'avait pas. Un `insert` de plus
+aurait rebouché ce trou-là en laissant ouvert celui du prochain chemin. Un
+déclencheur ne se contourne pas, pas même par un `psql` ouvert un dimanche
+soir, et c'est la même raison qui met le cloisonnement dans le RLS plutôt que
+dans une clause `where`. Au code il reste alors une seule chose à faire : DIRE
+D'OÙ IL PARLE, par un réglage de session — et un chemin qui l'oublie doit
+retomber sur le cas le plus probable, jamais faire échouer l'écriture.
+
+**Ce qui est effacé laisse une trace, et l'effacement ne peut pas emporter la
+trace.** La table qui tenait l'histoire d'une note était reliée à la note par
+un `on delete cascade` : elle était câblée pour être détruite par le geste
+qu'elle existe pour documenter. Une histoire survit à son sujet, ou ce n'est
+pas une histoire. Corollaire à l'écran : effacer doit être compté et nommé —
+« 0 note enregistrée » est le message de *il ne s'est rien passé*, et le dire
+après avoir détruit une note est un mensonge de plus qu'un silence.
 
 **Une phrase qui nomme une sanction doit arrêter le geste.** Le produit
 imprimait « Facturer ainsi expose l'établissement à une sanction » sur l'écran

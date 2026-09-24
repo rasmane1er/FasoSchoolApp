@@ -34,6 +34,7 @@
 
 import { spawn } from "node:child_process";
 import pg from "pg";
+import { emprunterLesNotes } from "./notes-epreuve.mjs";
 import { emprunterCalendrier } from "./calendrier-epreuve.mjs";
 
 const PORT = 4245;
@@ -61,6 +62,11 @@ const { rows: sc } = await client.query(
   `select school_id from auth_lookup_user('70000001')`);
 const SCHOOL = sc[0].school_id;
 await client.query(`select set_config('fasoschool.school_id', $1, false)`, [SCHOOL]);
+
+/* L'HISTOIRE DES NOTES EST ÉCRITE PAR LA BASE (0029) : écrire une note
+ * pour éprouver un écran, puis la remettre, laisse deux lignes derrière
+ * soi. On les emprunte, on les rend. */
+const notesEmpruntees = await emprunterLesNotes(client);
 
 const { rows: cl } = await client.query(
   `select id, label from classes order by label limit 1`);
@@ -257,6 +263,7 @@ try {
   }
   await purger().catch(() => {});
   await fermerLesSessions().catch(() => {});
+  await notesEmpruntees.rendre().catch(() => {});
   await client.end();
 }
 

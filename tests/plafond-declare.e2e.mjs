@@ -70,8 +70,10 @@ const { rows: DOSSIER } = await client.query(
 const { rows: FACTURES } = await client.query(
   `select id, status, total_fcfa, reference from invoices order by reference`);
 
+/* La démonstration sème une catégorie 2 et AUCUN plafond : c'est cet état-là
+ * qu'on exige au départ, et c'est celui qu'on rend. */
 const sale = DOSSIER.filter((d) => d.status !== "brouillon"
-  || d.category !== null || d.declared_ceiling_fcfa !== null);
+  || d.declared_ceiling_fcfa !== null);
 if (sale.length > 0) {
   console.error(
     `Le dossier de catégorisation de la démonstration n'est pas vierge : `

@@ -504,6 +504,10 @@ async function main() {
           const absent = rng() < 0.035;
           const justified = rng() < 0.6;
 
+          /* D'OÙ PARLENT CES NOTES : d'un script, pas d'un enseignant. Le
+           * déclencheur `tracer_note()` écrit leur histoire ; autant qu'elle
+           * dise la vérité sur leur origine. */
+          await c.query(`select set_config('fasoschool.grade_source', 'import', true)`);
           await c.query(
             `insert into grade_entries (school_id, evaluation_id, student_id, score,
                                         is_absent, is_justified, recorded_by)

@@ -12,6 +12,7 @@ import { spawn } from "node:child_process";
 import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
 import pg from "pg";
+import { emprunterLesNotes } from "./notes-epreuve.mjs";
 import { emprunterCalendrier } from "./calendrier-epreuve.mjs";
 
 const PORT = 4188;
@@ -147,6 +148,10 @@ await clientCalendrier.connect();
   }
 }
 const calendrier = await emprunterCalendrier(clientCalendrier);
+/* L'HISTOIRE DES NOTES EST ÉCRITE PAR LA BASE (0029) : ce parcours saisit
+ * une note pour éprouver l'écran, puis la remet — deux lignes d'histoire
+ * qui ne sont pas au jeu de démonstration. On les emprunte, on les rend. */
+const notesEmpruntees = await emprunterLesNotes(clientCalendrier);
 
 const server = spawn(process.execPath, ["--experimental-strip-types", "src/server/app.ts"], {
   env: { ...process.env, PORT: String(PORT), SMS_PROVIDER: "mock" },
@@ -425,6 +430,10 @@ try {
 
 } finally {
   await calendrier.rendre();
+  /* AVANT de fermer la connexion qui a servi à emprunter : l'aide rend les
+   * lignes d'histoire nées de ce parcours, et elle a besoin du contexte
+   * d'établissement posé sur CETTE connexion-là. */
+  await notesEmpruntees.rendre().catch(() => {});
   await clientCalendrier.end();
   await browser.close();
   server.kill();

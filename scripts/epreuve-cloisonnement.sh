@@ -80,7 +80,8 @@ psql "$CIBLE" -v ON_ERROR_STOP=1 -q \
   -f db/migrations/0025_entre_deux_trimestres.sql \
   -f db/migrations/0026_double_clic_au_guichet.sql \
   -f db/migrations/0027_annuler_une_facture.sql \
-  -f db/migrations/0028_le_plafond_declare.sql
+  -f db/migrations/0028_le_plafond_declare.sql \
+  -f db/migrations/0029_l_histoire_d_une_note.sql
 echo "migrations appliquées"
 
 echo

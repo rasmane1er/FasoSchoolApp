@@ -560,8 +560,21 @@ async function notesPage(user: SessionUser, url: URL, flash?: string): Promise<s
         where ev.class_id = $1 and ev.term_id = $2 and ev.subject_id = $3`,
       [classId, period.term_id, chosen],
     );
+    /* QUELLES NOTES ONT UNE HISTOIRE. Une case qui a bougé doit se voir : le
+     * censeur qui relit une feuille avant le conseil n'a aucun moyen, sinon,
+     * de savoir laquelle a changé. Les suppressions comptent aussi — c'est le
+     * geste qui ne laissait rien du tout. */
+    const histoires = await c.query(
+      `select r.evaluation_id, r.student_id, count(*)::int as n
+         from grade_entry_revisions r
+         join evaluations ev on ev.id = r.evaluation_id
+        where ev.class_id = $1 and ev.term_id = $2 and ev.subject_id = $3
+        group by r.evaluation_id, r.student_id`,
+      [classId, period.term_id, chosen],
+    );
     return { classes: classes.rows, subjects: subjects.rows, chosen, evals: evals.rows,
-             students: students.rows, grades: grades.rows };
+             students: students.rows, grades: grades.rows,
+             histoires: histoires.rows };
   });
 
   const selector = `
@@ -602,6 +615,10 @@ async function notesPage(user: SessionUser, url: URL, flash?: string): Promise<s
 
   const key = new Map<string, any>();
   for (const g of d.grades) key.set(`${g.evaluation_id}|${g.student_id}`, g);
+  const bouge = new Map<string, number>();
+  for (const h of (d as any).histoires ?? []) {
+    bouge.set(`${h.evaluation_id}|${h.student_id}`, Number(h.n));
+  }
 
   // Deux devoirs portent souvent le même intitulé : c'est la date qui les
   // distingue pour l'enseignant.
@@ -616,13 +633,18 @@ async function notesPage(user: SessionUser, url: URL, flash?: string): Promise<s
     const cells = d.evals.map((e: any) => {
       const g = key.get(`${e.id}|${st.id}`);
       const val = g?.is_absent ? "abs" : (g?.score !== undefined && g?.score !== null ? fr(Number(g.score)) : "");
+      const n = bouge.get(`${e.id}|${st.id}`) ?? 0;
       return `<td class="r"><input class="note-cell" name="n_${esc(e.id)}_${esc(st.id)}"
         value="${esc(val)}" inputmode="decimal" autocomplete="off"
         data-eval="${esc(e.id)}" data-student="${esc(st.id)}"
         data-bareme="${Number(e.bareme ?? 20)}"
         data-original="${esc(val)}"
         data-updated="${g?.updated_at ? new Date(g.updated_at).toISOString() : ""}"
-        aria-label="${esc(st.last_name)} — ${esc(e.label ?? e.eval_type)}"></td>`;
+        aria-label="${esc(st.last_name)} — ${esc(e.label ?? e.eval_type)}">${
+        n > 0 ? `<a href="/notes/histoire?evaluation=${esc(e.id)}&amp;eleve=${esc(st.id)}"
+          title="Cette note a été modifiée ${n} fois — voir l'histoire"
+          style="display:block;font-size:11px;color:var(--ochre);text-decoration:none"
+          >modifiée ${n}×</a>` : ""}</td>`;
     }).join("");
     return `<tr><td class="num" style="color:var(--faint)">${String(i + 1).padStart(2, "0")}</td>
       <td><b>${esc(st.last_name)}</b> ${esc(st.first_names)}</td>${cells}</tr>`;
@@ -659,13 +681,15 @@ async function notesPage(user: SessionUser, url: URL, flash?: string): Promise<s
 }
 
 interface SaisieRefusee { studentId: string; valeur: string; bareme: number }
+interface NoteEffacee { studentId: string; evaluationId: string; avant: string }
 
 async function saveNotes(
   user: SessionUser, url: URL, form: URLSearchParams,
-): Promise<{ saved: number; refuses: SaisieRefusee[] }> {
+): Promise<{ saved: number; refuses: SaisieRefusee[]; effacees: NoteEffacee[] }> {
   const schoolId = user.schoolId!;
   let saved = 0;
   const refuses: SaisieRefusee[] = [];
+  const effacees: NoteEffacee[] = [];
   /* Le contrôle porte sur l'ÉCRITURE, pas seulement sur ce qui a été affiché.
      Chaque évaluation est confrontée à la répartition de services : un
      identifiant envoyé à la main ne passe pas plus qu'une option masquée.
@@ -718,10 +742,29 @@ async function saveNotes(
       let absent = false;
 
       if (v === "") {
-        await c.query(
-          `delete from grade_entries where evaluation_id = $1 and student_id = $2`,
+        /* VIDER UNE CASE EFFAÇAIT UNE NOTE SANS UN MOT.
+         *
+         * `saved` n'était pas incrémenté, aucun refus n'était signalé : une
+         * colonne effacée par mégarde produisait « 0 note enregistrée » — le
+         * message exact de « il ne s'est rien passé ». Et la clé étrangère de
+         * l'historique portait `on delete cascade`, de sorte que le geste
+         * emportait aussi la preuve que la note avait existé.
+         *
+         * Le geste reste légitime : « cet élève n'a pas de note à cette
+         * évaluation » est un état qu'un enseignant doit pouvoir exprimer. Il
+         * est désormais COMPTÉ et NOMMÉ, et le déclencheur en garde
+         * l'histoire — voir 0029. */
+        const parti = await c.query(
+          `delete from grade_entries where evaluation_id = $1 and student_id = $2
+            returning score, is_absent`,
           [evaluationId, studentId],
         );
+        if (parti.rowCount! > 0) {
+          effacees.push({ studentId, evaluationId,
+            avant: parti.rows[0].score === null
+              ? (parti.rows[0].is_absent ? "abs" : "—")
+              : String(Number(parti.rows[0].score)) });
+        }
         continue;
       }
       if (v === "abs" || v === "a") {
@@ -753,13 +796,126 @@ async function saveNotes(
       saved += 1;
     }
 
+    /* LE JOURNAL GARDAIT UN COMPTE, ET RIEN D'AUTRE : `{classe, saisies}`.
+     * Une note effacée y écrivait « saisies: 0 » — le même que lorsqu'il ne
+     * s'est rien passé. Il porte maintenant ce qui a disparu, et la valeur
+     * d'avant. L'histoire note par note, elle, est dans
+     * `grade_entry_revisions`, écrite par la base. */
     await c.query(
       `insert into audit_log (school_id, actor_id, action, target_type, detail)
        values ($1,$2,'grades.save','class',$3)`,
-      [schoolId, user.userId, JSON.stringify({ classe: url.searchParams.get("classe"), saisies: saved })],
+      [schoolId, user.userId, JSON.stringify({
+        classe: url.searchParams.get("classe"), saisies: saved,
+        effacees: effacees.length || undefined,
+        valeurs_effacees: effacees.length ? effacees.map((e) => e.avant) : undefined,
+      })],
     );
   });
-  return { saved, refuses };
+  return { saved, refuses, effacees };
+}
+
+/**
+ * Ce qu'on peut répondre au parent qui conteste une note.
+ *
+ * Une histoire VIDE ne veut pas dire « cette note n'a jamais bougé » : les
+ * notes saisies avant que l'histoire ne soit tenue n'en ont pas. L'écran dit
+ * laquelle des deux il montre — quand le produit ne sait pas, il le dit.
+ */
+async function histoireNotePage(
+  user: SessionUser, evaluationId: string, studentId: string,
+): Promise<string> {
+  const schoolId = user.schoolId!;
+  const chrome = await chromeFor(user, "notes");
+  const d = await withSchool(schoolId, async (c) => {
+    const ev = await c.query(
+      `select ev.id, ev.label, ev.eval_type, ev.held_on::text as held_on,
+              coalesce(ev.bareme, 20) as bareme,
+              su.label as matiere, cl.label as classe
+         from evaluations ev
+         join subjects su on su.id = ev.subject_id
+         join classes cl on cl.id = ev.class_id
+        where ev.id = $1`, [evaluationId]);
+    const st = await c.query(
+      `select last_name, first_names, matricule from students where id = $1`,
+      [studentId]);
+    if (ev.rowCount === 0 || st.rowCount === 0) return null;
+    const h = await c.query(
+      `select * from histoire_d_une_note($1, $2)`, [evaluationId, studentId]);
+    const now = await c.query(
+      `select score, is_absent from grade_entries
+        where evaluation_id = $1 and student_id = $2`, [evaluationId, studentId]);
+    return { ev: ev.rows[0], st: st.rows[0], lignes: h.rows,
+             actuelle: now.rows[0] ?? null };
+  });
+
+  if (!d) {
+    return page(chrome, "Histoire d'une note",
+      `<h1>Histoire d'une note</h1>
+       <div class="note warn">Cette note n'existe pas.</div>`);
+  }
+
+  const valeur = (score: any, absent: any): string =>
+    absent === true ? "absent" : (score === null || score === undefined
+      ? "—" : fr(Number(score)));
+  const CHEMIN: Record<string, string> = {
+    online: "écran des notes", offline: "appareil hors ligne",
+    import: "import", correction: "arbitrage d'un conflit",
+  };
+
+  return page(chrome, "Histoire d'une note", `
+  <div class="row"><div><h1>Histoire d'une note</h1>
+    <p style="margin:0;color:var(--muted)">
+      <b>${esc(d.st.last_name)} ${esc(d.st.first_names)}</b>
+      ${d.st.matricule ? `<span class="num">${esc(d.st.matricule)}</span>` : ""} —
+      ${esc(d.ev.matiere)}, ${esc(d.ev.classe)},
+      ${esc(d.ev.eval_type === "composition" ? "composition" : d.ev.label ?? "devoir")}${
+        d.ev.held_on ? ` du ${jourFrCourt(d.ev.held_on)}` : ""}${
+        Number(d.ev.bareme) !== 20 ? `, sur ${fr(Number(d.ev.bareme), 0)}` : ""}.
+    </p></div>
+    <a class="btn ghost" href="/notes" style="margin-left:auto">Retour aux notes</a></div>
+
+  <div class="card">
+    <header><b>Aujourd'hui</b></header>
+    <div class="body"><p style="margin:0;font-size:22px" class="num">${
+      d.actuelle === null
+        ? `<span style="color:var(--laterite)">aucune note</span>`
+        : valeur(d.actuelle.score, d.actuelle.is_absent)}</p></div>
+  </div>
+
+  ${d.lignes.length === 0 ? `<div class="note warn">
+    <b>Cette note n'a pas d'histoire enregistrée.</b> Cela ne veut pas dire
+    qu'elle n'a jamais changé : le produit n'a commencé à tenir l'histoire des
+    notes qu'à partir de la mise à jour qui a introduit cet écran. Avant, une
+    note modifiée ne laissait rien — et une note effacée emportait même la
+    trace de son existence.</div>`
+  : `<div class="card">
+    <header><b>Ce que cette note a valu</b>
+      <span style="color:var(--muted);font-size:13px">${plural(d.lignes.length,
+        "mouvement", "mouvements")}</span></header>
+    <div class="scroll"><table>
+      <thead><tr><th>Quand</th><th>Geste</th><th class="r">Avant</th>
+        <th class="r">Après</th><th>Par quel chemin</th><th>De la main de</th></tr></thead>
+      <tbody>${d.lignes.map((l: any) => `<tr${
+        l.action === "suppression" ? ' class="warn"' : ""}>
+        <td class="num">${new Date(l.quand).toLocaleString("fr-FR", {
+          day: "2-digit", month: "2-digit", year: "numeric",
+          hour: "2-digit", minute: "2-digit" })}</td>
+        <td>${l.action === "suppression"
+          ? `<b style="color:var(--laterite)">effacée</b>` : "écrite"}</td>
+        <td class="r num">${valeur(l.ancien_score, l.ancien_absent)}</td>
+        <td class="r num"><b>${valeur(l.score, l.absent)}</b></td>
+        <td>${esc(CHEMIN[l.source] ?? l.source)}</td>
+        <td>${l.par ? esc(l.par) : `<span style="color:var(--faint)">—</span>`}</td>
+      </tr>`).join("")}</tbody>
+    </table></div>
+    <div class="body" style="border-top:1px solid var(--rule)">
+      <p class="hint" style="margin:0">Cette histoire est écrite par la base de
+      données à chaque écriture et à chaque suppression, quel que soit le
+      chemin — l'écran, un appareil hors ligne, un import, un arbitrage. Elle
+      survit à l'effacement de la note : c'est précisément ce geste-là qui
+      n'en laissait aucune.</p>
+    </div>
+  </div>`}`);
 }
 
 async function bulletinsPage(user: SessionUser, url: URL, flash?: string,
@@ -1490,6 +1646,19 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       if (!can(user, "voir_notes")) return html(res, "Accès refusé.", 403);
       return html(res, await notesPage(user, url));
     }
+    /* L'HISTOIRE D'UNE NOTE.
+     *
+     * `grade_entry_revisions` porte, dans le code qui l'alimentait, ce
+     * commentaire : « la réponse au parent qui conteste une note. » Encore
+     * fallait-il pouvoir la lire : aucun écran ne l'ouvrait, et elle n'était
+     * de toute façon écrite que pour les notes venues d'un appareil hors
+     * ligne. Voir 0029. */
+    if (path === "/notes/histoire" && req.method === "GET") {
+      if (!can(user, "voir_notes")) return html(res, "Accès refusé.", 403);
+      return html(res, await histoireNotePage(
+        user, url.searchParams.get("evaluation") ?? "",
+        url.searchParams.get("eleve") ?? ""));
+    }
     if (path === "/notes" && req.method === "POST") {
       if (!can(user, "saisir_notes")) return html(res, "Accès refusé.", 403);
       const r = await saveNotes(user, url, await formBody(req));
@@ -1508,6 +1677,21 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
               .join(", ")
           + ` — la note doit être un nombre entre 0 et ${
               r.refuses[0]!.bareme}, ou « abs ».`;
+      }
+      /* UNE NOTE EFFACÉE SE DIT. Elle produisait « 0 note enregistrée » — le
+       * message de « il ne s'est rien passé ». Un enseignant qui efface une
+       * colonne par mégarde doit l'apprendre tout de suite, et pas au conseil
+       * de classe. */
+      if (r.effacees.length) {
+        const noms = await withSchool(user.schoolId!, async (c) =>
+          new Map((await c.query(
+            `select id, last_name || ' ' || first_names as nom from students
+              where id = any($1::uuid[])`,
+            [r.effacees.map((x) => x.studentId)])).rows.map(
+              (x: any) => [x.id as string, x.nom as string])));
+        message += ` ${plural(r.effacees.length, "note effacée", "notes effacées")} : `
+          + r.effacees.map((x) => `${noms.get(x.studentId) ?? "?"} (${x.avant})`).join(", ")
+          + ` — l'historique en garde la trace.`;
       }
       return html(res, await notesPage(user, url, message));
     }

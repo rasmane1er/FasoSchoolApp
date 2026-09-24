@@ -55,6 +55,12 @@ const ATTENDU = [
   ["staff",                5, "censeur, enseignante, surveillant, économe, directeur"],
   ["evaluations",         24, "deux devoirs et une composition par discipline"],
   ["grade_entries",      288, "12 élèves × 24 évaluations"],
+  /* L'HISTOIRE DES NOTES EST SEMÉE AVEC ELLES. Le déclencheur
+     `tracer_note()` écrit une ligne par note à la création : une note
+     sans histoire ressemble à une note qui n'a jamais bougé, et c'est
+     l'ambiguïté que 0029 supprime. Si ce compte tombe, une suite a
+     modifié ou effacé des notes de la démonstration. */
+  ["grade_entry_revisions", 288, "une ligne par note, écrite par la base à la saisie"],
   ["attendance_sessions", 12, "douze appels, tous les cinq jours à partir du 5 octobre"],
   ["attendance_records", 144, "12 élèves × 12 appels"],
   ["guardians",           11, "onze tuteurs — le douzième élève n'en a aucun de joignable, "
@@ -212,6 +218,33 @@ try {
       + `${insc[0].autres ? ` — statuts trouvés : ${insc[0].autres}` : ""}`
       + ` — une suite a fait partir un élève et ne l'a pas remis ; les`
       + ` bulletins, l'appel et les factures en dépendent tous`);
+
+  /* LE DOSSIER DE CATÉGORISATION EST-IL ENCORE VIERGE ?
+   *
+   * Deux suites y écrivent une catégorie et un plafond. La première les
+   * rendait à la photo prise au début — donc recopiait la fuite du tour
+   * précédent — et le témoin ne regardait pas ce dossier : la plainte sortait
+   * deux suites plus loin, dans celle qui refuse de partir d'un dossier déjà
+   * rempli. C'est la troisième fuite de la même famille ; le témoin la nomme
+   * maintenant à la source. */
+  const { rows: dos } = await client.query(
+    `select coalesce(category::text, '—') as categorie,
+            coalesce(declared_ceiling_fcfa::text, '—') as plafond,
+            status,
+            (select count(*)::int from category_ceiling_changes) as mouvements
+       from category_assessments`);
+  /* CE QUE LA DÉMONSTRATION SÈME : une catégorie 2 lue dans l'arrêté par le
+   * chef d'établissement, AUCUN plafond, le statut « brouillon », et aucun
+   * mouvement. Le plafond et la déclaration sont précisément ce que 0028
+   * ajoute : les laisser vides est ce qui fait voir, à l'ouverture, l'écran
+   * qui dit « renseigné, pas déclaré ». */
+  check("le dossier de catégorisation est dans l'état semé",
+    dos.length === 1 && dos[0].categorie === "2" && dos[0].plafond === "—"
+      && dos[0].status === "brouillon" && dos[0].mouvements === 0,
+    JSON.stringify(dos)
+      + " — une suite y a écrit un plafond ou une déclaration et ne les a pas"
+      + " rendus ; la démonstration s'ouvre alors sur un dossier qu'aucun"
+      + " établissement n'a rempli");
 
   /* LA DÉMONSTRATION EST-ELLE ENCORE DANS UN TRIMESTRE ?
    *
