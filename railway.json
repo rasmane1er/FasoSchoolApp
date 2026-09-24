@@ -3,7 +3,7 @@
   "build": { "builder": "DOCKERFILE", "dockerfilePath": "Dockerfile" },
   "deploy": {
     "startCommand": "node --experimental-strip-types src/server/app.ts",
-    "preDeployCommand": "bash scripts/preparer-base.sh \"${FASOSCHOOL_DB:-fasoschool}\"",
+    "preDeployCommand": "node scripts/preparer-base.mjs",
     "healthcheckPath": "/sante",
     "healthcheckTimeout": 60,
     "restartPolicyType": "ON_FAILURE",

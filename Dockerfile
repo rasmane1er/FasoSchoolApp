@@ -23,21 +23,24 @@
 
 FROM node:22-bookworm-slim
 
-# `postgresql-client` pour `psql` : la commande de release l'utilise pour
-# appliquer les migrations, et `scripts/sauvegarde.sh` pour `pg_dump`.
-# `gnupg` pour le chiffrement des sauvegardes — une sauvegarde en clair est
-# une fuite de données qui attend son heure.
-# APT RÉESSAIE. Le premier déploiement a échoué ici sur un « context
-# canceled » : le réseau du constructeur avait lâché au milieu. Un échec
-# transitoire qui casse une mise en ligne coûte plus cher que trois lignes.
-RUN set -eux; \
-    for essai in 1 2 3; do \
-      apt-get update && \
-      apt-get install -y --no-install-recommends \
-        postgresql-client gnupg ca-certificates && break; \
-      echo "apt a échoué (essai $essai), nouvelle tentative"; sleep 5; \
-    done; \
-    rm -rf /var/lib/apt/lists/*
+# CETTE IMAGE N'INSTALLE RIEN.
+#
+# Elle a d'abord installé `postgresql-client` (pour `psql`, qu'utilisait la
+# commande de release) et `gnupg`. Le constructeur d'images de Railway n'a pas
+# d'accès aux miroirs Debian : `apt-get install` y meurt en trois secondes, sur
+# un « context canceled », et trois tentatives n'y changent rien.
+#
+# On aurait pu ruser. La conclusion est meilleure : une image de production qui
+# a besoin d'installer un paquet pour démarrer dépend, LE JOUR OÙ ELLE DÉMARRE,
+# d'un réseau qu'elle ne contrôle pas. Or ce dont la mise en ligne a besoin,
+# c'est d'exécuter du SQL — et le produit embarque déjà `pg`, sa seule
+# dépendance. `scripts/preparer-base.mjs` fait donc en Node ce que le script
+# shell fait avec `psql`, et l'image n'a plus rien à installer.
+#
+# Ce qui reste hors de cette image, et c'est dit plutôt que caché : les
+# sauvegardes chiffrées (`sauvegarde.sh`) ont besoin de `pg_dump` et de `gpg`.
+# Elles tourneront depuis une image qui les porte, ou depuis une machine qui
+# les a. Voir DEPLOIEMENT.md.
 
 WORKDIR /app
 

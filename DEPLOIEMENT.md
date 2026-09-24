@@ -47,6 +47,21 @@ dizaines d'écoles. Recommandé : **une seule base**.
 Dans Railway : `New Project` → `Provision PostgreSQL`. Notez l'URL interne
 (`postgres://postgres:…@postgres.railway.internal:5432/railway`).
 
+> **La préparation de la base ne passe pas par `psql`.** Le constructeur
+> d'images de Railway n'a pas d'accès aux miroirs Debian : `apt-get install
+> postgresql-client` y meurt en trois secondes. L'image n'installe donc rien,
+> et `scripts/preparer-base.mjs` fait en Node — avec `pg`, la seule dépendance
+> du produit — ce que `scripts/preparer-base.sh` fait avec `psql` : créer la
+> base, créer le rôle applicatif, refuser de continuer s'il est privilégié,
+> appliquer les migrations, accorder les droits, vérifier. Les deux existent :
+> le script shell pour une machine qui a `psql`, le script Node pour l'image.
+>
+> **Une conséquence à connaître :** les sauvegardes chiffrées ont besoin de
+> `pg_dump` et de `gpg`, qui ne sont plus dans l'image. Elles tournent depuis
+> une machine qui les porte, ou depuis une image dédiée. En attendant, les
+> sauvegardes automatiques de Railway couvrent la perte de la base — pas la
+> perte du compte Railway.
+
 ### 1.1 Le rôle applicatif n'est pas superutilisateur
 
 C'est la règle la plus importante de tout ce document. **Un superutilisateur

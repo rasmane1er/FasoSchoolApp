@@ -82,17 +82,65 @@ for (const [nom, liste] of Object.entries(sources)) {
         + ` référencer une table qui n'existe pas encore`);
 }
 
+/* === 1bis. Toutes les migrations sauf la fondatrice se rejouent ========= */
+console.log("\nUne migration se rejoue — sauf la fondatrice, et on le sait");
+
+/* LE DÉPÔT AFFIRMAIT QUE TOUTES SE REJOUAIENT. C'est vrai de vingt-neuf sur
+ * trente : la fondatrice crée ses tables sans `if not exists`, et ses index
+ * sans nom — ce qui interdit le `if not exists` qu'on y mettrait. Sans
+ * conséquence tant qu'on préparait une base une fois à la main ; fatal dès que
+ * la préparation devient la commande de release, puisque le premier
+ * déploiement passerait et tous les suivants échoueraient.
+ *
+ * `preparer-base.mjs` saute donc la fondatrice quand `schools` existe. Ce
+ * raisonnement ne tient que si les vingt-neuf autres se rejouent VRAIMENT :
+ * on le vérifie ici, contre la base déjà migrée, plutôt que de le supposer. */
+if (!process.env.ADMIN_DATABASE_URL) {
+  /* UN CONTOURNEMENT QUI SE VOIT. Rejouer une migration demande le rôle
+   * PROPRIÉTAIRE : le rôle applicatif ne peut pas créer de table, et c'est
+   * exactement ce qu'on veut de lui. Sans `ADMIN_DATABASE_URL`, cette
+   * vérification ne peut pas tourner — et un contrôle sauté en silence vaut
+   * un contrôle absent. L'intégration continue, elle, l'a toujours. */
+  console.log("  ––   REJOUE NON VÉRIFIÉ : ADMIN_DATABASE_URL n'est pas défini.");
+  console.log("       Cette vérification tourne en intégration continue, où il l'est.");
+} else {
+  const pg = (await import("pg")).default;
+  const c = new pg.Client({ connectionString: process.env.ADMIN_DATABASE_URL });
+  await c.connect();
+  const casses = [];
+  for (const f of surDisque) {
+    if (/^0001_/.test(f)) continue;
+    try { await c.query(readFileSync(`db/migrations/${f}.sql`, "utf8")); }
+    catch (e) { casses.push(`${f} : ${e.message}`); }
+  }
+  await c.end();
+  check("chaque migration après la fondatrice se rejoue sans effet de bord",
+    casses.length === 0,
+    casses.slice(0, 3).join(" | ")
+      + " — la commande de release les rejoue à CHAQUE déploiement : une seule"
+      + " qui ne le supporte pas, et le deuxième déploiement échoue");
+}
+
 /* === 2. La configuration de déploiement ================================ */
 console.log("\nLa configuration de mise en ligne dit ce qu'elle fait");
 
 check("un Dockerfile existe", existsSync("Dockerfile"));
-const dockerfile = existsSync("Dockerfile") ? readFileSync("Dockerfile", "utf8") : "";
+/* ON LIT LE FICHIER, PAS SES COMMENTAIRES — la leçon de l'autre témoin, ici
+ * aussi : le commentaire qui explique pourquoi l'image n'appelle plus `apt`
+ * contient le mot `apt`. */
+const dockerfile = (existsSync("Dockerfile") ? readFileSync("Dockerfile", "utf8") : "")
+  .split("\n").filter((l) => !/^\s*#/.test(l)).join("\n");
 check("l'image ne tourne pas en root", /^USER node$/m.test(dockerfile),
   "un processus qui n'a besoin d'écrire nulle part n'a pas besoin d'être root");
-check("elle embarque psql et gpg",
-  /postgresql-client/.test(dockerfile) && /gnupg/.test(dockerfile),
-  "le premier pour les migrations et pg_dump, le second parce qu'une "
-    + "sauvegarde en clair est une fuite qui attend son heure");
+/* L'IMAGE N'INSTALLE RIEN. Elle installait `postgresql-client` et `gnupg` ;
+ * le constructeur d'images de Railway n'a pas d'accès aux miroirs Debian et
+ * `apt-get` y meurt en trois secondes. La conclusion vaut au-delà de Railway :
+ * une image de production qui doit installer un paquet POUR DÉMARRER dépend,
+ * le jour où elle démarre, d'un réseau qu'elle ne contrôle pas. */
+check("l'image n'installe rien au moment de se construire",
+  !/apt-get|apk add|yum install/.test(dockerfile),
+  "elle exécute du SQL avec `pg`, sa seule dépendance, et n'a donc besoin de "
+    + "rien d'autre");
 check("elle n'installe pas les dépendances de développement",
   /npm ci --omit=dev/.test(dockerfile),
   "Playwright et TypeScript n'ont rien à faire en production");
@@ -107,7 +155,7 @@ const rail = existsSync("railway.json")
  * `db:migrate` seul supposerait que tout le reste a déjà été fait à la main,
  * ce qui est vrai exactement une fois et faux ensuite. */
 check("la migration est une commande de RELEASE, pas de démarrage",
-  /preparer-base\.sh/.test(rail.deploy?.preDeployCommand ?? "")
+  /preparer-base\.mjs/.test(rail.deploy?.preDeployCommand ?? "")
     && !/migrate|preparer-base/.test(rail.deploy?.startCommand ?? ""),
   JSON.stringify(rail.deploy)
     + " — un conteneur qui migre en démarrant migre aussi quand il redémarre"
