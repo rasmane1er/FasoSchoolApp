@@ -32,7 +32,7 @@
  *   node tests/deploiement.e2e.mjs
  */
 
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 
 const PORT = 4295;
@@ -144,6 +144,103 @@ check("l'image n'installe rien au moment de se construire",
 check("elle n'installe pas les dépendances de développement",
   /npm ci --omit=dev/.test(dockerfile),
   "Playwright et TypeScript n'ont rien à faire en production");
+
+/* === CE QUE L'IMAGE COPIE, LE DÉPÔT DOIT LE CONTENIR ===================
+ *
+ * TROUVÉ EN PRODUCTION, ET C'EST LE DÉFAUT QUI A TOUT BLOQUÉ. La
+ * construction de l'image mourait à l'étape 4 sur 6 :
+ *
+ *     COPY package.json package-lock.json ./
+ *     failed to calculate checksum of ref … : "/package-lock.json": not found
+ *
+ * `package-lock.json` N'A JAMAIS EXISTÉ dans ce dépôt. Or `npm ci` est
+ * exactement la commande qui EXIGE un verrou — elle refuse de s'exécuter sans
+ * lui, par construction. Aucune mise en ligne n'a donc jamais abouti. Pas une
+ * seule fois, depuis le premier jour.
+ *
+ * ET LE TÉMOIN LISAIT POURTANT CE FICHIER. Trois lignes au-dessus, il vérifie
+ * que l'image ne tourne pas en root, qu'elle n'installe rien, qu'elle omet les
+ * dépendances de développement. Trois affirmations VRAIES, sur une recette qui
+ * ne pouvait pas se construire. On avait éprouvé ce que l'image DIT ; jamais ce
+ * dont elle a BESOIN.
+ *
+ * LA RÈGLE : ce qu'une recette copie doit exister là où elle sera jouée — et
+ * « là où elle sera jouée » n'est pas cette machine, c'est LE DÉPÔT, tel qu'un
+ * constructeur le reçoit. Un fichier posé sur le disque de celui qui écrit et
+ * absent de `git ls-files` est un fichier qui manquera le jour du déploiement,
+ * et ce jour-là seulement. C'est pourquoi la mesure ci-dessous interroge git et
+ * non le disque.
+ */
+console.log("\nCe que l'image copie, le dépôt le contient");
+
+/* Les sources de chaque COPY : tous les arguments sauf le dernier (la
+ * destination), les drapeaux `--from=…` mis de côté. `.` et les jokers ne
+ * désignent pas un fichier : on ne peut rien en dire ici. */
+const copies = [...dockerfile.matchAll(/^\s*COPY\s+(.+)$/gm)]
+  .flatMap((m) => {
+    const mots = m[1].trim().split(/\s+/).filter((w) => !w.startsWith("--"));
+    return mots.slice(0, -1);
+  })
+  .filter((f) => f !== "." && !f.includes("*"));
+
+check("l'image copie au moins un fichier nommé", copies.length > 0,
+  "sinon la mesure qui suit ne mesure rien");
+
+/* CE QUE LE DÉPÔT CONTIENT, ET NON CE QUE CETTE MACHINE PORTE. */
+let suivis = null;
+try {
+  suivis = new Set(execFileSync("git", ["ls-files"], { encoding: "utf8" })
+    .split("\n").filter(Boolean));
+} catch { /* pas de dépôt git ici */ }
+
+if (suivis === null) {
+  console.log("  SKIP  git est indisponible : on ne peut pas savoir ce que le "
+    + "dépôt contient, et c'est LA question. Cette mesure ne dit rien ici.");
+} else {
+  for (const f of copies) {
+    check(`le dépôt contient « ${f} »`, suivis.has(f),
+      existsSync(f)
+        ? "il est sur ce disque mais PAS dans le dépôt : le constructeur ne le "
+          + "recevra pas, et la construction mourra le jour du déploiement"
+        : "il n'existe nulle part — la construction meurt à cette ligne");
+  }
+}
+
+/* ET LE .dockerignore NE REPREND PAS D'UNE MAIN CE QUE LE COPY DONNE DE
+ * L'AUTRE. Un chemin ignoré n'est pas copié, et le message d'erreur est le
+ * même que celui d'un fichier absent : « not found ». */
+const ignores = (existsSync(".dockerignore")
+  ? readFileSync(".dockerignore", "utf8") : "")
+  .split("\n").map((l) => l.trim())
+  .filter((l) => l && !l.startsWith("#") && !l.startsWith("!"));
+for (const f of copies) {
+  check(`« ${f} » n'est pas exclu par .dockerignore`,
+    !ignores.includes(f),
+    "un chemin ignoré donne exactement la même erreur qu'un chemin absent");
+}
+
+/* LE VERROU DIT LA MÊME CHOSE QUE package.json. Un verrou périmé n'échoue pas
+ * à la construction : `npm ci` s'arrête net en disant que les deux fichiers ne
+ * sont pas d'accord. Autant l'apprendre ici. */
+const verrou = existsSync("package-lock.json")
+  ? JSON.parse(readFileSync("package-lock.json", "utf8")) : null;
+check("le verrou existe et porte le nom du produit",
+  verrou !== null && verrou.name === pkg.name,
+  `${verrou?.name} ≠ ${pkg.name}`);
+check("il est au format que npm ci sait lire",
+  (verrou?.lockfileVersion ?? 0) >= 2,
+  `lockfileVersion ${verrou?.lockfileVersion}`);
+{
+  const declarees = Object.keys({ ...(pkg.dependencies ?? {}),
+                                  ...(pkg.devDependencies ?? {}) });
+  const verrouillees = new Set(Object.keys(verrou?.packages ?? {})
+    .filter((k) => k.startsWith("node_modules/"))
+    .map((k) => k.slice("node_modules/".length)));
+  const manquantes = declarees.filter((d) => !verrouillees.has(d));
+  check("chaque dépendance déclarée est verrouillée", manquantes.length === 0,
+    manquantes.join(", ") + " — `npm ci` refuserait de poser une dépendance"
+      + " qu'il ne trouve pas dans le verrou, et l'image ne se construirait pas");
+}
 
 check("un railway.json existe", existsSync("railway.json"));
 const rail = existsSync("railway.json")

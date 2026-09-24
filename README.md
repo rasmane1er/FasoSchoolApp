@@ -1006,7 +1006,63 @@ qu'il atteint tous les téléphones du pays, pas seulement ceux qui ont un
 compte Google.
 
 `Dockerfile`, `railway.json`, `DEPLOIEMENT.md`,
-`tests/deploiement.e2e.mjs` (30 assertions).
+`tests/deploiement.e2e.mjs` (41 assertions), `package-lock.json`.
+
+### L'image copiait un fichier que le dépôt n'a jamais contenu
+
+Trouvé dans les journaux de construction de la première mise en ligne réelle.
+L'image mourait à l'étape 4 sur 6 :
+
+```
+COPY package.json package-lock.json ./
+failed to calculate checksum of ref … : "/package-lock.json": not found
+```
+
+`package-lock.json` n'a jamais existé dans ce dépôt. Or l'étape suivante est
+`npm ci`, qui est précisément la commande qui EXIGE un verrou : elle refuse de
+s'exécuter sans lui, par construction. **Aucune mise en ligne n'a donc jamais
+abouti, pas une seule fois.** Le produit tournait sur la machine de celui qui
+l'écrit, où `npm install` avait posé `node_modules` il y a des mois, et nulle
+part ailleurs.
+
+Le témoin de déploiement lisait pourtant ce Dockerfile. Il vérifiait que
+l'image ne tourne pas en root, qu'elle n'installe aucun paquet, qu'elle omet
+les dépendances de développement. Trois affirmations vraies sur une recette qui
+ne pouvait pas se construire : on avait éprouvé ce que l'image DIT, jamais ce
+dont elle a BESOIN.
+
+La correction tient en deux choses. Le verrou est écrit et versionné —
+`npm ci --omit=dev` pose quatorze paquets, `pg` et ses dépendances, sans
+Playwright ni TypeScript. Et le témoin demande désormais, pour chaque fichier
+que le Dockerfile copie nommément, non pas « existe-t-il ? » mais **« `git
+ls-files` le connaît-il ? »** — parce qu'un fichier présent sur le disque de
+celui qui écrit et absent du dépôt est un fichier qui manquera le jour du
+déploiement, et ce jour-là seulement. Une mesure qui aurait interrogé le disque
+aurait répondu « tout va bien ». Le témoin vérifie aussi que `.dockerignore` ne
+reprend pas d'une main ce que le `COPY` donne de l'autre : un chemin ignoré
+produit exactement le même message qu'un chemin absent.
+
+### Un contrôle négatif qui était devenu un contrôle positif, en silence
+
+Trouvé en relançant `check:all` avec une `DATABASE_URL` écrite avec une socket
+Unix plutôt qu'un port. L'épreuve de sauvegarde fabriquait sa panne ainsi :
+
+```js
+ADMIN.replace(/port=\d+/, "port=1")
+```
+
+Sur une URL sans `port=`, la substitution ne remplace rien. `pg_dump`
+réussissait donc parfaitement, et la suite affirmait ensuite, sur une
+sauvegarde valide, que l'échec n'était pas annoncé et qu'un fichier tronqué
+restait : quatre échecs bruyants qui ne disaient rien du produit. Le contraire
+serait arrivé sur un autre défaut — un garde-fou retiré n'aurait pas été vu,
+puisque la panne qu'on croyait provoquer n'avait jamais lieu.
+
+C'est la règle du dépôt sur les gardes, prise du côté du témoin : **une mesure
+doit être nourrie de la bonne valeur, et le seul moyen d'en être sûr est de le
+vérifier.** L'URL morte est désormais construite de toutes pièces, sans
+dépendre de la façon dont celle de travail est écrite, et une assertion dit
+qu'elle diffère bien de celle qui marche.
 
 ### « La réponse au parent qui conteste une note », et elle n'existait que hors ligne
 
@@ -2465,7 +2521,7 @@ qu'ils ont trouvé, dans les sections qui précèdent.
 | suite | ce qu'elle prouve |
 |---|---|
 | `test:credit-epuise` (22) | le crédit épuisé arrête l'envoi au lieu de le nier, le solde ne descend plus sous zéro, et les familles restées sans nouvelle sont nommées — pas comptées |
-| `test:deploiement` (35) | les en-têtes de sécurité couvrent toute forme de réponse, aucun gestionnaire d'événement en ligne ne rend un geste inerte, toutes les migrations sauf la fondatrice se rejouent, et les quatre listes disent la même chose que le répertoire |
+| `test:deploiement` (41) | les en-têtes de sécurité couvrent toute forme de réponse, aucun gestionnaire d'événement en ligne ne rend un geste inerte, toutes les migrations sauf la fondatrice se rejouent, les quatre listes disent la même chose que le répertoire, et **tout fichier que l'image copie est un fichier que le dépôt contient** — demandé à `git ls-files`, jamais au disque |
 | `test:histoire-note` (26) | une note modifiée ou effacée laisse son histoire quel que soit le chemin — écran, appareil, import, arbitrage, `psql` — et l'effacement n'emporte plus la preuve que la note a existé |
 | `test:plafond-declare` (34) | le produit n'écrit plus « déclaré » sur un dossier que rien n'a fait sortir, le plafond ne bouge plus sans nom ni motif, et une grille au-dessus du plafond fait refuser l'émission au lieu de l'avertir |
 | `test:annuler-facture` (35) | une facture d'élève parti s'annule avec un nom, une date et un motif — refusée sans trace par la base, sortie des totaux mais lisible barrée, et réémise en nouvelle ligne au lieu d'être ressuscitée |
@@ -2479,7 +2535,7 @@ qu'ils ont trouvé, dans les sections qui précèdent.
 | `test:cookies` (13) | les deux cookies de session portent `Secure` derrière https et pas en local, et on refuse d'inviter une famille sur une adresse en http |
 | `test:cloisonnement` (16) | l'épreuve d'isolation passe sur un schéma complet, **échoue** sur un schéma auquel il manque la migration 0009, et ne touche à aucune base réelle |
 | `test:installation` (17) | le chemin du premier jour marche du disque nu à la première connexion, et aucune table portant `school_id` n'échappe au RLS |
-| `test:sauvegarde` (15) | la sauvegarde refuse de tourner avec le rôle applicatif, ne laisse aucun fichier quand elle échoue, et son archive se restaure vraiment |
+| `test:sauvegarde` (16) | la sauvegarde refuse de tourner avec le rôle applicatif, ne laisse aucun fichier quand elle échoue, et son archive se restaure vraiment ; son contrôle négatif porte désormais son propre témoin, parce qu'il dépendait de la façon dont `DATABASE_URL` était écrite |
 | `test:bareme` (21) | une note sur 10 compte pour 20/20 dans la moyenne, et aucun des trois chemins de saisie ne rejette plus en silence |
 | `test:justifications` (24) | justifier une absence à une composition fait monter la moyenne du bulletin, et renverser la règle change le calcul |
 | `test:discipline` (29) | l'exclusion définitive est refusée au surveillant même en postant à la main, et un incident retiré reste écrit et barré |
@@ -2670,6 +2726,20 @@ L'image de production téléchargeait un paquet au moment de se construire, pour
 un outil dont le seul rôle était d'exécuter du SQL que sa propre dépendance
 sait exécuter. Une dépendance réseau au moment du démarrage transforme la panne
 de quelqu'un d'autre en panne de l'école.
+
+**Ce qu'une recette copie, le dépôt doit le contenir — et c'est à git qu'on le
+demande, pas au disque.** L'image de production faisait
+`COPY package.json package-lock.json ./` puis `npm ci`, la commande qui EXIGE
+un verrou. `package-lock.json` n'avait jamais existé dans ce dépôt : la
+construction mourait à l'étape 4 sur 6, et aucune mise en ligne n'a abouti, pas
+une seule fois. Le témoin lisait pourtant ce Dockerfile — il vérifiait que
+l'image ne tourne pas en root, qu'elle n'installe rien, qu'elle omet les
+dépendances de développement : trois affirmations vraies sur une recette qui ne
+pouvait pas se construire. On avait éprouvé ce que l'image DIT, jamais ce dont
+elle a BESOIN. Corollaire moins évident, et c'est lui qui compte : un fichier
+présent sur la machine de celui qui écrit et absent de `git ls-files` est un
+fichier qui manquera le jour du déploiement, et ce jour-là seulement — une
+mesure qui interroge le disque aurait donc dit « tout va bien ».
 
 **Une politique ne couvre pas que les chemins auxquels on a pensé.** Les
 en-têtes de sécurité, posés d'abord dans le rendu des pages, laissaient à nu
