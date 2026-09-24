@@ -152,7 +152,7 @@ async function main() {
 
     // provision_school() a posé le contexte pour sa propre transaction ; on le
     // repose explicitement, parce que rien ne garantit qu'il soit encore là.
-    await client.query(`select set_config('fasoschool.school_id', $1, true)`,
+    await client.query(`select set_config('schoolfaso.school_id', $1, true)`,
       [schoolId]);
 
     const u = await client.query(

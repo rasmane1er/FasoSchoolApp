@@ -62,7 +62,7 @@ const purge = async () => {
   const { rows } = await client.query(
     `select school_id from auth_lookup_user($1)`, [TEL]);
   for (const s of rows) {
-    await client.query(`select set_config('fasoschool.school_id', $1, false)`,
+    await client.query(`select set_config('schoolfaso.school_id', $1, false)`,
       [s.school_id]);
     // ON DELETE CASCADE emporte tout ce qui pend à l'établissement.
     await client.query(`delete from schools where id = $1`, [s.school_id])
@@ -147,7 +147,7 @@ try {
     /identifiant interne : ([0-9a-f-]{36})/) ?? [])[1];
   check("l'installateur imprime l'identifiant de l'établissement",
     Boolean(ecole), "sans lui, une école installée est introuvable en base");
-  await client.query(`select set_config('fasoschool.school_id', $1, false)`, [ecole]);
+  await client.query(`select set_config('schoolfaso.school_id', $1, false)`, [ecole]);
 
   const { rows: ec } = await client.query(
     `select id, sector, fee_zone, commune from schools where id = $1`, [ecole]);
@@ -193,7 +193,7 @@ try {
     (await p1.content()).includes("Aucun élève"),
     "c'est la promesse la plus lourde du produit");
 
-  await client.query(`select set_config('fasoschool.school_id', $1, false)`, [ecole]);
+  await client.query(`select set_config('schoolfaso.school_id', $1, false)`, [ecole]);
   const { rows: vus } = await client.query(
     `select (select count(*)::int from students) as eleves,
             (select count(*)::int from grade_entries) as notes,
@@ -205,7 +205,7 @@ try {
     JSON.stringify(vus[0]));
 
   // Et dans l'autre sens : la démonstration n'a rien gagné.
-  await client.query(`select set_config('fasoschool.school_id', $1, false)`, [ecoleDemo]);
+  await client.query(`select set_config('schoolfaso.school_id', $1, false)`, [ecoleDemo]);
   const { rows: dem } = await client.query(
     `select count(*)::int as n from staff where full_name = 'SAWADOGO Rasmane'`);
   check("l'établissement de démonstration ne voit pas le nouveau personnel",

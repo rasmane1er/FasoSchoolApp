@@ -15,7 +15,7 @@
 #
 # Le README prescrivait `npm run db:test:rls` « avant tout développement ». Sur
 # une machine où le produit est installé, la commande échouait : le fichier SQL
-# commençait par `drop role if exists fasoschool_app`, et ce rôle porte des
+# commençait par `drop role if exists schoolfaso_app`, et ce rôle porte des
 # droits dès qu'une base existe. Le test de sûreté du projet ne pouvait donc
 # pas être lancé sur un système installé — c'est-à-dire précisément là où on
 # voudrait le lancer.
@@ -37,12 +37,12 @@ if [ -z "${ADMIN_DATABASE_URL:-}" ]; then
   exit 2
 fi
 
-BASE="fasoschool_cloisonnement_$$"
+BASE="schoolfaso_cloisonnement_$$"
 CIBLE="$(printf '%s' "$ADMIN_DATABASE_URL" | sed -E "s#(://[^/]*)/[^?]*#\1/${BASE}#")"
 
 nettoyer() {
   psql "$ADMIN_DATABASE_URL" -q -c "drop database if exists ${BASE}" >/dev/null 2>&1 || true
-  psql "$ADMIN_DATABASE_URL" -q -c "drop role if exists fasoschool_rls_probe" >/dev/null 2>&1 || true
+  psql "$ADMIN_DATABASE_URL" -q -c "drop role if exists schoolfaso_rls_probe" >/dev/null 2>&1 || true
 }
 trap nettoyer EXIT
 
@@ -82,7 +82,8 @@ psql "$CIBLE" -v ON_ERROR_STOP=1 -q \
   -f db/migrations/0027_annuler_une_facture.sql \
   -f db/migrations/0028_le_plafond_declare.sql \
   -f db/migrations/0029_l_histoire_d_une_note.sql \
-  -f db/migrations/0030_le_credit_qui_ne_retient_rien.sql
+  -f db/migrations/0030_le_credit_qui_ne_retient_rien.sql \
+  -f db/migrations/0031_le_produit_change_de_nom.sql
 echo "migrations appliquées"
 
 echo

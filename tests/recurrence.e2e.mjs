@@ -65,7 +65,7 @@ await client.connect();
 const { rows: sc } = await client.query(
   `select school_id from auth_lookup_user('70000005')`);
 const SCHOOL = sc[0].school_id;
-await client.query(`select set_config('fasoschool.school_id', $1, false)`, [SCHOOL]);
+await client.query(`select set_config('schoolfaso.school_id', $1, false)`, [SCHOOL]);
 
 const MARQUE = "EPREUVE RECURRENCE";
 
@@ -280,7 +280,7 @@ try {
 {
   const c2 = new pg.Client({ connectionString: process.env.DATABASE_URL });
   await c2.connect();
-  await c2.query(`select set_config('fasoschool.school_id', $1, false)`, [SCHOOL]);
+  await c2.query(`select set_config('schoolfaso.school_id', $1, false)`, [SCHOOL]);
   await c2.query(`delete from behavior_incidents where description like $1`,
     ["%" + MARQUE + "%"]);
   await c2.query(`delete from sms_messages where body like '%discipline%'`);

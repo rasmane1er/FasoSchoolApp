@@ -97,25 +97,25 @@ def main() -> None:
 
     for taille in (192, 512):
         img = dessiner(taille, marge=0.0, arrondi=True)
-        chemin = f"{SORTIE}/fasoschool-{taille}.png"
+        chemin = f"{SORTIE}/schoolfaso-{taille}.png"
         img.save(chemin, "PNG", optimize=True)
         fichiers.append(chemin)
 
     # Zone sûre d'Android : la marque doit tenir dans les 80 % centraux.
     # 0.30 de marge la place confortablement à l'intérieur du cercle.
     masquable = dessiner(512, marge=0.30, arrondi=False)
-    masquable.save(f"{SORTIE}/fasoschool-512-masquable.png", "PNG", optimize=True)
-    fichiers.append(f"{SORTIE}/fasoschool-512-masquable.png")
+    masquable.save(f"{SORTIE}/schoolfaso-512-masquable.png", "PNG", optimize=True)
+    fichiers.append(f"{SORTIE}/schoolfaso-512-masquable.png")
 
     # Apple : plein bord, aplati, sans canal alpha.
     pomme = aplatir(dessiner(180, marge=0.06, arrondi=False))
-    pomme.save(f"{SORTIE}/fasoschool-apple-180.png", "PNG", optimize=True)
-    fichiers.append(f"{SORTIE}/fasoschool-apple-180.png")
+    pomme.save(f"{SORTIE}/schoolfaso-apple-180.png", "PNG", optimize=True)
+    fichiers.append(f"{SORTIE}/schoolfaso-apple-180.png")
 
     # L'onglet du navigateur.
     dessiner(32, marge=0.0, arrondi=True).save(
-        f"{SORTIE}/fasoschool-32.png", "PNG", optimize=True)
-    fichiers.append(f"{SORTIE}/fasoschool-32.png")
+        f"{SORTIE}/schoolfaso-32.png", "PNG", optimize=True)
+    fichiers.append(f"{SORTIE}/schoolfaso-32.png")
 
     for f in fichiers:
         print(f"{f}  {os.path.getsize(f)} octets")

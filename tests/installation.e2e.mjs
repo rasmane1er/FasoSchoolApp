@@ -43,8 +43,8 @@ const check = (name, cond, detail = "") => {
   else { failures.push(`${name}${detail ? " — " + detail : ""}`); console.log(`  FAIL ${name} ${detail}`); }
 };
 
-const NOM_BASE = "fasoschool_installation_controle";
-const ROLE = "fasoschool_controle_app";
+const NOM_BASE = "schoolfaso_installation_controle";
+const ROLE = "schoolfaso_controle_app";
 const TEL = "76998877";
 
 /* On dérive les URL depuis DATABASE_URL : même hôte, même socket, rôle et base

@@ -84,7 +84,7 @@ try {
     process.exit(1);
   }
   await client.query(
-    `select set_config('fasoschool.school_id', $1, false)`, [sc[0].school_id]);
+    `select set_config('schoolfaso.school_id', $1, false)`, [sc[0].school_id]);
 
   console.log("Le jeu de démonstration, compté après tout le reste");
 

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 #
-# Préparer la base d'un serveur FasoSchool.
+# Préparer la base d'un serveur SchoolFaso.
 #
 # POURQUOI CE SCRIPT EXISTE. Le README disait :
 #
-#     createdb fasoschool
-#     createuser fasoschool_app --pwprompt        # PAS superutilisateur
-#     export DATABASE_URL=postgres://fasoschool_app@localhost/fasoschool
+#     createdb schoolfaso
+#     createuser schoolfaso_app --pwprompt        # PAS superutilisateur
+#     export DATABASE_URL=postgres://schoolfaso_app@localhost/schoolfaso
 #     npm run db:migrate
 #
 # Suivi à la lettre, cela ne marche pas — et échoue de deux façons dont la
@@ -28,16 +28,16 @@
 # La première requête de l'application aurait échoué.
 #
 #   ADMIN_DATABASE_URL='postgres://postgres@localhost/postgres' \
-#   APP_ROLE=fasoschool_app APP_PASSWORD='...' \
-#   ./scripts/preparer-base.sh fasoschool
+#   APP_ROLE=schoolfaso_app APP_PASSWORD='...' \
+#   ./scripts/preparer-base.sh schoolfaso
 #
 # Le script est idempotent : on peut le relancer sur une base existante pour
 # appliquer les migrations ajoutées depuis.
 #
 set -euo pipefail
 
-BASE="${1:-fasoschool}"
-APP_ROLE="${APP_ROLE:-fasoschool_app}"
+BASE="${1:-schoolfaso}"
+APP_ROLE="${APP_ROLE:-schoolfaso_app}"
 
 if [ -z "${ADMIN_DATABASE_URL:-}" ]; then
   echo "ADMIN_DATABASE_URL n'est pas défini." >&2
@@ -128,7 +128,8 @@ psql "$CIBLE" -v ON_ERROR_STOP=1 -q \
   -f db/migrations/0027_annuler_une_facture.sql \
   -f db/migrations/0028_le_plafond_declare.sql \
   -f db/migrations/0029_l_histoire_d_une_note.sql \
-  -f db/migrations/0030_le_credit_qui_ne_retient_rien.sql
+  -f db/migrations/0030_le_credit_qui_ne_retient_rien.sql \
+  -f db/migrations/0031_le_produit_change_de_nom.sql
 echo "migrations appliquées"
 
 echo

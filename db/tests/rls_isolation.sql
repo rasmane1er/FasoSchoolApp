@@ -8,7 +8,7 @@
 -- la supprime après.
 --
 -- Il utilisait auparavant le nom du rôle applicatif de production,
--- `fasoschool_app`, et commençait par `drop role`. Sur une machine où le
+-- `schoolfaso_app`, et commençait par `drop role`. Sur une machine où le
 -- produit est installé, cela échouait — le rôle porte des droits — et, s'il
 -- avait réussi, il aurait supprimé le compte de l'application en service pour
 -- le recréer avec le mot de passe « test ». Le test de sûreté du projet était
@@ -20,11 +20,11 @@
 \set ON_ERROR_STOP on
 
 -- Rôle jetable, nommé pour qu'on ne le confonde avec aucun compte réel.
-drop role if exists fasoschool_rls_probe;
-create role fasoschool_rls_probe login password 'epreuve';
-grant usage on schema public to fasoschool_rls_probe;
-grant select, insert, update, delete on all tables in schema public to fasoschool_rls_probe;
-grant execute on function current_school_id() to fasoschool_rls_probe;
+drop role if exists schoolfaso_rls_probe;
+create role schoolfaso_rls_probe login password 'epreuve';
+grant usage on schema public to schoolfaso_rls_probe;
+grant select, insert, update, delete on all tables in schema public to schoolfaso_rls_probe;
+grant execute on function current_school_id() to schoolfaso_rls_probe;
 
 -- Deux établissements concurrents.
 insert into schools (id, name, sector, fee_zone) values
@@ -66,8 +66,8 @@ insert into auth_sessions (user_id, school_id, access_token_hash, refresh_token_
    'acces-b','refresh-b', now() + interval '1 hour');
 
 \echo '--- contexte : établissement A ---'
-set role fasoschool_rls_probe;
-select set_config('fasoschool.school_id', '11111111-1111-1111-1111-111111111111', false);
+set role schoolfaso_rls_probe;
+select set_config('schoolfaso.school_id', '11111111-1111-1111-1111-111111111111', false);
 
 -- Chaque assertion doit passer.
 do $$
@@ -142,8 +142,8 @@ end $$;
 -- migration 0009, et rien ici ne l'avait vu : l'épreuve regardait les sessions
 -- des familles et pas celles des agents. Une assertion n'existe que pour ce
 -- qu'on a pensé à regarder.
-set role fasoschool_rls_probe;
-select set_config('fasoschool.school_id', '11111111-1111-1111-1111-111111111111', false);
+set role schoolfaso_rls_probe;
+select set_config('schoolfaso.school_id', '11111111-1111-1111-1111-111111111111', false);
 do $$
 declare n int;
 begin
@@ -175,8 +175,8 @@ values ('11111111-1111-1111-1111-111111111111', 'Congés propres à A', 'conges'
        (null, 'Fête légale nationale', 'fete',
         '2027-02-10', '2027-02-10', true);
 
-set role fasoschool_rls_probe;
-select set_config('fasoschool.school_id', '22222222-2222-2222-2222-222222222222', false);
+set role schoolfaso_rls_probe;
+select set_config('schoolfaso.school_id', '22222222-2222-2222-2222-222222222222', false);
 do $$
 declare n int;
 begin
@@ -209,10 +209,10 @@ end $$;
 -- Sans ce `set role`, l'assertion suivante interrogeait la base en
 -- superutilisateur et annonçait une fuite qui n'existe pas. Une épreuve de
 -- cloisonnement qui oublie sous quel rôle elle parle ne prouve rien.
-set role fasoschool_rls_probe;
+set role schoolfaso_rls_probe;
 
 -- Sans contexte posé : on ne doit rien voir du tout.
-select set_config('fasoschool.school_id', '', false);
+select set_config('schoolfaso.school_id', '', false);
 do $$
 declare n int;
 begin

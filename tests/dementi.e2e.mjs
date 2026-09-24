@@ -71,7 +71,7 @@ await client.connect();
 const { rows: sc } = await client.query(
   `select school_id from auth_lookup_user('70000001')`);
 const SCHOOL = sc[0].school_id;
-await client.query(`select set_config('fasoschool.school_id', $1, false)`, [SCHOOL]);
+await client.query(`select set_config('schoolfaso.school_id', $1, false)`, [SCHOOL]);
 
 /* Un jour d'école libre, demandé à la base. Le décalage est propre à cette
  * suite : un jour n'est à soi que si personne d'autre ne le prend. */

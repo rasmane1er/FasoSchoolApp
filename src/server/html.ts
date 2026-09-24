@@ -270,13 +270,13 @@ const initials = (name: string) =>
  */
 const ENTETE_APPLICATION = `<link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#22305C">
-<link rel="icon" href="/icones/fasoschool-32.png" sizes="32x32">
-<link rel="icon" href="/icones/fasoschool-192.png" sizes="192x192">
-<link rel="apple-touch-icon" href="/icones/fasoschool-apple-180.png">
+<link rel="icon" href="/icones/schoolfaso-32.png" sizes="32x32">
+<link rel="icon" href="/icones/schoolfaso-192.png" sizes="192x192">
+<link rel="apple-touch-icon" href="/icones/schoolfaso-apple-180.png">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="FasoSchool">`;
+<meta name="apple-mobile-web-app-title" content="SchoolFaso">`;
 
 export function page(chrome: PageChrome, title: string, body: string): string {
   return `<!doctype html>
@@ -284,7 +284,7 @@ export function page(chrome: PageChrome, title: string, body: string): string {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(title)} — FasoSchool</title>
+<title>${esc(title)} — SchoolFaso</title>
 ${ENTETE_APPLICATION}
 <style>${CSS}</style>
 </head>
@@ -292,7 +292,7 @@ ${ENTETE_APPLICATION}
 <script src="/app.js" defer></script>
 <div class="shell">
   <aside class="side">
-    <div class="brand"><b>FasoSchool</b><span>${esc(chrome.schoolName)}</span></div>
+    <div class="brand"><b>SchoolFaso</b><span>${esc(chrome.schoolName)}</span></div>
     <nav>
       ${navPour(chrome.user, chrome.active)}
     </nav>
@@ -340,7 +340,7 @@ export function loginPage(opts: {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Connexion — FasoSchool</title>
+<title>Connexion — SchoolFaso</title>
 ${ENTETE_APPLICATION}
 <style>${CSS}
 .split{display:flex;min-height:100vh}
@@ -355,7 +355,7 @@ ${ENTETE_APPLICATION}
 <div class="split">
   <div class="left">
     <div>
-      <div style="font-family:var(--serif);font-size:30px;font-weight:700">FasoSchool</div>
+      <div style="font-family:var(--serif);font-size:30px;font-weight:700">SchoolFaso</div>
       <div style="font-size:13px;color:rgba(255,255,255,.62);margin-top:4px">Gestion scolaire — Burkina Faso</div>
     </div>
     <div style="margin-top:52px;font-family:var(--serif);font-size:24px;font-weight:600;line-height:1.35">

@@ -62,7 +62,7 @@ const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
 await client.connect();
 const { rows: sc } = await client.query(
   `select school_id from auth_lookup_user('70000001')`);
-await client.query(`select set_config('fasoschool.school_id', $1, false)`, [sc[0].school_id]);
+await client.query(`select set_config('schoolfaso.school_id', $1, false)`, [sc[0].school_id]);
 
 /* CE QU'ON EMPRUNTE : trois notes, et l'histoire semée avec le jeu. On rend
  * les notes à leur valeur, et on retire les lignes d'histoire que CETTE suite
@@ -295,8 +295,8 @@ try {
    * déclencheur retomberait sur « online », ce qu'on vérifie juste au-dessus. */
   await client.query(`begin`);
   await client.query(
-    `select set_config('fasoschool.school_id', $1, true)`, [sc[0].school_id]);
-  await client.query(`select set_config('fasoschool.grade_source', 'offline', true)`);
+    `select set_config('schoolfaso.school_id', $1, true)`, [sc[0].school_id]);
+  await client.query(`select set_config('schoolfaso.grade_source', 'offline', true)`);
   await client.query(`update grade_entries set score = 8 where id = $1`, [C.id]);
   await client.query(`commit`);
   const h5b = await histoire(C);
@@ -305,8 +305,8 @@ try {
 
   await client.query(`begin`);
   await client.query(
-    `select set_config('fasoschool.school_id', $1, true)`, [sc[0].school_id]);
-  await client.query(`select set_config('fasoschool.grade_source', 'n_importe_quoi', true)`);
+    `select set_config('schoolfaso.school_id', $1, true)`, [sc[0].school_id]);
+  await client.query(`select set_config('schoolfaso.grade_source', 'n_importe_quoi', true)`);
   await client.query(`update grade_entries set score = 9 where id = $1`, [C.id]);
   await client.query(`commit`);
   const h5c = await histoire(C);

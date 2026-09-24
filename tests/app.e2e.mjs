@@ -56,7 +56,7 @@ async function connecter(page, phone) {
   await client.connect();
   const { rows } = await client.query(`select school_id from auth_lookup_user('70000001')`);
   if (rows[0]) {
-    await client.query(`select set_config('fasoschool.school_id', $1, false)`, [rows[0].school_id]);
+    await client.query(`select set_config('schoolfaso.school_id', $1, false)`, [rows[0].school_id]);
 
 /* UN JOUR D'ÉCOLE CHOISI DANS L'ANNÉE, PAS ÉCRIT EN DUR.
  *
@@ -144,7 +144,7 @@ await clientCalendrier.connect();
     `select school_id from auth_lookup_user('70000001')`);
   if (rows[0]) {
     await clientCalendrier.query(
-      `select set_config('fasoschool.school_id', $1, false)`, [rows[0].school_id]);
+      `select set_config('schoolfaso.school_id', $1, false)`, [rows[0].school_id]);
   }
 }
 const calendrier = await emprunterCalendrier(clientCalendrier);
@@ -449,7 +449,7 @@ try {
   const { rows: ec } = await fin.query(
     `select school_id from auth_lookup_user('70000001')`).catch(() => ({ rows: [] }));
   if (ec[0]) {
-    await fin.query(`select set_config('fasoschool.school_id', $1, false)`,
+    await fin.query(`select set_config('schoolfaso.school_id', $1, false)`,
       [ec[0].school_id]).catch(() => {});
     await fin.query(
       `delete from sms_messages

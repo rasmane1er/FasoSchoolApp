@@ -35,11 +35,11 @@ export async function emprunterLesNotes(client) {
      aucune ligne, et l'emprunt croirait partir d'une base vide — puis
      supprimerait tout au retour. */
   const { rows: ctx } = await client.query(
-    `select coalesce(current_setting('fasoschool.school_id', true), '') as s`);
+    `select coalesce(current_setting('schoolfaso.school_id', true), '') as s`);
   if (ctx[0].s === "") {
     throw new Error(
       "emprunterLesNotes : le contexte d'établissement n'est pas posé. "
-      + "Appelez set_config('fasoschool.school_id', …) d'abord — sinon "
+      + "Appelez set_config('schoolfaso.school_id', …) d'abord — sinon "
       + "l'emprunt part d'une base vide et le retour efface tout.");
   }
 

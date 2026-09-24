@@ -10,7 +10,7 @@
 (function () {
   "use strict";
 
-  var DB = "fasoschool", STORE = "outbox", VERSION = 1;
+  var DB = "schoolfaso", STORE = "outbox", VERSION = 1;
 
   function openDb() {
     return new Promise(function (resolve, reject) {
@@ -42,7 +42,7 @@
   var all = function () { return tx("readonly", function (s) { return s.getAll(); }); };
 
   function deviceId() {
-    var k = "fasoschool.device";
+    var k = "schoolfaso.device";
     var v = null;
     try { v = localStorage.getItem(k); } catch (e) { /* navigation privée */ }
     if (!v) {

@@ -102,16 +102,16 @@ create index if not exists grade_entry_revisions_note
 -- ---------------------------------------------------------------------------
 -- 2. LE DÉCLENCHEUR.
 --
--- D'OÙ PARLE LE CODE : `fasoschool.grade_source`, lu comme `school_id` l'est
+-- D'OÙ PARLE LE CODE : `schoolfaso.grade_source`, lu comme `school_id` l'est
 -- déjà. Non posé, c'est « online » — le chemin normal, celui qui n'écrivait
 -- rien. Un défaut d'oubli doit retomber sur la valeur la plus probable, pas
 -- sur un refus.
 create or replace function source_de_saisie()
 returns text language sql stable as $$
   select case
-    when coalesce(current_setting('fasoschool.grade_source', true), '') in
+    when coalesce(current_setting('schoolfaso.grade_source', true), '') in
            ('online', 'offline', 'import', 'correction')
-      then current_setting('fasoschool.grade_source', true)
+      then current_setting('schoolfaso.grade_source', true)
     else 'online'
   end;
 $$;

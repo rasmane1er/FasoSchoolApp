@@ -1,4 +1,4 @@
--- FasoSchool — référentiel national et valeurs par défaut
+-- SchoolFaso — référentiel national et valeurs par défaut
 --
 -- Deux parties :
 --   1. Le référentiel national (niveaux, séries, matières, rôles), partagé
@@ -118,7 +118,7 @@ on conflict (code) do nothing;
 --
 -- L'authentification est PAR NATURE antérieure au locataire : on cherche un
 -- utilisateur par son téléphone avant de savoir de quel établissement il
--- relève, donc avant de pouvoir poser fasoschool.school_id. Sous RLS strict,
+-- relève, donc avant de pouvoir poser schoolfaso.school_id. Sous RLS strict,
 -- cette recherche ne renvoie rien et personne ne peut se connecter.
 --
 -- Plutôt que d'affaiblir les politiques de users, staff, user_roles et
@@ -197,7 +197,7 @@ create or replace function provision_school(
 declare
   v_id uuid := uuid_generate_v4();
 begin
-  perform set_config('fasoschool.school_id', v_id::text, true);
+  perform set_config('schoolfaso.school_id', v_id::text, true);
 
   insert into schools (id, name, sector, fee_zone, commune, region)
   values (v_id, p_name, p_sector, p_fee_zone, p_commune, p_region);

@@ -350,13 +350,13 @@ const shell = (title: string, body: string): string => `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(title)} — FasoSchool</title>
+<title>${esc(title)} — SchoolFaso</title>
 <meta name="theme-color" content="#2C3F7C">
-<link rel="icon" href="/icones/fasoschool-32.png" sizes="32x32">
+<link rel="icon" href="/icones/schoolfaso-32.png" sizes="32x32">
 <style>${CSS}</style>
 </head>
 <body>
-<div class="bar"><b>FasoSchool</b><a href="/famille/sortie">Quitter</a></div>
+<div class="bar"><b>SchoolFaso</b><a href="/famille/sortie">Quitter</a></div>
 <div class="wrap">${body}</div>
 </body></html>`;
 

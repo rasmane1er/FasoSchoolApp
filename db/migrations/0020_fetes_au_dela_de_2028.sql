@@ -11,7 +11,7 @@
 -- démonstration était lui aussi épinglé sur 2026-2027, à l'intérieur de la
 -- fenêtre.
 --
--- Une école qui ouvre FasoSchool à la rentrée 2029 n'a donc AUCUNE fête légale
+-- Une école qui ouvre SchoolFaso à la rentrée 2029 n'a donc AUCUNE fête légale
 -- au calendrier. Conséquences, dans l'ordre où elles se produisent :
 --
 --   * l'appel du matin s'ouvre le 25 décembre, le 1er janvier, le 8 mars ;

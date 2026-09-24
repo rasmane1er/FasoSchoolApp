@@ -1,5 +1,5 @@
 /**
- * Serveur applicatif FasoSchool.
+ * Serveur applicatif SchoolFaso.
  *
  * HTTP natif, rendu côté serveur, formulaires classiques. Aucune dépendance
  * hors `pg`. Une page pèse quelques dizaines de kilo-octets et fonctionne sur
@@ -202,7 +202,7 @@ export function estSecurise(req: IncomingMessage): boolean {
     .split(",")[0]!.trim().toLowerCase();
   if (transmis === "https") return true;
   if ((req.socket as any)?.encrypted === true) return true;
-  return (process.env.FASOSCHOOL_PUBLIC_URL ?? "").trim()
+  return (process.env.SCHOOLFASO_PUBLIC_URL ?? "").trim()
     .toLowerCase().startsWith("https://");
 }
 
@@ -1634,16 +1634,16 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     "/hors-ligne": { fichier: "hors-ligne.html", type: "text/html; charset=utf-8" },
     "/manifest.webmanifest": {
       fichier: "manifest.webmanifest", type: "application/manifest+json; charset=utf-8" },
-    "/icones/fasoschool-32.png": {
-      fichier: "icones/fasoschool-32.png", type: "image/png", binaire: true },
-    "/icones/fasoschool-192.png": {
-      fichier: "icones/fasoschool-192.png", type: "image/png", binaire: true },
-    "/icones/fasoschool-512.png": {
-      fichier: "icones/fasoschool-512.png", type: "image/png", binaire: true },
-    "/icones/fasoschool-512-masquable.png": {
-      fichier: "icones/fasoschool-512-masquable.png", type: "image/png", binaire: true },
-    "/icones/fasoschool-apple-180.png": {
-      fichier: "icones/fasoschool-apple-180.png", type: "image/png", binaire: true },
+    "/icones/schoolfaso-32.png": {
+      fichier: "icones/schoolfaso-32.png", type: "image/png", binaire: true },
+    "/icones/schoolfaso-192.png": {
+      fichier: "icones/schoolfaso-192.png", type: "image/png", binaire: true },
+    "/icones/schoolfaso-512.png": {
+      fichier: "icones/schoolfaso-512.png", type: "image/png", binaire: true },
+    "/icones/schoolfaso-512-masquable.png": {
+      fichier: "icones/schoolfaso-512-masquable.png", type: "image/png", binaire: true },
+    "/icones/schoolfaso-apple-180.png": {
+      fichier: "icones/schoolfaso-apple-180.png", type: "image/png", binaire: true },
   };
   const statique = STATIC[path];
   if (req.method === "GET" && statique) {
@@ -1761,7 +1761,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     } catch { base = false; }
     res.writeHead(base ? 200 : 503, { "content-type": "application/json" });
     return res.end(JSON.stringify({
-      ok: base, service: "fasoschool", base,
+      ok: base, service: "schoolfaso", base,
       // Sans ce champ, rien en dehors du serveur ne pouvait distinguer une
       // installation qui envoie d'une qui fait semblant.
       sms: VERDICT.canal, simule: Boolean(VERDICT.simule),
@@ -2591,7 +2591,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
  * de l'installation. */
 const VERDICT = verdictCanal();
 if (!VERDICT.ok) {
-  console.error("\nFasoSchool refuse de démarrer.\n");
+  console.error("\nSchoolFaso refuse de démarrer.\n");
   console.error(VERDICT.refus);
   console.error("");
   process.exit(2);
@@ -2615,7 +2615,7 @@ const server = createServer((req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`FasoSchool sur http://localhost:${PORT}`);
+  console.log(`SchoolFaso sur http://localhost:${PORT}`);
 });
 
 const stop = async () => { server.close(); await pool.end(); process.exit(0); };

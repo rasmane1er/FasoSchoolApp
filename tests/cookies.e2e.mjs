@@ -40,7 +40,7 @@ const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
 await client.connect();
 const { rows: ecole } = await client.query(
   `select school_id from auth_lookup_user('70000001')`);
-await client.query(`select set_config('fasoschool.school_id', $1, false)`,
+await client.query(`select set_config('schoolfaso.school_id', $1, false)`,
   [ecole[0].school_id]);
 await client.query(`delete from auth_rate_limits`);
 await client.query(`delete from auth_otp_challenges`);
@@ -79,7 +79,7 @@ const cookieDeConnexion = async (port, entetes = {}) => {
 
 try {
   console.log("\nEn développement local, pas de Secure — sinon on ne se connecte plus");
-  await lancer(4219, { FASOSCHOOL_PUBLIC_URL: "" });
+  await lancer(4219, { SCHOOLFASO_PUBLIC_URL: "" });
   const local = await cookieDeConnexion(4219);
   check("la connexion aboutit", Boolean(local.cookie), "aucun cookie posé");
   check("le cookie est HttpOnly", /HttpOnly/i.test(local.cookie ?? ""));
@@ -96,7 +96,7 @@ try {
     /HttpOnly/i.test(derriere.cookie ?? "") && /SameSite=Lax/i.test(derriere.cookie ?? ""));
 
   console.log("\nAvec une adresse publique en https, Secure est posé aussi");
-  await lancer(4220, { FASOSCHOOL_PUBLIC_URL: "https://wend-panga.example.bf" });
+  await lancer(4220, { SCHOOLFASO_PUBLIC_URL: "https://wend-panga.example.bf" });
   const publique = await cookieDeConnexion(4220);
   check("Secure sans même l'en-tête du proxy",
     /;\s*Secure/i.test(publique.cookie ?? ""), publique.cookie ?? "");
@@ -133,7 +133,7 @@ try {
   const faux = { userId: null, schoolId: sc[0].school_id, fullName: "Contrôle",
                  roles: ["censeur"], fonction: "censeur" };
 
-  process.env.FASOSCHOOL_PUBLIC_URL = "http://wend-panga.example.bf";
+  process.env.SCHOOLFASO_PUBLIC_URL = "http://wend-panga.example.bf";
   const enClair = await previenirFamilles(faux, kl[0].id, kl[0].term_id);
   check("L'ENVOI EST REFUSÉ EN HTTP",
     (enClair.error ?? "").includes("voyagerait en clair"),
@@ -141,7 +141,7 @@ try {
   check("et le refus dit quoi faire", (enClair.error ?? "").includes("https"));
   check("rien n'est parti", enClair.envoyes === 0);
 
-  process.env.FASOSCHOOL_PUBLIC_URL = "http://localhost:4180";
+  process.env.SCHOOLFASO_PUBLIC_URL = "http://localhost:4180";
   const enLocal = await previenirFamilles(faux, kl[0].id, kl[0].term_id);
   check("mais localhost reste accepté : c'est le développement, pas une famille",
     !(enLocal.error ?? "").includes("voyagerait en clair"),

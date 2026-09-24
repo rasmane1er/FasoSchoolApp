@@ -12,8 +12,8 @@
 # du fichier est-elle celle du jour de la sauvegarde.
 #
 #   ADMIN_DATABASE_URL='postgres://postgres@/postgres' \
-#   FASOSCHOOL_PASSPHRASE='...' \
-#   ./scripts/restauration-verifiee.sh sauvegardes/fasoschool-20260906-1400.dump.gpg
+#   SCHOOLFASO_PASSPHRASE='...' \
+#   ./scripts/restauration-verifiee.sh sauvegardes/schoolfaso-20260906-1400.dump.gpg
 #
 set -euo pipefail
 
@@ -27,8 +27,8 @@ if [ -z "${ADMIN_DATABASE_URL:-}" ]; then
   echo "ADMIN_DATABASE_URL n'est pas défini (droit de créer une base)." >&2
   exit 2
 fi
-if [ -z "${FASOSCHOOL_PASSPHRASE:-}" ]; then
-  echo "FASOSCHOOL_PASSPHRASE n'est pas défini." >&2
+if [ -z "${SCHOOLFASO_PASSPHRASE:-}" ]; then
+  echo "SCHOOLFASO_PASSPHRASE n'est pas défini." >&2
   exit 2
 fi
 
@@ -42,7 +42,7 @@ else
   echo "faiblesse."
 fi
 
-CIBLE="fasoschool_epreuve_$$"
+CIBLE="schoolfaso_epreuve_$$"
 
 # Construire l'URL de la base jetable en ne remplaçant QUE le nom de base :
 # une URL peut porter des paramètres (?host=/tmp/pgsock&port=5433) qu'une
@@ -64,7 +64,7 @@ echo
 echo "--- restauration dans une base jetable ---"
 psql "$ADMIN_DATABASE_URL" -q -c "create database \"$CIBLE\""
 
-gpg --batch --quiet --decrypt --passphrase-fd 3 "$ARCHIVE" 3<<< "$FASOSCHOOL_PASSPHRASE" \
+gpg --batch --quiet --decrypt --passphrase-fd 3 "$ARCHIVE" 3<<< "$SCHOOLFASO_PASSPHRASE" \
   | pg_restore --dbname "$CIBLE_URL" --no-owner --no-privileges 2>&1 \
   | grep -v "^$" || true
 

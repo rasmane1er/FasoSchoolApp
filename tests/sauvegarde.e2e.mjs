@@ -37,7 +37,7 @@ const check = (name, cond, detail = "") => {
 };
 
 const PASS = "epreuve-de-restauration-controle";
-const dossier = await mkdtemp(join(tmpdir(), "fasoschool-sauv-"));
+const dossier = await mkdtemp(join(tmpdir(), "schoolfaso-sauv-"));
 
 /* L'URL d'administration : le propriétaire des tables, qui contourne le RLS.
    On la déduit de DATABASE_URL en changeant seulement le rôle — la suite doit
@@ -55,12 +55,12 @@ const fichiers = async () => (await readdir(dossier)).sort();
 try {
   console.log("\nCe que la sauvegarde refuse de faire");
 
-  const sansPass = await lancer({ ADMIN_DATABASE_URL: ADMIN, FASOSCHOOL_PASSPHRASE: "" });
+  const sansPass = await lancer({ ADMIN_DATABASE_URL: ADMIN, SCHOOLFASO_PASSPHRASE: "" });
   check("sans phrase de passe, elle refuse",
     sansPass.code !== 0 && sansPass.stderr.includes("en clair"),
     "une sauvegarde en clair des données d'élèves ne doit pas exister");
 
-  const sansAdmin = await lancer({ ADMIN_DATABASE_URL: "", FASOSCHOOL_PASSPHRASE: PASS });
+  const sansAdmin = await lancer({ ADMIN_DATABASE_URL: "", SCHOOLFASO_PASSPHRASE: PASS });
   check("sans URL d'administration, elle refuse",
     sansAdmin.code !== 0 && sansAdmin.stderr.includes("row-level security"),
     "et elle DIT pourquoi : c'était le défaut, le script demandait la variable "
@@ -75,7 +75,7 @@ try {
      changé, disque plein. Avant le garde-fou, elle laissait un fichier. */
   const mort = await lancer({
     ADMIN_DATABASE_URL: ADMIN.replace(/port=\d+/, "port=1"),
-    FASOSCHOOL_PASSPHRASE: PASS });
+    SCHOOLFASO_PASSPHRASE: PASS });
   check("l'échec est annoncé", mort.code !== 0);
   check("et il est annoncé comme un ÉCHEC, pas comme un avertissement",
     mort.stderr.includes("ÉCHOUÉE"), mort.stderr.slice(0, 200));
@@ -86,7 +86,7 @@ try {
       + "un jour de panne en croyant tenir ses données");
 
   console.log("\nUne vraie sauvegarde");
-  const bonne = await lancer({ ADMIN_DATABASE_URL: ADMIN, FASOSCHOOL_PASSPHRASE: PASS });
+  const bonne = await lancer({ ADMIN_DATABASE_URL: ADMIN, SCHOOLFASO_PASSPHRASE: PASS });
   check("elle réussit", bonne.code === 0, bonne.stderr.slice(0, 300));
   const produits = await fichiers();
   const archive = produits.find((f) => f.endsWith(".dump.gpg"));
@@ -113,7 +113,7 @@ try {
   const drill = await execFileP("bash",
     ["scripts/restauration-verifiee.sh", join(dossier, archive)],
     { env: { ...process.env, ADMIN_DATABASE_URL: ADMIN.replace(/\/demo\?/, "/postgres?"),
-             FASOSCHOOL_PASSPHRASE: PASS } })
+             SCHOOLFASO_PASSPHRASE: PASS } })
     .then((r) => ({ ...r, code: 0 }))
     .catch((e) => ({ stdout: e.stdout ?? "", stderr: e.stderr ?? "", code: e.code ?? 1 }));
   check("la restauration d'épreuve réussit", drill.code === 0,

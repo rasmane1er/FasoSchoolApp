@@ -182,10 +182,10 @@ do $$
 declare e uuid;
 begin
   for e in select id from schools loop
-    perform set_config('fasoschool.school_id', e::text, true);
+    perform set_config('schoolfaso.school_id', e::text, true);
     perform seed_gabarits_sms(e);
   end loop;
-  perform set_config('fasoschool.school_id', '', true);
+  perform set_config('schoolfaso.school_id', '', true);
 end $$;
 
 -- Et les suivants. On ne recopie pas `seed_school_defaults` : on ajoute
@@ -201,7 +201,7 @@ create or replace function provision_school(
 declare
   v_id uuid := uuid_generate_v4();
 begin
-  perform set_config('fasoschool.school_id', v_id::text, true);
+  perform set_config('schoolfaso.school_id', v_id::text, true);
 
   insert into schools (id, name, sector, fee_zone, commune, region)
   values (v_id, p_name, p_sector, p_fee_zone, p_commune, p_region);

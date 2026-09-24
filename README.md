@@ -1,4 +1,4 @@
-# FasoSchool
+# SchoolFaso
 
 Plateforme de gestion scolaire pour les établissements privés du Burkina Faso.
 
@@ -162,7 +162,7 @@ dépôt avait un test d'isolation depuis le premier jour. Deux choses n'allaient
 pas, et une troisième s'est révélée en les corrigeant.
 
 **On ne pouvait pas le lancer.** Le fichier SQL commençait par
-`drop role if exists fasoschool_app` — le compte de l'application. Sur une
+`drop role if exists schoolfaso_app` — le compte de l'application. Sur une
 machine où le produit est installé, ce rôle porte des droits et PostgreSQL
 refuse de le supprimer : la commande prescrite « avant tout développement »
 échouait précisément là où elle aurait servi.
@@ -230,7 +230,7 @@ ou à mentir.
 
 Deux refus, pour les mêmes raisons qu'ailleurs :
 
-- **sans adresse publique configurée** (`FASOSCHOOL_PUBLIC_URL`), on n'envoie
+- **sans adresse publique configurée** (`SCHOOLFASO_PUBLIC_URL`), on n'envoie
   rien. Un SMS payé qui renvoie vers une adresse inexistante coûte de l'argent
   et de la crédibilité ;
 - **crédit insuffisant : rien ne part.** La moitié des familles prévenue et
@@ -425,7 +425,7 @@ joindre des parents, cela passe par la vie scolaire, qui en répond.
 C'est le premier geste d'une installation — avant l'année scolaire, avant les
 classes, avant les élèves — et il n'existait pas. Une seule ligne du projet
 créait un compte : `scripts/demo.ts`. Un établissement qui installait
-FasoSchool ne pouvait inscrire ni son proviseur, ni son censeur, ni un seul de
+SchoolFaso ne pouvait inscrire ni son proviseur, ni son censeur, ni un seul de
 ses enseignants sans ouvrir psql.
 
 Un compte se crée avec un nom, un numéro à huit chiffres et une fonction. Le
@@ -853,6 +853,87 @@ seule lecture.
 
 `db/migrations/0030_le_credit_qui_ne_retient_rien.sql`,
 `tests/credit-epuise.e2e.mjs` (22 assertions).
+
+### Le produit change de nom, et le nom portait la frontière
+
+FasoSchool devient **SchoolFaso**. Quatre-vingt-quatre fichiers, et ce serait
+une affaire de texte si une chaîne de caractères ne portait pas, au milieu, la
+frontière entre deux établissements :
+
+```sql
+current_setting('fasoschool.school_id')
+```
+
+C'est le réglage de session que lit `current_school_id()`, dont dépend **chaque
+politique de row-level security**. Le code applicatif le pose, la base le lit.
+Renommer l'un sans l'autre ne provoque pas une fuite — il provoque l'inverse :
+plus aucune ligne n'est visible et le produit s'arrête net. C'est la bonne façon
+d'échouer, et il n'y a aucune raison de l'infliger à une école un mardi matin,
+pendant l'appel.
+
+`current_school_id()` lit donc le nouveau nom et **retombe sur l'ancien**. Une
+base déjà en service continue de répondre pendant que le code se met à jour,
+dans l'ordre que l'on veut, sans fenêtre où rien ne marche. La fonction est
+`create or replace`, donc remplacée à chaque déploiement — y compris sur les
+bases où la migration fondatrice, qui l'avait créée, n'est plus rejouée.
+
+Éprouvé pour de bon, et pas seulement raisonné : `tests/cloisonnement.e2e.mjs`
+vérifie que l'ancien nom montre autant d'élèves que le nouveau, **et** que sans
+aucun des deux il n'en montre aucun — car c'est cela, la frontière. Le produit
+a aussi été lancé en entier avec le code posant l'ancien nom : il marche. Le
+jour où l'on retirera la retombée, c'est cette suite qui le dira.
+
+Ce qui n'a PAS été renommé, et pourquoi : ni les tables, ni les colonnes, ni les
+politiques — elles ne portent pas le nom du produit. Le seul endroit où il
+apparaissait dans la base était ce réglage de session, et les noms de rôles, qui
+sont des objets d'administration recréés par `preparer-base`.
+
+`db/migrations/0031_le_produit_change_de_nom.sql`.
+
+### Deux défauts trouvés en essayant de mettre en ligne
+
+Aucun des deux n'est propre à l'hébergeur. Tous deux étaient invisibles tant
+que le produit ne quittait pas la machine où il était écrit.
+
+**L'image dépendait d'un réseau qu'elle ne contrôle pas, le jour où elle
+démarre.** Elle installait `postgresql-client`, pour que la commande de release
+puisse lancer `psql`. Le constructeur d'images de Railway n'a pas d'accès aux
+miroirs Debian : `apt-get install` y meurt en trois secondes sur un « context
+canceled », et trois tentatives n'y changent rien.
+
+On pouvait ruser ; la conclusion est meilleure. **Ce dont la mise en ligne a
+besoin, c'est d'exécuter du SQL** — et le produit embarque déjà `pg`, sa seule
+dépendance. `scripts/preparer-base.mjs` fait donc en Node ce que le script
+shell fait avec `psql` : créer la base, créer le rôle applicatif, **refuser de
+continuer s'il porte SUPERUSER ou BYPASSRLS**, appliquer les migrations,
+accorder les droits, et vérifier qu'aucune table portant `school_id` n'échappe
+au RLS. L'image n'installe plus rien.
+
+Ce qui reste dehors est dit plutôt que caché : les sauvegardes chiffrées ont
+besoin de `pg_dump` et de `gpg`, qui ne sont plus dans l'image. Elles tournent
+depuis une machine qui les porte.
+
+**« Chaque migration peut être rejouée sans effet de bord » — c'est vrai de
+vingt-neuf sur trente.** La fondatrice crée ses tables sans `if not exists`, et
+ses index **sans nom**, ce qui interdit le `if not exists` qu'on y mettrait.
+Rejouée, elle s'arrête sur `relation "school_groups" already exists`.
+
+Sans conséquence tant qu'on ne préparait une base qu'une fois, à la main. Fatal
+dès que la préparation devient la commande de release : **le premier
+déploiement passe, et tous les suivants échouent.** Le défaut était donc
+invisible jusqu'au jour où il aurait tout bloqué — et il l'aurait fait le jour
+d'une correction urgente, qui est le pire de tous.
+
+On ne réécrit pas la fondatrice : on constate qu'elle a déjà tourné. Et pour
+que ce raisonnement ne repose pas sur une mesure d'un jour,
+`tests/deploiement.e2e.mjs` **rejoue les vingt-neuf autres** contre une vraie
+base déjà migrée, avec le rôle propriétaire. Quand ce contrôle ne peut pas
+tourner — faute d'une connexion d'administration — il le dit à voix haute au
+lieu de passer au vert : un contrôle sauté en silence vaut un contrôle absent.
+
+Au passage, le témoin du déploiement a dû apprendre lui aussi à ne pas lire les
+commentaires : il accusait le `Dockerfile` d'appeler `apt` à cause de la phrase
+qui explique pourquoi il ne l'appelle plus.
 
 ### Mettre en ligne, et la politique qui a cassé sept écrans
 
@@ -1633,7 +1714,7 @@ Ce qui change :
 **Et, un étage plus bas, un vrai défaut du produit.** La migration 0010 semait
 les onze jours chômés de la loi du 9 janvier 2026 pour `array[2026, 2027, 2028]`
 — trois années, écrites en 2026. Invisible, parce que la démonstration était
-elle aussi épinglée à l'intérieur de la fenêtre. Une école qui ouvre FasoSchool
+elle aussi épinglée à l'intérieur de la fenêtre. Une école qui ouvre SchoolFaso
 à la rentrée **2029** n'a donc aucune fête légale au calendrier : l'appel du
 matin s'ouvre le 25 décembre, le surveillant coche les absents d'une classe
 vide, et quarante familles reçoivent « votre enfant est absent aujourd'hui » le
@@ -2247,7 +2328,7 @@ d'avant-hier avec l'aplomb de chiffres justes. `/hors-ligne` est donc une page
 pourquoi. Elle ne peut pas mentir, puisqu'elle n'affirme rien sur l'école.
 
 L'espace des familles est délibérément tenu à l'écart de tout ceci : les
-parents reçoivent des SMS, et une icône « FasoSchool » les ferait atterrir sur
+parents reçoivent des SMS, et une icône « SchoolFaso » les ferait atterrir sur
 l'écran de connexion du personnel.
 
 `npm run test:pwa` — 51 assertions. Elle ouvre les PNG et vérifie qu'ils font
@@ -2325,10 +2406,10 @@ npm install
 # La base : migrations avec le rôle d'ADMINISTRATION, droits accordés au rôle
 # applicatif, puis vérification du cloisonnement avant de déclarer la base prête.
 ADMIN_DATABASE_URL='postgres://postgres@localhost/postgres' \
-APP_ROLE=fasoschool_app APP_PASSWORD='...' \
-./scripts/preparer-base.sh fasoschool
+APP_ROLE=schoolfaso_app APP_PASSWORD='...' \
+./scripts/preparer-base.sh schoolfaso
 
-export DATABASE_URL=postgres://fasoschool_app:...@localhost:5432/fasoschool
+export DATABASE_URL=postgres://schoolfaso_app:...@localhost:5432/schoolfaso
 
 # LE CANAL SMS EST UN CHOIX ÉCRIT, SANS DÉFAUT. Le serveur refuse de démarrer
 # sans lui : une variable oubliée basculait l'installation en démonstration,
@@ -2384,7 +2465,7 @@ qu'ils ont trouvé, dans les sections qui précèdent.
 | suite | ce qu'elle prouve |
 |---|---|
 | `test:credit-epuise` (22) | le crédit épuisé arrête l'envoi au lieu de le nier, le solde ne descend plus sous zéro, et les familles restées sans nouvelle sont nommées — pas comptées |
-| `test:deploiement` (30) | les en-têtes de sécurité couvrent toute forme de réponse, aucun gestionnaire d'événement en ligne ne rend un geste inerte, et les quatre listes de migrations disent la même chose que le répertoire |
+| `test:deploiement` (35) | les en-têtes de sécurité couvrent toute forme de réponse, aucun gestionnaire d'événement en ligne ne rend un geste inerte, toutes les migrations sauf la fondatrice se rejouent, et les quatre listes disent la même chose que le répertoire |
 | `test:histoire-note` (26) | une note modifiée ou effacée laisse son histoire quel que soit le chemin — écran, appareil, import, arbitrage, `psql` — et l'effacement n'emporte plus la preuve que la note a existé |
 | `test:plafond-declare` (34) | le produit n'écrit plus « déclaré » sur un dossier que rien n'a fait sortir, le plafond ne bouge plus sans nom ni motif, et une grille au-dessus du plafond fait refuser l'émission au lieu de l'avertir |
 | `test:annuler-facture` (35) | une facture d'élève parti s'annule avec un nom, une date et un motif — refusée sans trace par la base, sortie des totaux mais lisible barrée, et réémise en nouvelle ligne au lieu d'être ressuscitée |
@@ -2475,12 +2556,12 @@ Une matinée avec un censeur coopératif et une photocopieuse ferme les sept.
 ## Sauvegarde
 
 ```bash
-ADMIN_DATABASE_URL='postgres://postgres@localhost/fasoschool' \
-FASOSCHOOL_PASSPHRASE='...' ./scripts/sauvegarde.sh /media/usb
+ADMIN_DATABASE_URL='postgres://postgres@localhost/schoolfaso' \
+SCHOOLFASO_PASSPHRASE='...' ./scripts/sauvegarde.sh /media/usb
 
 ADMIN_DATABASE_URL='postgres://postgres@localhost/postgres' \
-FASOSCHOOL_PASSPHRASE='...' \
-./scripts/restauration-verifiee.sh /media/usb/fasoschool-20260906-1400.dump.gpg
+SCHOOLFASO_PASSPHRASE='...' \
+./scripts/restauration-verifiee.sh /media/usb/schoolfaso-20260906-1400.dump.gpg
 ```
 
 `ADMIN_DATABASE_URL`, et **non** `DATABASE_URL` : le rôle applicatif est soumis
@@ -2545,7 +2626,7 @@ ne mène à un refus, pour chaque compte.
 ## Règles d'ingénierie
 
 **Le cloisonnement passe par la base, pas par le code.** Toute requête
-applicative passe par `withSchool()`. Sans `fasoschool.school_id` posé, le RLS
+applicative passe par `withSchool()`. Sans `schoolfaso.school_id` posé, le RLS
 ne renvoie aucune ligne. L'utilisateur PostgreSQL applicatif ne doit jamais
 être superutilisateur — un superutilisateur contourne le RLS entièrement.
 
@@ -2574,6 +2655,21 @@ additionnées au présent. Ce défaut a été trouvé deux fois, dans deux modul
 `tests/bornes.e2e.mjs` relit désormais le code source du dépôt pour qu'il n'y
 ait pas de troisième fois, et une requête volontairement cumulative doit écrire
 `-- borne:` suivi de sa raison.
+
+**Un défaut qui ne se voit qu'au deuxième tour est le plus dangereux de tous.**
+La migration fondatrice ne se rejouait pas. Tant qu'on préparait une base une
+fois à la main, personne ne pouvait le savoir ; le jour où la préparation est
+devenue la commande de déploiement, le premier déploiement est passé et tous
+les suivants auraient échoué — c'est-à-dire le jour d'une correction urgente,
+qui est le pire. Ce qui tourne à chaque fois doit être éprouvé DEUX fois, et
+c'est aussi pourquoi `check:all` est lancé deux fois de suite avant chaque
+livraison de ce dépôt.
+
+**Ce qui doit tourner le jour du déploiement ne s'installe pas ce jour-là.**
+L'image de production téléchargeait un paquet au moment de se construire, pour
+un outil dont le seul rôle était d'exécuter du SQL que sa propre dépendance
+sait exécuter. Une dépendance réseau au moment du démarrage transforme la panne
+de quelqu'un d'autre en panne de l'école.
 
 **Une politique ne couvre pas que les chemins auxquels on a pensé.** Les
 en-têtes de sécurité, posés d'abord dans le rendu des pages, laissaient à nu

@@ -51,7 +51,7 @@ await client.connect();
 const { rows: e } = await client.query(
   `select school_id from auth_lookup_user('70000005')`);
 const SCHOOL = e[0].school_id;
-await client.query(`select set_config('fasoschool.school_id', $1, false)`, [SCHOOL]);
+await client.query(`select set_config('schoolfaso.school_id', $1, false)`, [SCHOOL]);
 
 const HORS_DOSSIER = "Pièce d'une autre école";
 const TEMOIN = "ÉPREUVE PIÈCES";     // préfixe du libellé de tout ce qu'on dépose
@@ -308,7 +308,7 @@ try {
 
   /* === 4. Une pièce d'un autre établissement ============================= */
   console.log("\nUne pièce d'un autre établissement est introuvable, pas interdite");
-  await client.query(`select set_config('fasoschool.school_id', $1, false)`, [SCHOOL]);
+  await client.query(`select set_config('schoolfaso.school_id', $1, false)`, [SCHOOL]);
   const etranger = (await client.query(
     `insert into documents (school_id, category_criterion_id, label, doc_type,
                             content, content_type, byte_size, sha256)
@@ -359,7 +359,7 @@ try {
   const hote = APP.replace(/^postgres:\/\/[^@]*@[^/]*\/[^?]*/, "");
   const base = (APP.match(/\/([^/?]+)\?/) ?? [])[1] ?? "demo";
   const adminSur = (b) => `postgres://postgres@/${b}${hote}`;
-  const COPIE = `fasoschool_pieces_${process.pid}`;
+  const COPIE = `schoolfaso_pieces_${process.pid}`;
   const psql = (u, ...a) => execFileP("psql", [u, ...a]).catch((x) => ({ stdout: "", stderr: String(x) }));
 
   await psql(adminSur("postgres"), "-q", "-c", `drop database if exists ${COPIE}`);
@@ -391,7 +391,7 @@ try {
 
 } finally {
   server.kill();
-  await client.query(`select set_config('fasoschool.school_id', $1, false)`, [SCHOOL])
+  await client.query(`select set_config('schoolfaso.school_id', $1, false)`, [SCHOOL])
     .catch(() => {});
   await purger().catch(() => {});
   for (const c of dossierInitial) {

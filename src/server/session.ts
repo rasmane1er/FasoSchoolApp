@@ -112,7 +112,7 @@ export async function issueOtp(
     if (!connu) return { ok: true };
 
     const sms = createSmsChannel();
-    const corps = `FasoSchool: votre code de connexion est ${code}. `
+    const corps = `SchoolFaso: votre code de connexion est ${code}. `
       + `Valable 5 minutes.`;
     const envoi = await sms.send({ to: phone, schoolId: "", body: corps });
 

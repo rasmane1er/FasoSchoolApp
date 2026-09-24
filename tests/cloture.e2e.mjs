@@ -40,7 +40,7 @@ await client.connect();
  * réglage dont ses assertions dépendent, et le rend. */
 const calendrier = await emprunterCalendrier(client);
 const { rows: sc } = await client.query(`select school_id from auth_lookup_user('70000001')`);
-await client.query(`select set_config('fasoschool.school_id', $1, false)`, [sc[0].school_id]);
+await client.query(`select set_config('schoolfaso.school_id', $1, false)`, [sc[0].school_id]);
 
 /* L'HISTOIRE DES NOTES EST ÉCRITE PAR LA BASE (0029) : écrire une note
  * pour éprouver un écran, puis la remettre, laisse deux lignes derrière
@@ -118,7 +118,7 @@ const rendreLaFenetre = async () => {
 };
 
 const server = spawn(process.execPath, ["--experimental-strip-types", "src/server/app.ts"], {
-  env: { ...process.env, PORT: String(PORT), SMS_PROVIDER: "mock", FASOSCHOOL_PUBLIC_URL: ADRESSE },
+  env: { ...process.env, PORT: String(PORT), SMS_PROVIDER: "mock", SCHOOLFASO_PUBLIC_URL: ADRESSE },
   stdio: ["ignore", "pipe", "pipe"],
 });
 let stderr = ""; server.stderr.on("data", (d) => { stderr += d.toString(); });
@@ -365,7 +365,7 @@ try {
   const PORT2 = PORT + 40;
   const muet = spawn(process.execPath,
     ["--experimental-strip-types", "src/server/app.ts"],
-    { env: { ...process.env, PORT: String(PORT2), FASOSCHOOL_PUBLIC_URL: "" },
+    { env: { ...process.env, PORT: String(PORT2), SCHOOLFASO_PUBLIC_URL: "" },
       stdio: ["ignore", "pipe", "pipe"] });
   for (let i = 0; i < 50; i += 1) {
     try { if ((await fetch(`http://127.0.0.1:${PORT2}/sante`)).ok) break; } catch {}

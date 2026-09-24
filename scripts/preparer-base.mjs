@@ -30,8 +30,8 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import pg from "pg";
 
-const BASE = process.argv[2] || process.env.FASOSCHOOL_DB || "fasoschool";
-const APP_ROLE = process.env.APP_ROLE || "fasoschool_app";
+const BASE = process.argv[2] || process.env.SCHOOLFASO_DB || "schoolfaso";
+const APP_ROLE = process.env.APP_ROLE || "schoolfaso_app";
 const APP_PASSWORD = process.env.APP_PASSWORD || "";
 const ADMIN = process.env.ADMIN_DATABASE_URL || "";
 

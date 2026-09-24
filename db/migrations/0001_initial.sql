@@ -1,4 +1,4 @@
--- FasoSchool — schéma initial
+-- SchoolFaso — schéma initial
 -- PostgreSQL 14+
 --
 -- Remplace les 87 migrations du prototype. Aucune donnée de production
@@ -19,9 +19,9 @@ create extension if not exists "uuid-ossp";
 -- ---------------------------------------------------------------------------
 
 -- Renvoie l'établissement du contexte de session, posé au checkout de
--- connexion via  set_config('fasoschool.school_id', $1, false).
+-- connexion via  set_config('schoolfaso.school_id', $1, false).
 create or replace function current_school_id() returns uuid as $$
-  select nullif(current_setting('fasoschool.school_id', true), '')::uuid;
+  select nullif(current_setting('schoolfaso.school_id', true), '')::uuid;
 $$ language sql stable;
 
 -- ---------------------------------------------------------------------------
@@ -991,7 +991,7 @@ create index on sync_conflicts (school_id, status);
 -- Row-level security
 -- ---------------------------------------------------------------------------
 --
--- Une requête exécutée sans fasoschool.school_id posé ne voit rien. C'est la
+-- Une requête exécutée sans schoolfaso.school_id posé ne voit rien. C'est la
 -- base de données qui refuse, pas le code qui doit se souvenir.
 
 -- Deux régimes.

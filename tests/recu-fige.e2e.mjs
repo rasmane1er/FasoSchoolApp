@@ -61,7 +61,7 @@ await client.connect();
 const { rows: sc } = await client.query(
   `select school_id from auth_lookup_user('70000004')`);
 const SCHOOL = sc[0].school_id;
-await client.query(`select set_config('fasoschool.school_id', $1, false)`, [SCHOOL]);
+await client.query(`select set_config('schoolfaso.school_id', $1, false)`, [SCHOOL]);
 
 /* Ce que cette suite crée, et qu'elle seule doit retirer : des paiements et
  * leurs reçus. Un reçu est append-only dans le produit — on ne le supprime
@@ -251,7 +251,7 @@ try {
 {
   const c2 = new pg.Client({ connectionString: process.env.DATABASE_URL });
   await c2.connect();
-  await c2.query(`select set_config('fasoschool.school_id', $1, false)`, [SCHOOL]);
+  await c2.query(`select set_config('schoolfaso.school_id', $1, false)`, [SCHOOL]);
   for (const id of paiementsPoses) {
     await c2.query(`delete from receipts where payment_id = $1`, [id]).catch(() => {});
     await c2.query(`delete from payment_events where payment_id = $1`, [id]).catch(() => {});

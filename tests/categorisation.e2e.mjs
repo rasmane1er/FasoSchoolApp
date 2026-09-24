@@ -27,7 +27,7 @@ const check = (name, cond, detail = "") => {
 const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
 await client.connect();
 const { rows: sc } = await client.query(`select school_id from auth_lookup_user('70000005')`);
-await client.query(`select set_config('fasoschool.school_id', $1, false)`, [sc[0].school_id]);
+await client.query(`select set_config('schoolfaso.school_id', $1, false)`, [sc[0].school_id]);
 await client.query(`delete from auth_rate_limits`);
 await client.query(`delete from auth_otp_challenges`);
 await client.query(`delete from auth_sessions`);

@@ -40,7 +40,7 @@ jobs:
 
     env:
       ADMIN_DATABASE_URL: postgres://postgres:epreuve@127.0.0.1:5432/postgres
-      DATABASE_URL: postgres://fasoschool_app:epreuve@127.0.0.1:5432/demo
+      DATABASE_URL: postgres://schoolfaso_app:epreuve@127.0.0.1:5432/demo
       # LE MODE SIMULÉ EST EXPLICITE, JAMAIS PAR DÉFAUT. Le serveur refuse de
       # démarrer sans, et l'épreuve ne doit surtout pas envoyer de vrais SMS.
       SMS_PROVIDER: mock
@@ -67,7 +67,7 @@ jobs:
         # crée lui-même le rôle applicatif et refuse de continuer s'il porte
         # SUPERUSER ou BYPASSRLS.
         env:
-          APP_ROLE: fasoschool_app
+          APP_ROLE: schoolfaso_app
           APP_PASSWORD: epreuve
         run: bash scripts/preparer-base.sh demo
 
@@ -79,10 +79,10 @@ jobs:
         run: |
           DROITS="$(psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -tAc \
             "select rolsuper::text || ' ' || rolbypassrls::text
-               from pg_roles where rolname = 'fasoschool_app'")"
+               from pg_roles where rolname = 'schoolfaso_app'")"
           echo "rolsuper rolbypassrls = $DROITS   (attendu : false false)"
           test "$DROITS" = "false false" \
-            || { echo "fasoschool_app a des privilèges qu'il ne doit pas avoir"; exit 1; }
+            || { echo "schoolfaso_app a des privilèges qu'il ne doit pas avoir"; exit 1; }
 
       - name: Semer la démonstration
         run: npm run demo
@@ -94,13 +94,13 @@ jobs:
         run: npm run check:all
 
       - name: L'image de production se construit
-        run: docker build -t fasoschool:epreuve .
+        run: docker build -t schoolfaso:epreuve .
 
       - name: Et elle démarre
         run: |
           docker run -d --name fs --network host \
-            -e DATABASE_URL="postgres://fasoschool_app:epreuve@127.0.0.1:5432/demo" \
-            -e SMS_PROVIDER=mock -e PORT=8080 fasoschool:epreuve
+            -e DATABASE_URL="postgres://schoolfaso_app:epreuve@127.0.0.1:5432/demo" \
+            -e SMS_PROVIDER=mock -e PORT=8080 schoolfaso:epreuve
           for i in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:8080/sante > /tmp/sante.json; then break; fi
             sleep 2

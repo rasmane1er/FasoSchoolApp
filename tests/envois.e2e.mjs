@@ -48,7 +48,7 @@ await client.connect();
 const { rows: sc } = await client.query(
   `select school_id from auth_lookup_user('70000001')`);
 const SCHOOL = sc[0].school_id;
-await client.query(`select set_config('fasoschool.school_id', $1, false)`, [SCHOOL]);
+await client.query(`select set_config('schoolfaso.school_id', $1, false)`, [SCHOOL]);
 /* UN JOUR D'ÉCOLE CHOISI DANS L'ANNÉE, PAS ÉCRIT EN DUR.
  *
  * Ces dates étaient fixées sur l'année 2026-2027 du jeu de démonstration, qui
@@ -276,7 +276,7 @@ try {
 
 } finally {
   server.kill();
-  await client.query(`select set_config('fasoschool.school_id', $1, false)`, [SCHOOL])
+  await client.query(`select set_config('schoolfaso.school_id', $1, false)`, [SCHOOL])
     .catch(() => {});
   await client.query(
     `delete from sms_messages where queued_at::date = current_date

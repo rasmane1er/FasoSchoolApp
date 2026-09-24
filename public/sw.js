@@ -18,7 +18,7 @@
  * marche encore, ce qui ne marche pas, et pourquoi. Elle ne peut pas mentir,
  * puisqu'elle n'affirme rien sur l'école.
  */
-var CACHE = "fasoschool-v2";
+var CACHE = "schoolfaso-v2";
 
 /* Le strict nécessaire pour que l'application s'ouvre sans réseau. */
 var COQUILLE = ["/hors-ligne", "/offline.js"];

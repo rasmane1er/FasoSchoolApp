@@ -63,7 +63,7 @@ const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
 await client.connect();
 const { rows: sc } = await client.query(
   `select school_id from auth_lookup_user('70000004')`);
-await client.query(`select set_config('fasoschool.school_id', $1, false)`, [sc[0].school_id]);
+await client.query(`select set_config('schoolfaso.school_id', $1, false)`, [sc[0].school_id]);
 
 /* CE QU'ON EMPRUNTE : la fenêtre de l'établissement, le compteur de reçus et
  * l'état des factures. Tout est rendu dans le `finally`. */

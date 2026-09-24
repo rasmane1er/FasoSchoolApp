@@ -47,7 +47,7 @@ await client.connect();
 const { rows: sc } = await client.query(
   `select school_id from auth_lookup_user('70000001')`);
 const SCHOOL = sc[0].school_id;
-await client.query(`select set_config('fasoschool.school_id', $1, false)`, [SCHOOL]);
+await client.query(`select set_config('schoolfaso.school_id', $1, false)`, [SCHOOL]);
 
 const { rows: cl } = await client.query(
   `select id, label, academic_year_id from classes order by label limit 1`);
@@ -230,7 +230,7 @@ try {
 
 } finally {
   server.kill();
-  await client.query(`select set_config('fasoschool.school_id', $1, false)`, [SCHOOL])
+  await client.query(`select set_config('schoolfaso.school_id', $1, false)`, [SCHOOL])
     .catch(() => {});
   await purger().catch(() => {});
   /* Les bulletins retrouvent l'état où la démonstration les laisse : ceux que

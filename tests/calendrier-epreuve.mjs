@@ -41,13 +41,13 @@ export async function emprunterCalendrier(client, { marge = 21 } = {}) {
    * est là, complète. Éprouvé : deux suites appellent cette fonction avant de
    * poser leur contexte, et c'est leur droit — une aide doit se suffire. */
   const { rows: ctx } = await client.query(
-    `select coalesce(current_setting('fasoschool.school_id', true), '') as pose`);
+    `select coalesce(current_setting('schoolfaso.school_id', true), '') as pose`);
   if (!ctx[0].pose) {
     const { rows: ec } = await client.query(
       `select school_id from auth_lookup_user('70000001')`);
     if (ec[0]) {
       await client.query(
-        `select set_config('fasoschool.school_id', $1, false)`, [ec[0].school_id]);
+        `select set_config('schoolfaso.school_id', $1, false)`, [ec[0].school_id]);
     }
   }
 

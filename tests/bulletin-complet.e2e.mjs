@@ -61,7 +61,7 @@ const calendrier = await emprunterCalendrier(client);
 const { rows: sc } = await client.query(
   `select school_id from auth_lookup_user('70000001')`);
 const SCHOOL = sc[0].school_id;
-await client.query(`select set_config('fasoschool.school_id', $1, false)`, [SCHOOL]);
+await client.query(`select set_config('schoolfaso.school_id', $1, false)`, [SCHOOL]);
 
 /* L'HISTOIRE DES NOTES EST ÉCRITE PAR LA BASE (0029) : écrire une note
  * pour éprouver un écran, puis la remettre, laisse deux lignes derrière
@@ -247,7 +247,7 @@ try {
 } finally {
   await calendrier.rendre();
   server.kill();
-  await client.query(`select set_config('fasoschool.school_id', $1, false)`, [SCHOOL])
+  await client.query(`select set_config('schoolfaso.school_id', $1, false)`, [SCHOOL])
     .catch(() => {});
   /* Les notes retirées reviennent, avec leurs valeurs d'origine. */
   for (const g of notesRetirees) {

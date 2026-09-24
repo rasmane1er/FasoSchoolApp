@@ -54,7 +54,7 @@ const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
 await client.connect();
 const { rows: sc } = await client.query(
   `select school_id from auth_lookup_user('70000003')`);
-await client.query(`select set_config('fasoschool.school_id', $1, false)`, [sc[0].school_id]);
+await client.query(`select set_config('schoolfaso.school_id', $1, false)`, [sc[0].school_id]);
 
 /* CE QU'ON EMPRUNTE. Les lignes du grand livre et les messages d'avant,
  * reconnus par leurs identifiants — pas par une date : les lignes semées par

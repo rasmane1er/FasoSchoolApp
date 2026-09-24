@@ -64,7 +64,7 @@ const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
 await client.connect();
 const { rows: sc } = await client.query(
   `select school_id from auth_lookup_user('70000001')`);
-await client.query(`select set_config('fasoschool.school_id', $1, false)`, [sc[0].school_id]);
+await client.query(`select set_config('schoolfaso.school_id', $1, false)`, [sc[0].school_id]);
 
 /* CE QUE CETTE SUITE CRÉE PORTE SA MARQUE, et c'est par elle qu'elle le
  * retire — jamais par un prédicat décrivant une famille de lignes. */

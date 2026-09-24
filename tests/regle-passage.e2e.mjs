@@ -60,7 +60,7 @@ const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
 await client.connect();
 const { rows: sc } = await client.query(
   `select school_id from auth_lookup_user('70000001')`);
-await client.query(`select set_config('fasoschool.school_id', $1, false)`, [sc[0].school_id]);
+await client.query(`select set_config('schoolfaso.school_id', $1, false)`, [sc[0].school_id]);
 
 /* CE QU'ON EMPRUNTE. Les règles de l'établissement et le niveau de la classe.
  * On retient l'état exact, on le remet dans le `finally` — une suite rend la

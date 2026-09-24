@@ -161,7 +161,7 @@ export async function applyMutations(
 
       /* D'OÙ PARLE CE CODE : une note remontée d'un appareil. Le déclencheur
        * `tracer_note()` lit ce réglage comme le RLS lit `school_id`. */
-      await c.query(`select set_config('fasoschool.grade_source', 'offline', true)`);
+      await c.query(`select set_config('schoolfaso.grade_source', 'offline', true)`);
       const up = await c.query(
         `insert into grade_entries (school_id, evaluation_id, student_id, score, is_absent,
                                     is_justified, mutation_id, device_id, recorded_by, updated_at)
@@ -280,7 +280,7 @@ export async function resolveConflict(
     if (choice === "appareil") {
       const d = r.rows[0].device_payload;
       /* D'OÙ PARLE CE CODE : un arbitrage de conflit par le censeur. */
-      await c.query(`select set_config('fasoschool.grade_source', 'correction', true)`);
+      await c.query(`select set_config('schoolfaso.grade_source', 'correction', true)`);
       await c.query(
         `update grade_entries set score = $2, is_absent = $3, updated_at = now()
           where id = $1`, [r.rows[0].entity_id, d.score, d.isAbsent === true]);

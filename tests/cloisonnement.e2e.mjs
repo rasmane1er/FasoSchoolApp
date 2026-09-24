@@ -9,7 +9,7 @@
  * 1. **On ne pouvait pas le lancer.** Le README prescrivait
  *    `npm run db:test:rls` « avant tout développement ». Sur une machine où le
  *    produit est installé, le fichier SQL commençait par
- *    `drop role if exists fasoschool_app` — le compte de l'application — et
+ *    `drop role if exists schoolfaso_app` — le compte de l'application — et
  *    échouait parce qu'il porte des droits. Le test de sûreté ne pouvait donc
  *    pas être lancé là où il servirait.
  *
@@ -57,14 +57,14 @@ const MIGRATIONS = [
   "0015_bulletin_complet", "0016_famille_injoignable",
   "0017_echeancier", "0018_recu_fige", "0019_arrivee_en_cours_annee", "0020_fetes_au_dela_de_2028",
   "0021_dementi_absence", "0022_regle_de_passage_datee", "0023_assiduite_de_l_annee", "0024_ce_qui_est_clos_est_clos", "0025_entre_deux_trimestres", "0026_double_clic_au_guichet",
-  "0027_annuler_une_facture", "0028_le_plafond_declare", "0029_l_histoire_d_une_note", "0030_le_credit_qui_ne_retient_rien",
+  "0027_annuler_une_facture", "0028_le_plafond_declare", "0029_l_histoire_d_une_note", "0030_le_credit_qui_ne_retient_rien", "0031_le_produit_change_de_nom",
 ];
 
-const BASE_SANS_0009 = `fasoschool_sans_0009_${process.pid}`;
+const BASE_SANS_0009 = `schoolfaso_sans_0009_${process.pid}`;
 
 const nettoyer = async () => {
   await psql(ADMIN, "-q", "-c", `drop database if exists ${BASE_SANS_0009}`);
-  await psql(ADMIN, "-q", "-c", "drop role if exists fasoschool_rls_probe");
+  await psql(ADMIN, "-q", "-c", "drop role if exists schoolfaso_rls_probe");
 };
 await nettoyer();
 
@@ -100,16 +100,54 @@ try {
     sortie.includes("base jetable") && sortie.includes("Aucune base réelle"),
     "elle supprimait le compte de l'application en service");
   const restes = (await psql(ADMIN, "-tAc",
-    "select count(*) from pg_database where datname like 'fasoschool_cloisonnement_%'")).stdout.trim();
+    "select count(*) from pg_database where datname like 'schoolfaso_cloisonnement_%'")).stdout.trim();
   check("aucune base jetable ne survit", restes === "0", restes);
   const roleReste = (await psql(ADMIN, "-tAc",
-    "select count(*) from pg_roles where rolname = 'fasoschool_rls_probe'")).stdout.trim();
+    "select count(*) from pg_roles where rolname = 'schoolfaso_rls_probe'")).stdout.trim();
   check("ni le rôle jetable", roleReste === "0", roleReste);
 
   const appIntact = (await psql(ADMIN, "-tAc",
-    "select count(*) from pg_roles where rolname = 'fasoschool_app'")).stdout.trim();
+    "select count(*) from pg_roles where rolname = 'schoolfaso_app'")).stdout.trim();
   check("LE COMPTE DE L'APPLICATION EST INTACT", appIntact === "1",
     "l'ancien test le supprimait pour le recréer avec le mot de passe « test »");
+
+  /* LE PRODUIT A CHANGÉ DE NOM, ET LE NOM PORTAIT LA FRONTIÈRE.
+   *
+   * `current_setting('fasoschool.school_id')` est le réglage de session que
+   * lit `current_school_id()`, dont dépend CHAQUE politique de row-level
+   * security. Renommer le produit sans y penser aurait fait qu'une base en
+   * service, après un déploiement passé avant l'autre, ne montre plus une
+   * seule ligne — bruyant plutôt que silencieux, ce qui est la bonne façon
+   * d'échouer, mais il n'y a aucune raison de l'infliger à une école un mardi
+   * matin. La migration 0031 fait retomber la lecture sur l'ancien nom.
+   *
+   * Le jour où l'on retirera cette retombée, c'est ici qu'on l'apprendra. */
+  console.log("\nL'ANCIEN NOM DU RÉGLAGE DE SESSION FONCTIONNE ENCORE");
+  {
+    /* L'identifiant vient d'`auth_lookup_user`, une fonction `security
+     * definer` — le seul trou nommé par lequel le rôle applicatif peut
+     * apprendre à quel établissement il appartient AVANT d'avoir posé son
+     * contexte. `ADMIN` pointe sur la base `postgres`, où il n'y a pas
+     * d'école : c'est ce qui rendait cette mesure nulle. */
+    const uneEcole = (await psql(APP, "-tAc",
+      "select school_id from auth_lookup_user('70000001')")).stdout.trim();
+    const parAncien = (await psql(APP, "-tAc",
+      `select set_config('fasoschool.school_id', '${uneEcole}', false);`
+      + ` select count(*) from students`)).stdout.trim().split("\n").map((l) => l.trim()).filter(Boolean).pop();
+    const parNouveau = (await psql(APP, "-tAc",
+      `select set_config('schoolfaso.school_id', '${uneEcole}', false);`
+      + ` select count(*) from students`)).stdout.trim().split("\n").map((l) => l.trim()).filter(Boolean).pop();
+    check("l'ancien nom montre autant d'élèves que le nouveau",
+      parAncien === parNouveau && Number(parNouveau) > 0,
+      `ancien ${parAncien}, nouveau ${parNouveau} — une base en service ne doit`
+        + ` pas cesser de répondre parce qu'un déploiement est passé avant l'autre`);
+    const sansRien = (await psql(APP, "-tAc",
+      "select set_config('fasoschool.school_id', '', false);"
+      + " select set_config('schoolfaso.school_id', '', false);"
+      + " select count(*) from students")).stdout.trim().split("\n").map((l) => l.trim()).filter(Boolean).pop();
+    check("et sans aucun des deux, toujours AUCUNE ligne",
+      sansRien === "0", `${sansRien} — c'est la frontière elle-même`);
+  }
 
   console.log("\nET ELLE SAIT ÉCHOUER : sans la migration 0009");
   /* Un test de sûreté qui n'échoue jamais ne prouve rien. On rejoue l'épreuve

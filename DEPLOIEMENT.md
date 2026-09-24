@@ -1,4 +1,4 @@
-# Mettre FasoSchool en ligne
+# Mettre SchoolFaso en ligne
 
 Ce document est une **procédure**, pas une présentation. Chaque commande est
 faite pour être copiée telle quelle. Ce qui demande une décision humaine est
@@ -73,11 +73,11 @@ Connectez-vous à la base (`Railway → PostgreSQL → Connect → psql`) et lan
 ```sql
 -- Le rôle qui fera tourner l'application. Pas de SUPERUSER, pas de CREATEDB,
 -- pas de BYPASSRLS.
-create role fasoschool_app login password 'UN-MOT-DE-PASSE-LONG-ET-ALEATOIRE';
+create role schoolfaso_app login password 'UN-MOT-DE-PASSE-LONG-ET-ALEATOIRE';
 
 -- Le propriétaire des tables, qui applique les migrations. Lui seul porte
 -- BYPASSRLS, et il ne sert JAMAIS à servir une requête d'écran.
-create role fasoschool_owner login password 'UN-AUTRE-MOT-DE-PASSE'
+create role schoolfaso_owner login password 'UN-AUTRE-MOT-DE-PASSE'
   bypassrls createdb;
 ```
 
@@ -85,12 +85,12 @@ Vérifiez, et gardez la sortie :
 
 ```sql
 select rolname, rolsuper, rolbypassrls
-  from pg_roles where rolname like 'fasoschool%';
--- fasoschool_app    | f | f     <- les deux colonnes DOIVENT être f
--- fasoschool_owner  | f | t
+  from pg_roles where rolname like 'schoolfaso%';
+-- schoolfaso_app    | f | f     <- les deux colonnes DOIVENT être f
+-- schoolfaso_owner  | f | t
 ```
 
-> Si `rolsuper` vaut `t` pour `fasoschool_app`, arrêtez-vous ici. Rien de ce
+> Si `rolsuper` vaut `t` pour `schoolfaso_app`, arrêtez-vous ici. Rien de ce
 > qui suit n'a de sens : `epreuve-cloisonnement.sh` le vérifie aussi, et il
 > refusera.
 
@@ -99,7 +99,7 @@ select rolname, rolsuper, rolbypassrls
 Depuis votre machine, avec l'URL **publique** de la base Railway :
 
 ```bash
-export ADMIN_DATABASE_URL='postgres://fasoschool_owner:…@…rlwy.net:PORT/railway'
+export ADMIN_DATABASE_URL='postgres://schoolfaso_owner:…@…rlwy.net:PORT/railway'
 bash scripts/preparer-base.sh railway
 ```
 
@@ -124,14 +124,14 @@ aveugle.
 
 ## 2. L'application
 
-Dans le même projet Railway : `New` → `GitHub Repo` → `FasoSchoolApp`.
+Dans le même projet Railway : `New` → `GitHub Repo` → `SchoolFasoApp`.
 Railway lit `railway.json` et construit avec le `Dockerfile`.
 
 ### 2.1 Les variables d'environnement
 
 | Variable | Valeur | Pourquoi |
 |---|---|---|
-| `DATABASE_URL` | `postgres://fasoschool_app:…@postgres.railway.internal:5432/railway` | **le rôle applicatif**, pas l'owner |
+| `DATABASE_URL` | `postgres://schoolfaso_app:…@postgres.railway.internal:5432/railway` | **le rôle applicatif**, pas l'owner |
 | `PGPOOL_MAX` | `10` | tenir sous la limite de connexions du plan |
 | `SMS_PROVIDER` | `mock` puis `orange_bf` | le serveur refuse de démarrer sans |
 | `SMS_COST_FCFA` | `8` | ce que le canal facture réellement |
@@ -139,13 +139,13 @@ Railway lit `railway.json` et construit avec le `Dockerfile`.
 | `ORANGE_SMS_CLIENT_SECRET` | (Orange) | idem |
 | `ORANGE_SMS_SENDER` | (Orange) | l'expéditeur affiché sur le téléphone |
 | `PAYMENT_PROVIDER` | `none` | pas avant le RCCM |
-| `FASOSCHOOL_PUBLIC_URL` | `https://votre-domaine` | pose `Secure` sur les cookies et sert de base aux liens envoyés par SMS |
-| `FASOSCHOOL_PASSPHRASE` | (long, aléatoire) | `sauvegarde.sh` refuse de tourner sans : **une sauvegarde en clair est une fuite qui attend son heure** |
+| `SCHOOLFASO_PUBLIC_URL` | `https://votre-domaine` | pose `Secure` sur les cookies et sert de base aux liens envoyés par SMS |
+| `SCHOOLFASO_PASSPHRASE` | (long, aléatoire) | `sauvegarde.sh` refuse de tourner sans : **une sauvegarde en clair est une fuite qui attend son heure** |
 | `NODE_ENV` | `production` | |
 
 Railway pose `PORT` lui-même ; ne le forcez pas.
 
-> **`FASOSCHOOL_PUBLIC_URL` n'est pas cosmétique.** Sans lui, et derrière un
+> **`SCHOOLFASO_PUBLIC_URL` n'est pas cosmétique.** Sans lui, et derrière un
 > proxy qui ne poserait pas `x-forwarded-proto`, les cookies de session
 > partiraient sans `Secure`. Celui des familles ouvre le dossier d'un enfant.
 
@@ -156,7 +156,7 @@ il dit lequel des deux canaux SMS est actif :
 
 ```bash
 curl -s https://votre-service.up.railway.app/sante
-# {"ok":true,"service":"fasoschool","base":true,"sms":"mock","simule":true}
+# {"ok":true,"service":"schoolfaso","base":true,"sms":"mock","simule":true}
 ```
 
 `"simule": true` signifie **aucun SMS ne part**. C'est le bon état tant que
@@ -169,7 +169,7 @@ Avec le rôle **applicatif** — l'installateur n'a besoin d'aucun privilège
 particulier, et il vaut mieux qu'il n'en ait pas :
 
 ```bash
-DATABASE_URL='postgres://fasoschool_app:…@…rlwy.net:PORT/railway' \
+DATABASE_URL='postgres://schoolfaso_app:…@…rlwy.net:PORT/railway' \
   npm run installer -- \
     --nom       "Complexe scolaire Wend-Panga" \
     --secteur   prive_laic \
@@ -219,7 +219,7 @@ dormir dans un cache partagé. Ne créez donc **aucune** règle de cache sur
 Une seule règle, pour les fichiers qui ne changent qu'avec une version :
 
 - `Caching` → `Cache Rules` → `Create rule`
-- Nom : `Statiques FasoSchool`
+- Nom : `Statiques SchoolFaso`
 - Si : `URI Path` `starts with` `/icones/` **ou** `URI Path` `equals`
   `/app.js` **ou** `/offline.js` **ou** `/manifest.webmanifest`
 - Alors : `Eligible for cache`, `Edge TTL: 1 day`
@@ -244,7 +244,7 @@ essaierait des milliers de numéros.
 
 ## 4. Les sauvegardes
 
-`scripts/sauvegarde.sh` **refuse de tourner sans `FASOSCHOOL_PASSPHRASE`**.
+`scripts/sauvegarde.sh` **refuse de tourner sans `SCHOOLFASO_PASSPHRASE`**.
 C'est voulu : une sauvegarde d'école en clair contient les notes, les
 absences, les numéros des familles et la comptabilité.
 
@@ -264,15 +264,15 @@ Sur Railway, créez un service `Cron` (`New` → `Empty Service` →
 > soumis au row-level security : `pg_dump` lancé avec lui échoue table par
 > table (« query would be affected by row-level security policy ») et produit
 > une sauvegarde **vide sans le dire**. Le service de sauvegarde reçoit donc
-> `ADMIN_DATABASE_URL` (le rôle propriétaire) et `FASOSCHOOL_PASSPHRASE`, et
+> `ADMIN_DATABASE_URL` (le rôle propriétaire) et `SCHOOLFASO_PASSPHRASE`, et
 > rien d'autre.
 
 Et — ceci est la partie que tout le monde saute — **restaurez-en une** :
 
 ```bash
-ADMIN_DATABASE_URL='postgres://fasoschool_owner:…@…/postgres' \
-FASOSCHOOL_PASSPHRASE='…' \
-  bash scripts/restauration-verifiee.sh sauvegardes/fasoschool-20260924-0200.dump.gpg
+ADMIN_DATABASE_URL='postgres://schoolfaso_owner:…@…/postgres' \
+SCHOOLFASO_PASSPHRASE='…' \
+  bash scripts/restauration-verifiee.sh sauvegardes/schoolfaso-20260924-0200.dump.gpg
 ```
 
 Le script restaure dans une base jetable, recompte les élèves, les factures
@@ -286,7 +286,7 @@ n'a jamais restaurée n'est pas une sauvegarde, c'est un fichier.
 Il n'y a **pas d'application à installer depuis un magasin**, et c'est une
 décision d'architecture, pas un raccourci.
 
-FasoSchool est du HTML rendu au serveur, sans bundle JavaScript. Une page
+SchoolFaso est du HTML rendu au serveur, sans bundle JavaScript. Une page
 pèse quelques dizaines de kilooctets et s'ouvre sur un téléphone d'entrée de
 gamme en EDGE. Une application native ferait l'inverse : 20 à 40 Mo à
 télécharger avant la première utilisation, un magasin à traverser à chaque

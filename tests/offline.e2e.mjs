@@ -30,7 +30,7 @@ const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
 await client.connect();
 const { rows: sc } = await client.query(`select school_id from auth_lookup_user('70000002')`);
 const schoolId = sc[0].school_id;
-await client.query(`select set_config('fasoschool.school_id', $1, false)`, [schoolId]);
+await client.query(`select set_config('schoolfaso.school_id', $1, false)`, [schoolId]);
 
 /* L'HISTOIRE DES NOTES EST ÉCRITE PAR LA BASE (0029) : écrire une note
  * pour éprouver un écran, puis la remettre, laisse deux lignes derrière
@@ -107,7 +107,7 @@ try {
   await page2.goto(`${BASE}/notes?classe=${classe}`).catch(() => {});
   await page2.waitForTimeout(1500);
   const survit = await page2.evaluate(() => new Promise((resolve) => {
-    const r = indexedDB.open("fasoschool", 1);
+    const r = indexedDB.open("schoolfaso", 1);
     r.onsuccess = () => {
       const db = r.result;
       if (!db.objectStoreNames.contains("outbox")) return resolve(0);

@@ -49,7 +49,7 @@ await client.connect();
 const { rows: ec } = await client.query(
   `select school_id from auth_lookup_user('70000001')`);
 const SCHOOL = ec[0].school_id;
-await client.query(`select set_config('fasoschool.school_id', $1, false)`, [SCHOOL]);
+await client.query(`select set_config('schoolfaso.school_id', $1, false)`, [SCHOOL]);
 
 /* LA PURGE NE TOUCHE QUE LES JOURS DE CE TEST.
  *

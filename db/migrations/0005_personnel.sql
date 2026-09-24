@@ -2,7 +2,7 @@
 -- Le personnel de l'établissement.
 --
 -- Jusqu'ici, une seule ligne du projet créait un compte : `scripts/demo.ts`.
--- Un établissement qui installait FasoSchool ne pouvait donc inscrire ni son
+-- Un établissement qui installait SchoolFaso ne pouvait donc inscrire ni son
 -- proviseur, ni son censeur, ni un seul de ses enseignants — il fallait ouvrir
 -- psql. C'est pourtant le tout PREMIER geste d'une installation, avant l'année
 -- scolaire et avant les élèves.

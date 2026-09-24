@@ -1,5 +1,5 @@
 # -----------------------------------------------------------------------------
-# FasoSchool — image de production.
+# SchoolFaso — image de production.
 #
 # CE QU'ELLE CONTIENT, ET CE QU'ELLE NE CONTIENT PAS.
 #

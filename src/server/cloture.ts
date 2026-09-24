@@ -172,11 +172,11 @@ export async function previenirFamilles(
   user: SessionUser, classId: string, termId: string, forcer = false,
 ): Promise<AvisOutcome> {
   const schoolId = user.schoolId!;
-  const adresse = (process.env.FASOSCHOOL_PUBLIC_URL ?? "").trim()
+  const adresse = (process.env.SCHOOLFASO_PUBLIC_URL ?? "").trim()
     .replace(/\/+$/, "");
   if (!adresse) {
     return { envoyes: 0, refuses: 0, cout: 0,
-      error: "Aucune adresse publique n'est configurée (FASOSCHOOL_PUBLIC_URL). "
+      error: "Aucune adresse publique n'est configurée (SCHOOLFASO_PUBLIC_URL). "
         + "Un SMS payé qui renvoie vers une adresse inexistante coûte de "
         + "l'argent et de la crédibilité : rien n'a été envoyé." };
   }

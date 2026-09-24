@@ -2,7 +2,7 @@
  * Accès base — avec cloisonnement multi-établissement obligatoire.
  *
  * RÈGLE ABSOLUE : toute requête applicative passe par withSchool(). Le
- * row-level security de PostgreSQL lit fasoschool.school_id dans la session ;
+ * row-level security de PostgreSQL lit schoolfaso.school_id dans la session ;
  * sans lui, aucune ligne n'est visible. C'est la base de données qui refuse,
  * pas le code qui doit se souvenir.
  *
@@ -42,7 +42,7 @@ export async function withSchool<T>(
   const client = await pool.connect();
   try {
     await client.query("begin");
-    await client.query("select set_config('fasoschool.school_id', $1, true)", [schoolId]);
+    await client.query("select set_config('schoolfaso.school_id', $1, true)", [schoolId]);
     const result = await fn(client);
     await client.query("commit");
     return result;

@@ -132,7 +132,7 @@ begin
   end if;
 end $$;
 
-grant select, insert on category_ceiling_changes to fasoschool_app;
+grant select, insert on category_ceiling_changes to schoolfaso_app;
 
 -- ---------------------------------------------------------------------------
 -- Le plafond du dossier, avec ce qu'on sait de son état.
