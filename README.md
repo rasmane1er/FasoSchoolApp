@@ -793,6 +793,79 @@ saisit quarante notes, le réseau tombe, tout est perdu. Ici :
 4. Sans JavaScript, le formulaire se poste normalement. Le hors-ligne est une
    amélioration, jamais une dépendance.
 
+### Mettre en ligne, et la politique qui a cassé sept écrans
+
+Le dépôt savait tout faire sauf sortir de la machine où il était écrit : ni
+image, ni configuration d'hébergement, ni procédure. Ajouté ici : un
+`Dockerfile`, un `railway.json`, et `DEPLOIEMENT.md` — une procédure, pas une
+présentation, où chaque commande se copie telle quelle et où ce qui demande
+une décision humaine est signalé comme telle.
+
+Trois décisions valent d'être écrites.
+
+**La migration est une commande de *release*, pas de démarrage.** Un conteneur
+qui migre en démarrant migre aussi quand il redémarre en boucle, et deux
+instances qui démarrent ensemble migrent en même temps.
+
+**L'image ne compile rien.** Node 22 exécute le TypeScript directement, donc
+ce qui tourne en production est exactement le fichier qu'on lit dans le
+dépôt — aucun artefact intermédiaire à désynchroniser de sa source. Une seule
+dépendance (`pg`), `npm ci --omit=dev`, et `USER node` : le processus n'a
+besoin d'écrire nulle part.
+
+**`pg_dump` exige le rôle propriétaire, pas le rôle applicatif.** Celui-ci est
+soumis au RLS : `pg_dump` lancé avec lui échoue table par table et produit une
+sauvegarde **vide sans le dire**. C'est écrit dans le runbook en encadré,
+parce que c'est le genre de chose qu'on découvre le jour où l'on restaure.
+
+#### La politique de sécurité du contenu, et ce qu'elle a révélé
+
+Le produit n'a aucun script tiers : pas de CDN, pas d'analytique, pas de
+police distante. Deux fichiers, servis par lui-même. C'est une décision prise
+pour la bande passante d'une connexion EDGE, et elle vaut ici une politique
+que peu d'applications peuvent se permettre : **`script-src 'self'`, sans
+`unsafe-inline`**. Ce que cela ferme est la classe entière des injections de
+script — y compris là où un échappement aurait été oublié. Deux serrures sur
+la même porte, et la seconde ne dépend pas de ce que le code n'a pas oublié.
+
+Les en-têtes étaient d'abord posés dans le `html()` qui rend les pages. C'était
+le défaut de la veille, en plus discret : les fichiers statiques, les pièces
+jointes téléchargées, les redirections et les réponses d'erreur ne passent pas
+par là. **Une politique qui ne couvre que les chemins auxquels on a pensé
+n'est pas une politique.** Ils sont posés à l'entrée du routeur, et la suite
+les vérifie sur chaque forme de réponse que le produit sait produire.
+
+Puis la politique a cassé sept écrans — et c'est la partie intéressante. Sept
+listes déroulantes portaient `onchange="this.form.submit()"` dans le HTML.
+**Un gestionnaire écrit dans un attribut EST du script en ligne** : le
+navigateur ne distingue pas celui qu'on a écrit de celui qu'on a subi. Changer
+de classe ne faisait plus rien — aucune erreur à l'écran, aucune trace au
+serveur, et `app.e2e.mjs` est mort sur une navigation qui n'arrivait jamais.
+Les gestionnaires vivent désormais dans `public/app.js`, et le formulaire
+garde son bouton « Afficher » : sans JavaScript, il se poste normalement. Un
+témoin relit le code source du dépôt pour qu'il n'y ait pas de seconde fois —
+lui aussi a dû apprendre à ne pas lire les commentaires, ayant d'abord accusé
+`app.ts` d'un bloc `<script>` qui n'existait que dans la phrase expliquant
+qu'il n'y en a aucun.
+
+#### Web, Android, iOS
+
+Il n'y a pas d'application à installer depuis un magasin, et c'est une
+décision, pas un raccourci. Une page de ce produit pèse quelques dizaines de
+kilooctets ; une application native demanderait 20 à 40 Mo avant la première
+utilisation, un magasin à traverser à chaque correction, et deux bases de code
+de plus. Le produit s'installe quand même sur l'écran d'accueil par la **PWA**,
+sur Android comme sur iOS — `manifest.webmanifest`, icônes, service worker et
+page hors-ligne sont dans le dépôt et vérifiés par `npm run test:pwa`.
+
+Firebase n'est pas utilisé et n'est pas nécessaire : l'authentification est
+par code SMS contre la base, et le canal vers les familles est le SMS parce
+qu'il atteint tous les téléphones du pays, pas seulement ceux qui ont un
+compte Google.
+
+`Dockerfile`, `railway.json`, `DEPLOIEMENT.md`,
+`tests/deploiement.e2e.mjs` (30 assertions).
+
 ### « La réponse au parent qui conteste une note », et elle n'existait que hors ligne
 
 Trouvé en lisant qui alimente `grade_entry_revisions`. La table porte, dans le
@@ -2241,7 +2314,7 @@ Comptes de démonstration — le code s'affiche à l'écran, aucun SMS n'est env
 | `70000005` | Directeur |
 
 Vérifications : `npm run check:all` — typecheck strict, 60 tests unitaires, et
-**cinquante parcours**, chacun contre un vrai PostgreSQL et un vrai
+**cinquante et un parcours**, chacun contre un vrai PostgreSQL et un vrai
 serveur — sauf deux témoins qui n'écrivent rien : l'un compte le jeu de
 démonstration, l'autre relit le code source.
 Le tableau ci-dessous en détaille une partie ; les autres sont décrits, avec ce
@@ -2249,6 +2322,7 @@ qu'ils ont trouvé, dans les sections qui précèdent.
 
 | suite | ce qu'elle prouve |
 |---|---|
+| `test:deploiement` (30) | les en-têtes de sécurité couvrent toute forme de réponse, aucun gestionnaire d'événement en ligne ne rend un geste inerte, et les quatre listes de migrations disent la même chose que le répertoire |
 | `test:histoire-note` (26) | une note modifiée ou effacée laisse son histoire quel que soit le chemin — écran, appareil, import, arbitrage, `psql` — et l'effacement n'emporte plus la preuve que la note a existé |
 | `test:plafond-declare` (34) | le produit n'écrit plus « déclaré » sur un dossier que rien n'a fait sortir, le plafond ne bouge plus sans nom ni motif, et une grille au-dessus du plafond fait refuser l'émission au lieu de l'avertir |
 | `test:annuler-facture` (35) | une facture d'élève parti s'annule avec un nom, une date et un motif — refusée sans trace par la base, sortie des totaux mais lisible barrée, et réémise en nouvelle ligne au lieu d'être ressuscitée |
@@ -2439,6 +2513,21 @@ additionnées au présent. Ce défaut a été trouvé deux fois, dans deux modul
 ait pas de troisième fois, et une requête volontairement cumulative doit écrire
 `-- borne:` suivi de sa raison.
 
+**Une politique ne couvre pas que les chemins auxquels on a pensé.** Les
+en-têtes de sécurité, posés d'abord dans le rendu des pages, laissaient à nu
+les fichiers statiques, les pièces jointes, les redirections et les réponses
+d'erreur. C'est la même faute que d'écrire l'histoire d'une note à côté de deux
+chemins d'écriture sur trois. Une règle transversale se pose à l'endroit par
+lequel tout passe : l'entrée du routeur, ou la base.
+
+**Un gestionnaire d'événement écrit dans un attribut HTML est du script en
+ligne.** Le navigateur ne distingue pas celui qu'on a écrit de celui qu'on a
+subi : `script-src 'self'` les rend inertes tous les deux, sans un mot, et le
+geste cesse de faire quoi que ce soit. Corollaire général, au-delà de cette
+politique : un comportement qui s'éteint en silence est pire qu'un
+comportement qui échoue bruyamment, et c'est pourquoi le dépôt paye un témoin
+qui relit son propre code source plutôt qu'une note dans un commentaire.
+
 **Ce qui doit valoir pour TOUS les chemins d'écriture se pose dans la base.**
 L'histoire d'une note était écrite par le code, à côté de deux des trois
 endroits qui écrivent une note — et le troisième, celui par lequel passent
@@ -2565,6 +2654,17 @@ qu'elle vient de prendre. Photographier l'état avant de travailler recopie en
 référence la fuite du tour précédent : elle devient la nouvelle normale, et
 plus personne ne sait quand elle a commencé. Une suite qui ne peut pas
 distinguer son propre reste du jeu semé refuse de partir et le dit.
+
+---
+
+## Mettre en ligne
+
+`DEPLOIEMENT.md` est la procédure : Railway pour l'application et la base,
+Cloudflare pour le nom de domaine et le pare-feu, sauvegardes chiffrées
+planifiées et restaurées pour de bon, installation sur l'écran d'accueil des
+téléphones par la PWA. Elle commence par ce que le déploiement **ne fait
+pas** — aucun SMS sans les identifiants Orange, aucun Mobile Money avant le
+RCCM, aucune des sept règles confirmée par le seul fait d'être en ligne.
 
 ---
 

@@ -486,7 +486,7 @@ export async function conseilPage(
 
   const selector = `
     <form method="get" action="/conseil" class="row" style="margin-left:auto">
-      <select name="classe" onchange="this.form.submit()" style="width:auto">
+      <select name="classe" data-envoi-auto style="width:auto">
         <option value="">Choisir une classe…</option>
         ${classes.map((k: any) => `<option value="${esc(k.id)}"${
           k.id === classId ? " selected" : ""}>${esc(k.label)}</option>`).join("")}

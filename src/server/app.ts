@@ -102,12 +102,74 @@ async function formBody(req: IncomingMessage): Promise<URLSearchParams> {
   return new URLSearchParams(Buffer.concat(chunks).toString("utf-8"));
 }
 
+/**
+ * LA POLITIQUE DE SÉCURITÉ DU CONTENU.
+ *
+ * Ce produit n'a aucun script tiers : pas de CDN, pas d'analytique, pas de
+ * police distante. Deux fichiers seulement, servis par lui-même, et aucun
+ * bloc `<script>` en ligne. C'est une décision d'architecture prise pour la
+ * bande passante d'une connexion EDGE — elle vaut ici une politique que peu
+ * d'applications peuvent se permettre : `script-src 'self'`, sans
+ * `unsafe-inline`.
+ *
+ * Ce que cela ferme, concrètement : toute la classe des injections de script.
+ * Un nom d'élève contenant `<script>` — ou un motif d'annulation, ou une
+ * appréciation du conseil de classe — est déjà échappé à l'affichage ; si un
+ * échappement manquait quelque part, le navigateur refuserait quand même
+ * d'exécuter. Deux serrures sur la même porte, et celle-ci ne dépend pas de
+ * ce que le code n'a pas oublié.
+ *
+ * `style-src` garde `'unsafe-inline'` : les pages portent des attributs
+ * `style=` en quantité, et les retirer tous demanderait une feuille par
+ * variante. Le risque résiduel d'un style injecté est sans commune mesure
+ * avec celui d'un script.
+ *
+ * `frame-ancestors 'none'` : personne n'encadre l'espace des familles dans
+ * une page à lui. `form-action 'self'` : un formulaire de ce produit ne poste
+ * que vers ce produit — c'est la garde contre une page maquillée qui
+ * emprunterait nos écrans pour récolter un code de connexion.
+ */
+const CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data:",
+  "font-src 'self'",
+  "connect-src 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+  "base-uri 'none'",
+  "object-src 'none'",
+].join("; ");
+
+/**
+ * Les en-têtes de sécurité sont posés sur TOUTE réponse, au seul endroit par
+ * lequel elles passent toutes — l'entrée du routeur.
+ *
+ * Première version : dans le `html()` qui rend les pages. C'était le même
+ * défaut que celui trouvé la veille pour l'histoire des notes, en plus
+ * discret : les fichiers statiques, les pièces jointes téléchargées, les
+ * redirections et les réponses d'erreur n'y passent pas. Une politique qui
+ * ne couvre que les chemins auxquels on a pensé n'est pas une politique.
+ */
+function poserLesEnTetesDeSecurite(req: IncomingMessage, res: ServerResponse) {
+  res.setHeader("content-security-policy", CSP);
+  res.setHeader("x-content-type-options", "nosniff");
+  res.setHeader("referrer-policy", "same-origin");
+  res.setHeader("x-frame-options", "DENY");
+  /* HSTS UNIQUEMENT EN HTTPS. En clair, le navigateur l'ignore ; en
+     développement local, il condamnerait 127.0.0.1 à l'https pendant six
+     mois sur la machine de l'installateur. */
+  if (estSecurise(req)) {
+    res.setHeader("strict-transport-security",
+      "max-age=15552000; includeSubDomains");
+  }
+}
+
 const html = (res: ServerResponse, body: string, status = 200) => {
   res.writeHead(status, {
     "content-type": "text/html; charset=utf-8",
     "cache-control": "no-store",
-    "x-content-type-options": "nosniff",
-    "referrer-policy": "same-origin",
   });
   res.end(body);
 };
@@ -579,12 +641,12 @@ async function notesPage(user: SessionUser, url: URL, flash?: string): Promise<s
 
   const selector = `
     <form method="get" action="/notes" class="row" style="margin-left:auto">
-      <select name="classe" onchange="this.form.submit()" style="width:auto">
+      <select name="classe" data-envoi-auto style="width:auto">
         <option value="">Choisir une classe…</option>
         ${d.classes.map((c: any) =>
           `<option value="${esc(c.id)}"${c.id === classId ? " selected" : ""}>${esc(c.label)}</option>`).join("")}
       </select>
-      ${d.subjects.length ? `<select name="matiere" onchange="this.form.submit()" style="width:auto">
+      ${d.subjects.length ? `<select name="matiere" data-envoi-auto style="width:auto">
         ${d.subjects.map((s: any) =>
           `<option value="${esc(s.id)}"${s.id === (d as any).chosen ? " selected" : ""}>${esc(s.label)}</option>`).join("")}
       </select>` : ""}
@@ -936,7 +998,7 @@ async function bulletinsPage(user: SessionUser, url: URL, flash?: string,
 
   const selector = `
     <form method="get" action="/bulletins" class="row" style="margin-left:auto">
-      <select name="classe" onchange="this.form.submit()" style="width:auto">
+      <select name="classe" data-envoi-auto style="width:auto">
         <option value="">Choisir une classe…</option>
         ${classes.map((c: any) =>
           `<option value="${esc(c.id)}"${c.id === classId ? " selected" : ""}>${esc(c.label)}</option>`).join("")}
@@ -1140,7 +1202,7 @@ async function absencesPage(user: SessionUser, url: URL, flash?: string,
 
   const selector = `
     <form method="get" action="/absences" class="row" style="margin-left:auto">
-      <select name="classe" onchange="this.form.submit()" style="width:auto">
+      <select name="classe" data-envoi-auto style="width:auto">
         <option value="">Choisir une classe…</option>
         ${d.classes.map((c: any) =>
           `<option value="${esc(c.id)}"${c.id === classId ? " selected" : ""}>${esc(c.label)}</option>`).join("")}
@@ -1476,6 +1538,7 @@ async function saveAbsences(user: SessionUser, url: URL, form: URLSearchParams):
 // ---------------------------------------------------------------------------
 
 async function handle(req: IncomingMessage, res: ServerResponse) {
+  poserLesEnTetesDeSecurite(req, res);
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
   const path = url.pathname;
   const token = cookies(req).fs_session ?? null;

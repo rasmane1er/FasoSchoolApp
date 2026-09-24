@@ -418,7 +418,7 @@ export async function disciplinePage(
     a été signalé quatre fois sans que rien n'ait été fait.</p>
   </div>
   <form method="get" action="/discipline">
-    <select name="classe" onchange="this.form.submit()" style="width:auto">
+    <select name="classe" data-envoi-auto style="width:auto">
       ${r.classes.map((k) => `<option value="${k.id}"${
         k.id === r.classId ? " selected" : ""}>${esc(k.label)}</option>`).join("")}
     </select>
